@@ -6,15 +6,15 @@
      tree by scripts/ec-coverage.mjs. Edit `status`, `blockedReason` and `notes` in
      docs/edge-cases.json, then run `pnpm test:ec`. -->
 
-_Generated 2026-10-03 20:19Z._
+_Generated 2026-10-03 21:15Z._
 
 | Metric | Value |
 |---|---|
 | Edge cases in spec §12 | **109** |
-| Cases with at least one referencing test | **11** |
-| Cases fully `done` (test present + status done) | **8** |
+| Cases with at least one referencing test | **17** |
+| Cases fully `done` (test present + status done) | **10** |
 | Cases `blocked` (needs live sandbox / human step) | **0** |
-| Total test references | **81** |
+| Total test references | **152** |
 
 A test claims a case by naming it in the test title or in a comment on the line above,
 e.g. `it('EC-CAP-1 …')` or `// EC-WH-4 forged webhook`.
@@ -32,7 +32,7 @@ Owning work package(s): `WP-11` · module: `M11 orders` · spec line 1069
 | **EC-CAP-4** | Capture PENDING (eCheck / review) | State PENDING; ship nothing until PAYMENT.CAPTURE.COMPLETED (or the reconciler) | I | — | todo — no test |
 | **EC-CAP-5** | Capture DECLINED | Budget RELEASE; order PAYMENT_FAILED; notify the user; no automatic retry with another instrument (the mandate binds one instrument) | I | — | todo — no test |
 | **EC-REF-1** | Partial refund | refundCapture({amount}), PayPal-Request-Id = cs:{cap}:ref:{refId} | S | — | todo — no test |
-| **EC-REF-2** | Multiple partial refunds summing above the capture | Rejected locally; PayPal would also reject | U | — | todo — no test |
+| **EC-REF-2** | Multiple partial refunds summing above the capture | Rejected locally; PayPal would also reject | U | `packages/db/test/schema.test.ts:452` — captures: refunded_minor can never exceed amount_minor (EC-REF-2 backstop)<br>`packages/db/test/schema.test.ts:453`<br>`packages/db/test/schema.test.ts:454` | todo — 3 tests |
 | **EC-REF-3** | Refund PENDING / FAILED | Retry once after 1 h with a new refund ID if FAILED (never reuse a failed refund's request ID with a different body); otherwise escalate to manual | I | — | todo — no test |
 | **EC-REF-4** | Refund requested after a dispute is open | Block direct refunds; route through accept-claim/make-offer so PayPal records the resolution in the case | U | — | todo — no test |
 | **EC-REF-5** | Refund of a multi-currency or rounding remainder | allocate() largest-remainder; the last refund takes the exact remainder | P | — | todo — no test |
@@ -43,7 +43,8 @@ Owning work package(s): `WP-06, WP-10, WP-11` · module: `M6/M10/M11` · spec li
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-IDEM-1** | Agent submits the same checkout twice (LLM retry) | Unique l3_jti → second gets GATE_REPLAY; the same checkout with a new L3 returns the existing attempt/order if one is in flight | PU | — | todo — no test |
+| **EC-IDEM-1** | Agent submits the same checkout twice (LLM retry) | Unique l3_jti → second gets GATE_REPLAY; the same checkout with a new L3 returns the existing attempt/order if one is in flight | PU | `packages/db/test/schema.test.ts:2`<br>`packages/db/test/schema.test.ts:3`<br>`packages/db/test/schema.test.ts:4`<br>`packages/db/test/schema.test.ts:308`<br>`packages/db/test/schema.test.ts:309`<br>`packages/db/test/schema.test.ts:310`<br>`packages/db/test/schema.test.ts:312` — EC-IDEM-1: checkout_attempts has UNIQUE (l3_jti) and UNIQUE (idempotency_key)<br>`packages/db/test/schema.test.ts:313`<br>`packages/db/test/schema.test.ts:314` | done |
+| | _note:_ packages/db (WP-02). packages/db/src/schema.ts checkout_attempts UNIQUE (l3_jti) -> checkout_attempts_l3_jti_key and UNIQUE (idempotency_key); packages/db/src/repos/index.ts toRepoError maps 23505 on that constraint to GATE_REPLAY and on idempotency_key to CS_CONFLICT (AT-M2.4); packages/db/src/repos/attempts.ts findAttemptByL3Jti / findAttemptByCheckoutAndMandate; packages/db/test/schema.test.ts 'EC-IDEM-1: checkout_attempts has UNIQUE (l3_jti) and UNIQUE (idempotency_key)' plus 'AT-M2.4'. STILL OPEN: the live replay race needs a database and belongs to WP-10. | | | | |
 | **EC-IDEM-2** | Our server times out after PayPal created the order | Retry with the same PayPal-Request-Id [B14]; PayPal returns the earlier result | I | — | todo — no test |
 | **EC-IDEM-3** | Endpoint without idempotency support times out | Re-read state (GET order/capture) before deciding to retry | I | — | todo — no test |
 | **EC-IDEM-4** | Two worker instances process the same job | The second gets CS_CONFLICT and no-ops | I | — | todo — no test |
@@ -57,7 +58,7 @@ Owning work package(s): `WP-12` · module: `M12 webhooks` · spec line 1095
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
 | **EC-WH-1** | Webhook never arrives | Upsert from GET; metric reconciler_fixes_total | I | — | todo — no test |
-| **EC-WH-2** | Same event delivered several times (PayPal retries up to 25× over 3 days [V14]) | ON CONFLICT DO NOTHING; return 200 | U | — | todo — no test |
+| **EC-WH-2** | Same event delivered several times (PayPal retries up to 25× over 3 days [V14]) | ON CONFLICT DO NOTHING; return 200 | U | `packages/db/test/schema.test.ts:308`<br>`packages/db/test/schema.test.ts:309`<br>`packages/db/test/schema.test.ts:310`<br>`packages/db/test/schema.test.ts:318` — EC-WH-2: webhook_events has UNIQUE (paypal_event_id)<br>`packages/db/test/schema.test.ts:319`<br>`packages/db/test/schema.test.ts:320` | todo — 6 tests |
 | **EC-WH-3** | Out-of-order (REFUNDED before COMPLETED; dispute UPDATED before CREATED) | Always re-fetch the resource; never downgrade the rank | U | — | todo — no test |
 | **EC-WH-4** | Forged webhook | 400, audit log, alert after 10/h | U | — | todo — no test |
 | **EC-WH-5** | Our endpoint down for hours | Idempotent processing | S | — | todo — no test |
@@ -99,10 +100,10 @@ Owning work package(s): `WP-01, WP-09, WP-11` · module: `M1/M9/M11` · spec lin
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-FX-1** | Mandate in INR, store in USD | BLOCK CS_CURRENCY_MISMATCH. We never convert inside the Gate: FX rates are not signed by the user | U | `packages/core/test/core.test.ts:239` — EC-FX-1 every arithmetic helper refuses a mixed pair<br>`packages/core/test/core.test.ts:240`<br>`packages/core/test/core.test.ts:241`<br>`packages/core/test/core.test.ts:248` — EC-FX-1 withinRange reports CURRENCY instead of converting<br>`packages/core/test/core.test.ts:249`<br>`packages/core/test/core.test.ts:250`<br>`packages/core/test/core.test.ts:255` — EC-FX-1 exceedsCap names the code rather than converting<br>`packages/core/test/core.test.ts:256`<br>`packages/core/test/core.test.ts:257` | done |
+| **EC-FX-1** | Mandate in INR, store in USD | BLOCK CS_CURRENCY_MISMATCH. We never convert inside the Gate: FX rates are not signed by the user | U | `packages/core/test/core.test.ts:239` — EC-FX-1 every arithmetic helper refuses a mixed pair<br>`packages/core/test/core.test.ts:240`<br>`packages/core/test/core.test.ts:241`<br>`packages/core/test/core.test.ts:248` — EC-FX-1 withinRange reports CURRENCY instead of converting<br>`packages/core/test/core.test.ts:249`<br>`packages/core/test/core.test.ts:250`<br>`packages/core/test/core.test.ts:255` — EC-FX-1 exceedsCap names the code rather than converting<br>`packages/core/test/core.test.ts:256`<br>`packages/core/test/core.test.ts:257`<br>`packages/db/test/seed.test.ts:398` — refuses a currency mismatch rather than converting (EC-FX-1)<br>`packages/db/test/seed.test.ts:399`<br>`packages/db/test/seed.test.ts:400`<br>`packages/db/test/seed.test.ts:680` — refuses a wallet cap in a different currency rather than converting (EC-FX-1)<br>`packages/db/test/seed.test.ts:681`<br>`packages/db/test/seed.test.ts:682` | done |
 | | _note:_ Handled in packages/core (WP-01): currency mismatch throws instead of converting | | | | |
 | **EC-FX-2** | Buyer's PayPal funds in another currency (PayPal converts) | Out of our control. The mandate binds the merchant charge currency and amount; the receipt notes that PayPal may convert | I | — | todo — no test |
-| **EC-FX-3** | Zero-decimal currency (JPY) | toPayPalValue emits no decimals | P | `packages/core/test/core.test.ts:5`<br>`packages/core/test/core.test.ts:6`<br>`packages/core/test/core.test.ts:7`<br>`packages/core/test/core.test.ts:502` — EC-FX-3 formats zero-decimal JPY without a decimal point<br>`packages/core/test/core.test.ts:503`<br>`packages/core/test/core.test.ts:504`<br>`packages/core/test/env.test.ts:284` — EC-FX-3 ppAmountSchema checks decimal places against the currency, not a constant<br>`packages/core/test/env.test.ts:285`<br>`packages/core/test/env.test.ts:286` | done |
+| **EC-FX-3** | Zero-decimal currency (JPY) | toPayPalValue emits no decimals | P | `packages/core/test/core.test.ts:5`<br>`packages/core/test/core.test.ts:6`<br>`packages/core/test/core.test.ts:7`<br>`packages/core/test/core.test.ts:502` — EC-FX-3 formats zero-decimal JPY without a decimal point<br>`packages/core/test/core.test.ts:503`<br>`packages/core/test/core.test.ts:504`<br>`packages/core/test/env.test.ts:284` — EC-FX-3 ppAmountSchema checks decimal places against the currency, not a constant<br>`packages/core/test/env.test.ts:285`<br>`packages/core/test/env.test.ts:286`<br>`packages/db/test/seed.test.ts:2`<br>`packages/db/test/seed.test.ts:3`<br>`packages/db/test/seed.test.ts:4`<br>`packages/db/test/seed.test.ts:106` — seeds at least one JPY item (EC-FX-3, zero-decimal currency)<br>`packages/db/test/seed.test.ts:107`<br>`packages/db/test/seed.test.ts:108`<br>`packages/db/test/seed.test.ts:145`<br>`packages/db/test/seed.test.ts:146`<br>`packages/db/test/seed.test.ts:147` | done |
 | | _note:_ Handled in packages/core (WP-01): MINOR_DIGITS drives toPayPalValue/formatMoney/ppAmountSchema | | | | |
 | **EC-FX-4** | Rounding in shipping/tax allocation across split captures | Largest-remainder; Σ captures == total exactly; property test | P | `packages/core/test/core.test.ts:5`<br>`packages/core/test/core.test.ts:6`<br>`packages/core/test/core.test.ts:7`<br>`packages/core/test/core.test.ts:157` — EC-FX-4 property: the parts always sum exactly to the total<br>`packages/core/test/core.test.ts:158`<br>`packages/core/test/core.test.ts:159`<br>`packages/core/test/core.test.ts:176` — EC-FX-4 property: every part is within one minor unit of the exact share<br>`packages/core/test/core.test.ts:177`<br>`packages/core/test/core.test.ts:178` | done |
 | | _note:_ Handled in packages/core (WP-01): allocate() largest-remainder, property-tested to sum exactly | | | | |
@@ -121,7 +122,7 @@ Owning work package(s): `WP-09, WP-10, WP-11` · module: `M9/M10/M11` · spec li
 | **EC-PRICE-3** | Price drops after purchase | No automatic action (out of scope); a merchant may refund the difference (partial refund) | — | — | todo — no test |
 | **EC-STOCK-1** | Out of stock after authorization | Partial capture of the available lines + void the remainder (final_capture=true on the last capture) | S | — | todo — no test |
 | **EC-STOCK-2** | Out of stock with the CAPTURE intent (digital, or the C2 fallback) | Partial refund of the OOS lines | S | — | todo — no test |
-| **EC-STOCK-3** | Last-unit race between two agents | One wins; the other gets BLOCK GATE_OUT_OF_STOCK and the reservation is released | P | — | todo — no test |
+| **EC-STOCK-3** | Last-unit race between two agents | One wins; the other gets BLOCK GATE_OUT_OF_STOCK and the reservation is released | P | `packages/db/test/schema.test.ts:440` — EC-STOCK-3: products.stock may never go negative<br>`packages/db/test/schema.test.ts:441`<br>`packages/db/test/schema.test.ts:442`<br>`packages/db/test/seed.test.ts:2`<br>`packages/db/test/seed.test.ts:3`<br>`packages/db/test/seed.test.ts:4`<br>`packages/db/test/seed.test.ts:98` — seeds exactly 2 products with stock = 1 (EC-STOCK-3, last-unit race)<br>`packages/db/test/seed.test.ts:99`<br>`packages/db/test/seed.test.ts:100` | todo — 9 tests |
 | **EC-SPLIT-1** | Split shipment | One capture + one tracker per shipment; evidence lists both | S | — | todo — no test |
 | **EC-SPLIT-2** | Split shipment under the CAPTURE intent | Track twice against the same capture; OOS → partial refund | S | — | todo — no test |
 | **EC-SPLIT-3** | Dispute on only one shipment's items | The router evaluates only the disputed capture/lines | U | — | todo — no test |
@@ -145,7 +146,7 @@ Owning work package(s): `WP-05, WP-10, WP-13` · module: `M5/M10/M13` · spec li
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-AGT-1** | Prompt injection in a product listing | Listings are wrapped as untrusted; the Gate blocks out-of-mandate L3s; velocity guard → SUSPEND after 3 consecutive BLOCKs | E | — | todo — no test |
+| **EC-AGT-1** | Prompt injection in a product listing | Listings are wrapped as untrusted; the Gate blocks out-of-mandate L3s; velocity guard → SUSPEND after 3 consecutive BLOCKs | E | `packages/db/test/seed.test.ts:2`<br>`packages/db/test/seed.test.ts:3`<br>`packages/db/test/seed.test.ts:4`<br>`packages/db/test/seed.test.ts:78` — seeds exactly 3 products carrying an injection payload (EC-AGT-1, §8.13 AT-M13.2)<br>`packages/db/test/seed.test.ts:79`<br>`packages/db/test/seed.test.ts:80` | todo — 6 tests |
 | **EC-AGT-2** | Compromised agent (attacker controls the LLM loop or its server) | It can only sign L3s within L2 limits (the agent key is bound by the L2). Worst case = the full budget at allowed merchants. The user can revoke the agent (all of its mandates are suspended) | P | — | todo — no test |
 | **EC-AGT-3** | Agent private key leaked | jwks_keys.status=COMPROMISED; all mandates bound to it → REVOKED; the Gate refuses its L3s; past L3s are flagged "signed before compromise at T" in evidence | U | — | todo — no test |
 | **EC-AGT-4** | Agent key rotation (scheduled) | New key → user re-signs new L2s (the L2 binds the agent key); old mandates keep the old key until expiry | E | — | todo — no test |
@@ -156,7 +157,8 @@ Owning work package(s): `WP-05, WP-10, WP-13` · module: `M5/M10/M13` · spec li
 | **EC-FAM-1** | Family member uses the agent chat on the user's logged-in laptop | The agent can still only spend within existing mandates. New mandates need the device key plus a WebAuthn UV (passkey biometric/PIN; D4) | E | — | todo — no test |
 | **EC-FAM-2** | Family member knows the device PIN and signs a mandate | Legally/operationally it's the account holder's authorisation. The evidence shows a UV-backed signature. The dispute is resolved as friendly fraud / household use | — | — | todo — no test |
 | **EC-FAM-3** | Household wallet with explicit sub-users (P2) | P2: per-member agents with lower caps under one wallet cap | — | — | todo — no test |
-| **EC-MA-1** | Multiple agents on one wallet spending concurrently | Each mandate has its own budget; the wallet cap is serialised via FOR UPDATE on wallet_caps | P | — | todo — no test |
+| **EC-MA-1** | Multiple agents on one wallet spending concurrently | Each mandate has its own budget; the wallet cap is serialised via FOR UPDATE on wallet_caps | P | `packages/db/test/schema.test.ts:2`<br>`packages/db/test/schema.test.ts:3`<br>`packages/db/test/schema.test.ts:4`<br>`packages/db/test/seed.test.ts:15`<br>`packages/db/test/seed.test.ts:16`<br>`packages/db/test/seed.test.ts:17`<br>`packages/db/test/seed.test.ts:18`<br>`packages/db/test/seed.test.ts:19`<br>`packages/db/test/seed.test.ts:197`<br>`packages/db/test/seed.test.ts:198`<br>`packages/db/test/seed.test.ts:199`<br>`packages/db/test/seed.test.ts:577`<br>`packages/db/test/seed.test.ts:578`<br>`packages/db/test/seed.test.ts:579`<br>`packages/db/test/seed.test.ts:580` — EC-MA-1: multiple agents on one wallet<br>`packages/db/test/seed.test.ts:581`<br>`packages/db/test/seed.test.ts:582`<br>`packages/db/test/seed.test.ts:593`<br>`packages/db/test/seed.test.ts:594`<br>`packages/db/test/seed.test.ts:595`<br>`packages/db/test/seed.test.ts:614`<br>`packages/db/test/seed.test.ts:615`<br>`packages/db/test/seed.test.ts:616` | done |
+| | _note:_ packages/db (WP-02). packages/db/src/schema.ts wallet_caps (wallet_id PK, cap_minor, currency, period DAY\|MONTH); packages/db/src/repos/budget.ts walletCapCheckIn/lockWalletCap (SELECT ... FROM wallet_caps WHERE wallet_id = $1 FOR UPDATE) and sumWalletSpend (SUM RESERVE - SUM RELEASE across every mandate on the wallet); packages/db/test/seed.test.ts 'EC-MA-1: multiple agents on one wallet' asserts the lock target is the wallet row and that spend is summed across two mandates. STILL OPEN: the 20-way concurrent race needs Postgres and belongs to WP-10 AT-M10.2. | | | | |
 | **EC-MA-2** | Agent A tries to use agent B's mandate | verify_chain fails (L3 must be signed by the L2-bound key) | U | — | todo — no test |
 | **EC-MA-3** | One agent, many mandates (different merchants) | The agent picks the mandate per checkout; the Gate verifies the one presented | U | — | todo — no test |
 

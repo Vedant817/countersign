@@ -156,7 +156,8 @@
       "declaredTest": "U, P",
       "userFacing": "Agent told \"already purchased: order ord_…\"; no double charge",
       "specLine": 1084,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/db (WP-02). packages/db/src/schema.ts checkout_attempts UNIQUE (l3_jti) -> checkout_attempts_l3_jti_key and UNIQUE (idempotency_key); packages/db/src/repos/index.ts toRepoError maps 23505 on that constraint to GATE_REPLAY and on idempotency_key to CS_CONFLICT (AT-M2.4); packages/db/src/repos/attempts.ts findAttemptByL3Jti / findAttemptByCheckoutAndMandate; packages/db/test/schema.test.ts 'EC-IDEM-1: checkout_attempts has UNIQUE (l3_jti) and UNIQUE (idempotency_key)' plus 'AT-M2.4'. STILL OPEN: the live replay race needs a database and belongs to WP-10."
     },
     {
       "id": "EC-IDEM-2",
@@ -974,7 +975,8 @@
       "declaredTest": "P (race)",
       "userFacing": "Mandate cards show the per-agent spend; the wallet cap bar sits on the wallet page",
       "specLine": 1177,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/db (WP-02). packages/db/src/schema.ts wallet_caps (wallet_id PK, cap_minor, currency, period DAY|MONTH); packages/db/src/repos/budget.ts walletCapCheckIn/lockWalletCap (SELECT ... FROM wallet_caps WHERE wallet_id = $1 FOR UPDATE) and sumWalletSpend (SUM RESERVE - SUM RELEASE across every mandate on the wallet); packages/db/test/seed.test.ts 'EC-MA-1: multiple agents on one wallet' asserts the lock target is the wallet row and that spend is summed across two mandates. STILL OPEN: the 20-way concurrent race needs Postgres and belongs to WP-10 AT-M10.2."
     },
     {
       "id": "EC-MA-2",

@@ -9,8 +9,7 @@
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
     "./client": "./src/client.ts",
-    "./repos": "./src/repos/index.ts",
-    "./seed": "./src/seed/index.ts"
+    "./repos": "./src/repos/index.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
