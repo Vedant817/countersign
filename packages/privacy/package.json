@@ -1,0 +1,27 @@
+{
+  "name": "@countersign/privacy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@countersign/core": "workspace:*",
+    "@countersign/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3",
+    "tsx": "4.23.15"
+  }
+}

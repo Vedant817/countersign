@@ -1,3 +1,27 @@
+# pnpm workspace (spec §5, D1)
 packages:
   - "apps/*"
   - "packages/*"
+
+# Supply-chain policy: pnpm 12 defaults to `minimumReleaseAge: 1440` (one day) so that a
+# compromised release cannot be picked up by an automated install minutes after it is published.
+#
+# The spec (D12, §4) pins pg-boss 12.36.0, published 2026-10-02T20:39Z — 41 minutes before this
+# repo's install cutoff — and the owner verified it against the registry on 2026-10-04. We therefore
+# keep the one-day default as the *project* policy but exempt the handful of exact pins the spec
+# requires, so a `pnpm install` does not fail on a version that was checked by hand.
+# See docs/DECISIONS.md D-002.
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - pg-boss
+  - next
+  - zod
+  - vitest
+
+# Build scripts allowed to run. Approved deliberately:
+# - esbuild: required by vitest / tsx (native binary)
+# - unrs-resolver: used by eslint / oxc resolvers
+# `pnpm approve-builds` maintains this block; do not hand-edit.
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true

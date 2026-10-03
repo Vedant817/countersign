@@ -19,7 +19,14 @@
     "db:seed": "pnpm --filter @countersign/db seed"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "24.19.1",
+    "eslint": "9.39.5",
+    "globals": "16.5.0",
     "prettier": "3.6.2",
-    "typescript": "5.9.3"
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.3"
   }
 }

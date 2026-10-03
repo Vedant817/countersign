@@ -1,0 +1,72 @@
+@import 'tailwindcss';
+
+/*
+ * Countersign design tokens.
+ *
+ * Design intent (WP-17f): a calm, evidentiary palette. Money and authority are the subject, so the
+ * UI is quiet: neutral paper greys, one ink-blue for signed/verified things, one amber for the
+ * agent's proposals, one red reserved exclusively for BLOCKED and lost states. Nothing else is
+ * allowed to be red, so a red pixel always means "this was refused".
+ */
+
+@theme {
+  --color-paper: oklch(98.5% 0.004 95);
+  --color-paper-raised: oklch(100% 0 0);
+  --color-ink: oklch(22% 0.015 265);
+  --color-ink-soft: oklch(42% 0.012 265);
+  --color-ink-faint: oklch(58% 0.01 265);
+  --color-rule: oklch(90% 0.006 265);
+
+  --color-signed: oklch(48% 0.11 250); /* signed / verified / ALLOW */
+  --color-signed-soft: oklch(95% 0.02 250);
+  --color-proposed: oklch(62% 0.12 70); /* the agent proposing something */
+  --color-proposed-soft: oklch(96% 0.04 80);
+  --color-blocked: oklch(50% 0.17 25); /* BLOCKED / lost / fraud */
+  --color-blocked-soft: oklch(96% 0.03 25);
+  --color-honest: oklch(52% 0.11 155); /* honest refund, won */
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas, monospace;
+
+  --radius-card: 0.75rem;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* A signed artefact is rendered in a serif-adjacent, letter-spaced label. */
+.label-signed {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Money must never reflow as digits change. */
+.money {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

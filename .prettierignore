@@ -1,0 +1,9 @@
+node_modules
+.next
+dist
+build
+coverage
+pnpm-lock.yaml
+uv.lock
+docs/spec/countersign-blueprint.pdf
+docs/EDGE_CASES.md

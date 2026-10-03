@@ -19,8 +19,8 @@ Legend for lanes: **A** platform/CI/docs · **B** crypto/Gate/verifier · **C** 
 
 | WP | Title | Lane | Deps | Size | Status | Finishing commit | Acceptance |
 |---|---|---|---|---|---|---|---|
-| WP-00 | Repo scaffold, CI, Render blueprint, AGENTS.md | A | n/a | 3h | done | _(see git log)_ | AT-WP00 |
-| WP-01 | `packages/core` — ids, money, errors, clock | A | 00 | 3h | todo | | AT-M1 |
+| WP-00 | Repo scaffold, CI, Render blueprint, AGENTS.md | A | n/a | 3h | wip | | AT-WP00 |
+| WP-01 | `packages/core` — ids, money, errors, clock | A | 00 | 3h | done | `chore: add Countersign spec`+ (see git log) | AT-M1 ✅ 86 tests |
 | WP-02 | `packages/db` — schema + migrations + seed | A | 01 | 4h | todo | | AT-M2 |
 | WP-03 | `apps/vi` — vi-service (Python FastAPI) | B | 00 | 8h | todo | | AT-M3 |
 | WP-04 | `packages/vi-client` | B | 01, 03 | 2h | todo | | AT-M4 |
@@ -75,3 +75,7 @@ Legend for lanes: **A** platform/CI/docs · **B** crypto/Gate/verifier · **C** 
 - **2026-10-04** — Step 0 done: repo initialised on `main`, spec moved to `docs/spec/`, `.gitignore`,
   `AGENTS.md`, `docs/HUMAN_TODO.md`, `docs/PROGRESS.md`, `docs/DECISIONS.md` created.
   Human-only steps H-01…H-07 are open. WP-00 scaffold starting.
+- **2026-10-04** — All 26 pinned versions in spec §4 verified against the npm registry and PyPI, and
+  the pinned VI commit `356c29635f1c44df7de02edb58699ca9f29bece6` confirmed on GitHub (see
+  DECISIONS D-003). **WP-01 `packages/core` complete**: 86 tests green, lint + typecheck clean,
+  11 of 109 edge cases now have a referencing test.

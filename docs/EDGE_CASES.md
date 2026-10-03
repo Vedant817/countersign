@@ -6,15 +6,15 @@
      tree by scripts/ec-coverage.mjs. Edit `status`, `blockedReason` and `notes` in
      docs/edge-cases.json, then run `pnpm test:ec`. -->
 
-_Generated 2026-10-03 19:45Z._
+_Generated 2026-10-03 20:19Z._
 
 | Metric | Value |
 |---|---|
 | Edge cases in spec §12 | **109** |
-| Cases with at least one referencing test | **0** |
-| Cases fully `done` (test present + status done) | **0** |
+| Cases with at least one referencing test | **11** |
+| Cases fully `done` (test present + status done) | **8** |
 | Cases `blocked` (needs live sandbox / human step) | **0** |
-| Total test references | **0** |
+| Total test references | **81** |
 
 A test claims a case by naming it in the test title or in a comment on the line above,
 e.g. `it('EC-CAP-1 …')` or `// EC-WH-4 forged webhook`.
@@ -26,7 +26,7 @@ Owning work package(s): `WP-11` · module: `M11 orders` · spec line 1069
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-CAP-1** | Partial capture (one of two shipments) | captureAuthorization with an allocated amount, final_capture=false; the remainder stays authorized | S | — | todo — no test |
+| **EC-CAP-1** | Partial capture (one of two shipments) | captureAuthorization with an allocated amount, final_capture=false; the remainder stays authorized | S | `packages/core/test/core.test.ts:196` — splitting a shipment order sums to the authorized amount (spec EC-CAP-1/2)<br>`packages/core/test/core.test.ts:197`<br>`packages/core/test/core.test.ts:198` | todo — 3 tests |
 | **EC-CAP-2** | Final partial capture leaves money uncaptured | Capture with final_capture=true; PayPal releases the rest [B12]; ledger RELEASEs the remainder | S | — | todo — no test |
 | **EC-CAP-3** | Capture exceeds the authorized amount | Rejected locally (CS_VALIDATION) before calling PayPal; a higher amount needs a new mandate-checked attempt | U | — | todo — no test |
 | **EC-CAP-4** | Capture PENDING (eCheck / review) | State PENDING; ship nothing until PAYMENT.CAPTURE.COMPLETED (or the reconciler) | I | — | todo — no test |
@@ -70,7 +70,7 @@ Owning work package(s): `WP-10, WP-11` · module: `M10/M11` · spec line 1107
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-MDT-1** | Mandate expires between checkout creation and Gate | BLOCK VI_EXPIRED | U | — | todo — no test |
+| **EC-MDT-1** | Mandate expires between checkout creation and Gate | BLOCK VI_EXPIRED | U | `packages/core/test/core.test.ts:473` — EC-MDT-1 a token issued in the future is NOT_YET_VALID past the skew<br>`packages/core/test/core.test.ts:474`<br>`packages/core/test/core.test.ts:475` | todo — 3 tests |
 | **EC-MDT-2** | Revoked after Gate ALLOW, before order create | Abort; RELEASE the reservation | U | — | todo — no test |
 | **EC-MDT-3** | Revoked after authorization, before capture | voidAuthorization for each; RELEASE; the order is CANCELLED | S | — | todo — no test |
 | **EC-MDT-4** | Revoked after capture | The purchase stands (it was authorised when made); the user can request a refund via a merchant message | U | — | todo — no test |
@@ -85,11 +85,13 @@ Owning work package(s): `WP-03, WP-10` · module: `M3/M10` · spec line 1119
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
 | **EC-TIME-1** | Browser clock wrong by hours | Not affected | E | — | todo — no test |
-| **EC-TIME-2** | Server clocks drift between web and vi | Library skew of 300 s tolerates it [B2]; Render hosts are NTP-synced [U] | U | — | todo — no test |
+| **EC-TIME-2** | Server clocks drift between web and vi | Library skew of 300 s tolerates it [B2]; Render hosts are NTP-synced [U] | U | `packages/core/test/core.test.ts:463` — EC-TIME-2 a token is valid up to the skew past exp and invalid beyond it<br>`packages/core/test/core.test.ts:464`<br>`packages/core/test/core.test.ts:465` | done |
+| | _note:_ Handled in packages/core (WP-01): withinValidity applies the 300s skew the VI library uses | | | | |
 | **EC-TIME-3** | Dispute arrives after the mandate expired | Defender verifies with at_time = capture time and now; the evidence states both | U | — | todo — no test |
 | **EC-TIME-4** | Price-lock boundary race (lock expires mid-Gate) | Deterministic | U | — | todo — no test |
 | **EC-TIME-5** | Authorization expiry (29 days; honor period 3 days [V15]) | Day 3: reauthorize if unshipped and within mandate validity; day 28: alert; on expiry: state AUTH_EXPIRED, RELEASE | IU | — | todo — no test |
-| **EC-TIME-6** | Dispute deadline in a different TZ | Stored UTC; displayed IST with label; the Bryntum timeline uses UTC internally | U | — | todo — no test |
+| **EC-TIME-6** | Dispute deadline in a different TZ | Stored UTC; displayed IST with label; the Bryntum timeline uses UTC internally | U | `packages/core/test/core.test.ts:482` — EC-TIME-6 renders IST explicitly, with no timezone database needed<br>`packages/core/test/core.test.ts:483`<br>`packages/core/test/core.test.ts:484` | done |
+| | _note:_ Handled in packages/core (WP-01): formatIst/formatIstHuman render IST explicitly with no tz database | | | | |
 
 ## §12.6 Currency, FX and rounding
 
@@ -97,12 +99,16 @@ Owning work package(s): `WP-01, WP-09, WP-11` · module: `M1/M9/M11` · spec lin
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-FX-1** | Mandate in INR, store in USD | BLOCK CS_CURRENCY_MISMATCH. We never convert inside the Gate: FX rates are not signed by the user | U | — | todo — no test |
+| **EC-FX-1** | Mandate in INR, store in USD | BLOCK CS_CURRENCY_MISMATCH. We never convert inside the Gate: FX rates are not signed by the user | U | `packages/core/test/core.test.ts:239` — EC-FX-1 every arithmetic helper refuses a mixed pair<br>`packages/core/test/core.test.ts:240`<br>`packages/core/test/core.test.ts:241`<br>`packages/core/test/core.test.ts:248` — EC-FX-1 withinRange reports CURRENCY instead of converting<br>`packages/core/test/core.test.ts:249`<br>`packages/core/test/core.test.ts:250`<br>`packages/core/test/core.test.ts:255` — EC-FX-1 exceedsCap names the code rather than converting<br>`packages/core/test/core.test.ts:256`<br>`packages/core/test/core.test.ts:257` | done |
+| | _note:_ Handled in packages/core (WP-01): currency mismatch throws instead of converting | | | | |
 | **EC-FX-2** | Buyer's PayPal funds in another currency (PayPal converts) | Out of our control. The mandate binds the merchant charge currency and amount; the receipt notes that PayPal may convert | I | — | todo — no test |
-| **EC-FX-3** | Zero-decimal currency (JPY) | toPayPalValue emits no decimals | P | — | todo — no test |
-| **EC-FX-4** | Rounding in shipping/tax allocation across split captures | Largest-remainder; Σ captures == total exactly; property test | P | — | todo — no test |
-| **EC-FX-5** | Float creeping in from the LLM ("129.99") | Reject floats at boundaries | U | — | todo — no test |
-| **EC-FX-6** | VI example helper uses float dollars | Our checkout JWT uses integer minor units (§8.3) | U | — | todo — no test |
+| **EC-FX-3** | Zero-decimal currency (JPY) | toPayPalValue emits no decimals | P | `packages/core/test/core.test.ts:5`<br>`packages/core/test/core.test.ts:6`<br>`packages/core/test/core.test.ts:7`<br>`packages/core/test/core.test.ts:502` — EC-FX-3 formats zero-decimal JPY without a decimal point<br>`packages/core/test/core.test.ts:503`<br>`packages/core/test/core.test.ts:504`<br>`packages/core/test/env.test.ts:284` — EC-FX-3 ppAmountSchema checks decimal places against the currency, not a constant<br>`packages/core/test/env.test.ts:285`<br>`packages/core/test/env.test.ts:286` | done |
+| | _note:_ Handled in packages/core (WP-01): MINOR_DIGITS drives toPayPalValue/formatMoney/ppAmountSchema | | | | |
+| **EC-FX-4** | Rounding in shipping/tax allocation across split captures | Largest-remainder; Σ captures == total exactly; property test | P | `packages/core/test/core.test.ts:5`<br>`packages/core/test/core.test.ts:6`<br>`packages/core/test/core.test.ts:7`<br>`packages/core/test/core.test.ts:157` — EC-FX-4 property: the parts always sum exactly to the total<br>`packages/core/test/core.test.ts:158`<br>`packages/core/test/core.test.ts:159`<br>`packages/core/test/core.test.ts:176` — EC-FX-4 property: every part is within one minor unit of the exact share<br>`packages/core/test/core.test.ts:177`<br>`packages/core/test/core.test.ts:178` | done |
+| | _note:_ Handled in packages/core (WP-01): allocate() largest-remainder, property-tested to sum exactly | | | | |
+| **EC-FX-5** | Float creeping in from the LLM ("129.99") | Reject floats at boundaries | U | `packages/core/test/core.test.ts:5`<br>`packages/core/test/core.test.ts:6`<br>`packages/core/test/core.test.ts:7`<br>`packages/core/test/core.test.ts:105` — EC-FX-5 fromPayPalValue("1.005","USD") -> CS_ROUNDING<br>`packages/core/test/core.test.ts:106`<br>`packages/core/test/core.test.ts:107`<br>`packages/core/test/core.test.ts:514` — EC-FX-5 a model that emits sub-cent precision is refused, not rounded<br>`packages/core/test/core.test.ts:515`<br>`packages/core/test/core.test.ts:516`<br>`packages/core/test/core.test.ts:521` — EC-FX-5 the float round-trip that motivates all of this<br>`packages/core/test/core.test.ts:522`<br>`packages/core/test/core.test.ts:523`<br>`packages/core/test/env.test.ts:250` — EC-FX-5 minorSchema rejects a JS float outright<br>`packages/core/test/env.test.ts:251`<br>`packages/core/test/env.test.ts:252`<br>`packages/core/test/env.test.ts:259` — EC-FX-5 minorSchema rejects a decimal string and a negative<br>`packages/core/test/env.test.ts:260`<br>`packages/core/test/env.test.ts:261` | done |
+| | _note:_ Handled in packages/core (WP-01): fromPayPalValue refuses sub-minor precision; boundary schemas refuse JS numbers | | | | |
+| **EC-FX-6** | VI example helper uses float dollars | Our checkout JWT uses integer minor units (§8.3) | U | `packages/core/test/core.test.ts:5`<br>`packages/core/test/core.test.ts:6`<br>`packages/core/test/core.test.ts:7` | todo — 3 tests |
 
 ## §12.7 Price, stock and fulfilment
 
@@ -198,7 +204,8 @@ Owning work package(s): `WP-06` · module: `M6 paypal` · spec line 1214
 | **EC-PP-3** | OAuth token expired mid-flight | Refresh once (single-flight), then retry | U | — | todo — no test |
 | **EC-PP-4** | PayPal MCP server down | The Defender switches to direct REST for the same operations (getDispute, listDisputes); the agent tooling degrades gracefully | I | — | todo — no test |
 | **EC-PP-5** | Webhook verify endpoint slow | Respond 200 after storing; verify async (EC-WH-7) | U | — | todo — no test |
-| **EC-ENV-1** | Accidental live credentials | Boot refuses | U | — | todo — no test |
+| **EC-ENV-1** | Accidental live credentials | Boot refuses | U | `packages/core/test/env.test.ts:5`<br>`packages/core/test/env.test.ts:6`<br>`packages/core/test/env.test.ts:7`<br>`packages/core/test/env.test.ts:49` — EC-ENV-1 the process refuses to boot against live PayPal<br>`packages/core/test/env.test.ts:50` — parseEnv throws a CsError listing live as invalid<br>`packages/core/test/env.test.ts:51`<br>`packages/core/test/env.test.ts:61`<br>`packages/core/test/env.test.ts:62`<br>`packages/core/test/env.test.ts:63` | done |
+| | _note:_ Handled in packages/core (WP-01): envSchema rejects PAYPAL_ENV=live; assertSandbox enforces it at call time | | | | |
 | **EC-ENV-2** | Sandbox vs. live differences | The code paths that call sandbox-only APIs live in paypal.sandbox.* and are compiled out when PAYPAL_ENV=live (not supported anyway) | U | — | todo — no test |
 | **EC-ENV-3** | Sandbox data reset or account changes during judging | Alert Vedant; scripts/sandbox-bootstrap.ts recreates the personas | S | — | todo — no test |
 
@@ -210,7 +217,8 @@ Owning work package(s): `WP-19` · module: `M19 privacy` · spec line 1244
 |---|---|---|---|---|---|
 | **EC-PRIV-1** | Erasure request with an open dispute | PRIVACY_LEGAL_HOLD; scheduled for after resolution + window; the user is told the date | U | — | todo — no test |
 | **EC-PRIV-2** | Export request | JSON zip of all rows + tokens + PDFs within 24 h (immediate in the demo) | E | — | todo — no test |
-| **EC-PRIV-3** | Public verifier leaks PII | Redaction: email masked (a*@…), no street address; raw-token download includes selectively disclosed fields only (SD-JWT) | U | — | todo — no test |
+| **EC-PRIV-3** | Public verifier leaks PII | Redaction: email masked (a*@…), no street address; raw-token download includes selectively disclosed fields only (SD-JWT) | U | `packages/core/test/env.test.ts:160` — EC-PRIV-3 redaction<br>`packages/core/test/env.test.ts:161` — redacts secret-looking keys at any depth<br>`packages/core/test/env.test.ts:162`<br>`packages/core/test/env.test.ts:180` — EC-PRIV-3 scrubPii removes emails, card numbers and phone numbers<br>`packages/core/test/env.test.ts:181`<br>`packages/core/test/env.test.ts:182`<br>`packages/core/test/env.test.ts:186` — EC-PRIV-3 a log line keeps operational context but drops PII values<br>`packages/core/test/env.test.ts:187`<br>`packages/core/test/env.test.ts:188`<br>`packages/core/test/env.test.ts:211` — EC-PRIV-3 AT-M19.2 regex test: no logged field value contains an email<br>`packages/core/test/env.test.ts:212`<br>`packages/core/test/env.test.ts:213` | done |
+| | _note:_ Handled in packages/core (WP-01): three-filter logger redaction + redacted public verifier payload (S-18) | | | | |
 | **EC-PRIV-4** | LLM provider data | OpenAI API data-usage settings documented; no PII sent to the compiler beyond the intent text; product data only to the agent | U | — | todo — no test |
 | **EC-PRIV-5** | Pre-erasure notice | 48 h email (stub) before the retention purge, per DPDP Rule 8(2) good practice [B17] | U | — | todo — no test |
 | **EC-PRIV-6** | Cross-border transfer (India user, US hosting) | Disclosed in the notice; Render region chosen = Singapore [U: confirm Render region list in WP-00] | — | — | todo — no test |
@@ -223,6 +231,7 @@ Owning work package(s): `WP-08, WP-13, WP-15` · module: `M8/M13/M15` · spec li
 |---|---|---|---|---|---|
 | **EC-LLM-1** | OpenAI down / timeout | Compiler → manual constraint form; agent → "try later"; Defender → template notes (deterministic) | I | — | todo — no test |
 | **EC-LLM-2** | Output fails the zod schema | One repair retry (repairToolCall / re-ask), then fallback | U | — | todo — no test |
+| | _note:_ Handled in packages/core (WP-01): parseOr/parseEnv: one invalid value is reported, never guessed | | | | |
 | **EC-LLM-3** | Hallucinated fact in the notes | Citation checker blocks it | U | — | todo — no test |
 | **EC-LLM-4** | Cost runaway (agent loop) | isStepCount(12); per-user daily token budget; Judge Mode capped | U | — | todo — no test |
 | **EC-LLM-5** | Model deprecation | LLM_MAIN_MODEL env; the eval suite runs on a model switch | — | — | todo — no test |

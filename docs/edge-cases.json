@@ -450,7 +450,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1120,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): withinValidity applies the 300s skew the VI library uses"
     },
     {
       "id": "EC-TIME-3",
@@ -506,7 +507,8 @@
       "declaredTest": "U",
       "userFacing": "\"Respond by Tue 20 Oct, 5:29 AM IST\"",
       "specLine": 1124,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): formatIst/formatIstHuman render IST explicitly with no tz database"
     },
     {
       "id": "EC-FX-1",
@@ -520,7 +522,8 @@
       "declaredTest": "U",
       "userFacing": "\"Your limit is in ₹. This store charges in $. Create a $ mandate\"",
       "specLine": 1130,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): currency mismatch throws instead of converting"
     },
     {
       "id": "EC-FX-2",
@@ -548,7 +551,8 @@
       "declaredTest": "P",
       "userFacing": "Correct display",
       "specLine": 1132,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): MINOR_DIGITS drives toPayPalValue/formatMoney/ppAmountSchema"
     },
     {
       "id": "EC-FX-4",
@@ -562,7 +566,8 @@
       "declaredTest": "P",
       "userFacing": "Exact",
       "specLine": 1133,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): allocate() largest-remainder, property-tested to sum exactly"
     },
     {
       "id": "EC-FX-5",
@@ -576,7 +581,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1134,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): fromPayPalValue refuses sub-minor precision; boundary schemas refuse JS numbers"
     },
     {
       "id": "EC-FX-6",
@@ -1346,7 +1352,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1219,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): envSchema rejects PAYPAL_ENV=live; assertSandbox enforces it at call time"
     },
     {
       "id": "EC-ENV-2",
@@ -1416,7 +1423,8 @@
       "declaredTest": "U (snapshot)",
       "userFacing": "n/a",
       "specLine": 1246,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): three-filter logger redaction + redacted public verifier payload (S-18)"
     },
     {
       "id": "EC-PRIV-4",
@@ -1486,7 +1494,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1256,
-      "status": "todo"
+      "status": "done",
+      "notes": "Handled in packages/core (WP-01): parseOr/parseEnv: one invalid value is reported, never guessed"
     },
     {
       "id": "EC-LLM-3",

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+
+    /*
+     * Bundler resolution, not NodeNext.
+     *
+     * Every package in this monorepo is consumed as TypeScript **source** by the tool that runs it
+     * (vitest for tests, Next for the app, tsx for scripts), so extensionless relative imports are
+     * correct and idiomatic. NodeNext would require writing `./errors.js` everywhere and, worse,
+     * silently degrades any unresolved specifier to `any` instead of erroring — which is how a
+     * money bug becomes a `noImplicitAny` warning nobody reads.
+     *
+     * Nothing here is published as runnable JS: packages ship declarations only
+     * (see tsconfig.build.json), so there is no emitted-import problem.
+     */
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "useUnknownInCatchVariables": true,
+
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "exclude": ["node_modules", "dist", ".next"]
+}

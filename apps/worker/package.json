@@ -1,0 +1,37 @@
+{
+  "name": "@countersign/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@countersign/core": "workspace:*",
+    "@countersign/db": "workspace:*",
+    "@countersign/paypal": "workspace:*",
+    "@countersign/webhooks": "workspace:*",
+    "@countersign/defender": "workspace:*",
+    "@countersign/orders": "workspace:*",
+    "@countersign/privacy": "workspace:*",
+    "@countersign/ledger": "workspace:*",
+    "@ai-sdk/mcp": "2.0.66",
+    "@ai-sdk/openai": "4.0.83",
+    "ai": "7.0.127",
+    "pg-boss": "12.36.0",
+    "postgres": "3.4.9",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "5.0.3",
+    "@types/node": "24.19.1",
+    "tsx": "4.23.15"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@countersign/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./client": "./src/client.ts",
+    "./repos": "./src/repos/index.ts",
+    "./seed": "./src/seed/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "migrate": "drizzle-kit migrate",
+    "migrate:generate": "drizzle-kit generate",
+    "seed": "tsx src/seed/run.ts"
+  },
+  "dependencies": {
+    "@countersign/core": "workspace:*",
+    "drizzle-orm": "0.45.3",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "drizzle-kit": "0.31.11",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3"
+  }
+}
