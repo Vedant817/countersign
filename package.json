@@ -1,0 +1,25 @@
+{
+  "name": "countersign",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" build && pnpm --filter @countersign/web build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r test",
+    "test:ec": "node scripts/ec-coverage.mjs",
+    "db:migrate": "pnpm --filter @countersign/db migrate",
+    "db:seed": "pnpm --filter @countersign/db seed"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2",
+    "typescript": "5.9.3"
+  }
+}

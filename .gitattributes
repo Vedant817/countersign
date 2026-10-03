@@ -1,0 +1,17 @@
+# Normalise line endings in the repository; keep text files LF in the working tree.
+* text=auto eol=lf
+
+# Binary assets
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.mp4 binary
+
+# Lockfiles are generated; keep them out of diff normalisation noise.
+pnpm-lock.yaml text eol=lf
+uv.lock text eol=lf
