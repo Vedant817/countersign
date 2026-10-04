@@ -396,12 +396,31 @@ describe('error registry', () => {
         cause: new Error('connect ECONNREFUSED 10.0.0.5:443'),
         stack: 'Error: connect ECONNREFUSED\n    at …',
         access_token: 'A21AA-live-should-never-appear',
+        api_key: 'sk-should-never-appear',
       }),
     )
     const serialised = JSON.stringify(body)
     expect(serialised).not.toContain('ECONNREFUSED')
     expect(serialised).not.toContain('should-never-appear')
+    // The vi-service found that core's list let `api_key` and `*_key` through, so it runs a stricter
+    // superset. Being stricter cannot break a client, so core adopts it (DECISIONS D-008).
     expect(body.error.details).toEqual({ status: 503 })
+  })
+
+  it('D-008 toBody also drops api_key and any *_key field, per the vi-service finding', () => {
+    const body = toBody(
+      csError('CS_INTERNAL', 'boom', {
+        api_key: 'sk-live-xyz',
+        signing_key: 'ec-private-half',
+        gcm_ciphertext: 'AAAA',
+        status: 500,
+      }),
+    )
+    const serialised = JSON.stringify(body)
+    expect(serialised).not.toContain('sk-live-xyz')
+    expect(serialised).not.toContain('ec-private-half')
+    // Non-secret context survives, so the response is still diagnosable.
+    expect(body.error.details).toEqual({ gcm_ciphertext: 'AAAA', status: 500 })
   })
 
   it('toCsError passes an existing CsError through and wraps anything else', () => {
@@ -409,7 +428,41 @@ describe('error registry', () => {
     expect(toCsError(original)).toMatchObject({ code: 'PP_NOT_FOUND', message: 'gone' })
     expect(toCsError(new Error('boom'), 'PP_UNAVAILABLE').code).toBe('PP_UNAVAILABLE')
     expect(toCsError('a string').message).toBe('a string')
-    expect(toCsError({ weird: true }).code).toBe('CS_VALIDATION')
+    // An unhandled fault defaults to CS_INTERNAL, not CS_VALIDATION: telling a buyer their input was
+    // invalid when the server threw sends them to fix the wrong thing (DECISIONS D-007).
+    expect(toCsError({ weird: true }).code).toBe('CS_INTERNAL')
+    expect(toCsError(new Error('kaboom')).code).toBe('CS_INTERNAL')
+  })
+
+  it('D-007 the two codes added beyond the spec §8.1 registry behave correctly', () => {
+    expect(isCsErrorCode('CS_RATE_LIMITED')).toBe(true)
+    expect(isCsErrorCode('CS_INTERNAL')).toBe(true)
+
+    const limited = csError('CS_RATE_LIMITED', 'vi public route, 31st call in a minute')
+    // Retryable, because a client that backs off will succeed.
+    expect(limited.retryable).toBe(true)
+    expect(limited.userMessage).toMatch(/wait a moment/i)
+
+    const internal = csError('CS_INTERNAL', 'TypeError: x is not a function')
+    // Not retryable: a blind retry of a 500 usually reproduces it.
+    expect(internal.retryable).toBe(false)
+    expect(internal.userMessage).toMatch(/our side/i)
+    // The internal message must never leak into the buyer-facing sentence.
+    expect(internal.userMessage).not.toContain('TypeError')
+  })
+
+  it('D-007 attempt defaults to CS_INTERNAL rather than CS_VALIDATION', async () => {
+    const r = await attempt(async () => {
+      throw new Error('unhandled')
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error.code).toBe('CS_INTERNAL')
+    // …and an explicit override still wins.
+    const s = await attempt(async () => {
+      throw new Error('openai timed out')
+    }, 'LLM_UNAVAILABLE')
+    expect(s.ok).toBe(false)
+    if (!s.ok) expect(s.error.code).toBe('LLM_UNAVAILABLE')
   })
 
   it('Result helpers round-trip', () => {

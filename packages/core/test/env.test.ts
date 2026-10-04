@@ -256,6 +256,17 @@ describe('boundary schemas refuse floats and untrusted shapes', () => {
     if (!bad.success) expect(bad.error.issues[0]?.message).toContain('integer minor units')
   })
 
+  it('EC-FX-5 the schema itself accepts bigint, integer string and safe integer — nothing else', () => {
+    // JSON has no bigint, so every money field crossing a boundary arrives as a string or a number
+    // and must be converted by exactly one function (bigintFromJson). A JSON *float* is refused.
+    const asStrings = minorSchema.safeParse('13000')
+    expect(asStrings.success && asStrings.data).toBe(13000n)
+    expect(minorSchema.safeParse(13000n).success).toBe(true)
+    expect(minorSchema.safeParse(' 13000 ').success).toBe(true)
+    expect(minorSchema.safeParse('-1').success).toBe(false)
+    expect(minorSchema.safeParse('-1').success).toBe(false)
+  })
+
   it('EC-FX-5 minorSchema rejects a decimal string and a negative', () => {
     expect(minorSchema.safeParse('129.99').success).toBe(false)
     expect(minorSchema.safeParse('-1').success).toBe(false)

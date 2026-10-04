@@ -1,0 +1,105 @@
+{
+  "__meta__": {
+    "count": 8,
+    "currencies": [
+      "USD",
+      "EUR",
+      "GBP",
+      "INR",
+      "JPY",
+      "AUD",
+      "CAD"
+    ],
+    "generated_by": "apps/vi/tests/test_constraints_fixture.py",
+    "iso_20022_frequencies": [
+      "INDA",
+      "DAIL",
+      "WEEK",
+      "TWOK",
+      "TWMN",
+      "MNTH",
+      "TOMN",
+      "QUTR",
+      "FOMN",
+      "SEMI",
+      "YEAR",
+      "TYEA"
+    ],
+    "money": "integer minor units plus an ISO-4217 currency code; never a float (spec §0, EC-FX-6)",
+    "network_enforced_not_checked_by_library": [
+      "mandate.payment.agent_recurrence",
+      "mandate.payment.budget",
+      "mandate.payment.recurrence"
+    ],
+    "reference_is_generated_by_the_service": [
+      "mandate.payment.reference"
+    ],
+    "source": "verifiable_intent/models/constraints.py at the pinned commit",
+    "vi_lib_commit": "356c29635f1c44df7de02edb58699ca9f29bece6"
+  },
+  "mandate.checkout.allowed_merchants": {
+    "allowed": [
+      {
+        "id": "mrc_northwind",
+        "name": "Northwind Outfitters",
+        "website": "https://northwind.countersign.test"
+      }
+    ],
+    "type": "mandate.checkout.allowed_merchants"
+  },
+  "mandate.checkout.line_items": {
+    "items": [
+      {
+        "acceptable_items": [
+          {
+            "id": "SKU-TRAIL-42",
+            "title": "Trail Runner"
+          }
+        ],
+        "id": "line-item-1",
+        "quantity": 1
+      }
+    ],
+    "match_mode": "minimum",
+    "type": "mandate.checkout.line_items"
+  },
+  "mandate.payment.agent_recurrence": {
+    "end_date": "2027-10-01",
+    "frequency": "MNTH",
+    "max_occurrences": 12,
+    "start_date": "2026-10-01",
+    "type": "mandate.payment.agent_recurrence"
+  },
+  "mandate.payment.allowed_payees": {
+    "allowed": [
+      {
+        "id": "mrc_northwind",
+        "name": "Northwind Outfitters",
+        "website": "https://northwind.countersign.test"
+      }
+    ],
+    "type": "mandate.payment.allowed_payees"
+  },
+  "mandate.payment.amount_range": {
+    "currency": "USD",
+    "max": 13000,
+    "min": 0,
+    "type": "mandate.payment.amount_range"
+  },
+  "mandate.payment.budget": {
+    "currency": "USD",
+    "max": 13000,
+    "type": "mandate.payment.budget"
+  },
+  "mandate.payment.recurrence": {
+    "end_date": "2027-10-01",
+    "frequency": "MNTH",
+    "number": 12,
+    "start_date": "2026-10-01",
+    "type": "mandate.payment.recurrence"
+  },
+  "mandate.payment.reference": {
+    "conditional_transaction_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "type": "mandate.payment.reference"
+  }
+}

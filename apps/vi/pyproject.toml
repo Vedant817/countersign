@@ -22,6 +22,7 @@ dev = [
   "pytest==9.1.1",
   "httpx==0.28.1",
   "pytest-asyncio==1.3.0",
+  "ruff==0.16.10",
 ]
 
 [build-system]
@@ -50,7 +51,11 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
-ignore = [
-  "ANN101", # `self` needs no annotation
-  "ANN102", # `cls` needs no annotation
-]
+# ANN101/ANN102 (`self` / `cls`) were removed from ruff, so ignoring them is a no-op that warns.
+# `src/` is held to full annotation; only test fixture params are exempted, via per-file-ignores.
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixture parameters are injected by name and have no useful annotation. `src/` is held to
+# full ANN — the exception is for tests only, and it is scoped to `tests/*` rather than the whole
+# project so a production module cannot hide behind it.
+"tests/*" = ["ANN001"]

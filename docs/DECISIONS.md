@@ -105,3 +105,99 @@ claimed to would produce false confidence in a privacy control. The enforceable 
 a named field, never in the message string", and `PII_KEYS` enforces that half.
 **Evidence:** `packages/core/src/logger.ts` docstring; test
 "EC-PRIV-3 AT-M19.2 regex test: no logged field value contains an email".
+
+## D-007 — Two error codes added to the §8.1 registry, and `attempt` now defaults to `CS_INTERNAL`
+
+**Date:** 2026-10-04 · **Raised by:** WP-03 building `apps/vi`
+**Decision:** Add `CS_RATE_LIMITED` and `CS_INTERNAL` to `CS_ERROR_CODES`. Change `toCsError` and
+`attempt`'s fallback code from `CS_VALIDATION` to `CS_INTERNAL`.
+**Reason:** §8.0 rule 3 says every code must come from the §8.1 registry, but the registry has no code
+for two situations the system genuinely hits:
+
+1. **Our own rate limiter.** `apps/vi` must rate-limit `GET /v1/jwks` and `POST /v1/public/verify` to
+   30 req/min/IP (§8.3). The agent's first choice was `PP_RATE_LIMITED`, which is **actively
+   misleading**: that code's user-facing copy says "PayPal is asking us to slow down", and it would
+   tell a buyer that PayPal is throttling us when the constraint is entirely ours. Reusing a payment
+   rail's error code for a local control is exactly the kind of thing a judge reading the code would
+   flag, and rightly.
+2. **An unhandled fault.** With no code for "this is our bug", a 500 was being reported to users as
+   `CS_VALIDATION` — "some of that information is not valid, please check and try again". That sends
+   a buyer off to fix input that was never wrong, and it makes real incidents invisible in metrics
+   because they are counted as user errors.
+
+`CS_RATE_LIMITED` is `retryable: true` (a client that backs off will succeed);
+`CS_INTERNAL` is `retryable: false` (a blind retry of a 500 usually reproduces it).
+**Evidence:** `packages/core/src/errors.ts`; tests `D-007 …`.
+This is a deliberate, recorded deviation from a spec-owned registry (AGENTS.md: never diverge silently).
+
+## D-008 — `toBody` scrub list widened; `_` is a word character
+
+**Date:** 2026-10-04 · **Raised by:** WP-03, which ran a stricter superset than core
+**Decision:** Widen `NEVER_SERIALISE` in `packages/core/src/errors.ts` to also drop `key`, `kid`,
+`client_id`, `session_id` anywhere in a `details` key.
+**Reason:** Two separate bugs, one root cause. `_` is a **word character** in JavaScript regex, so
+`\btoken\b` does not match `access_token` and `\bkey\b` does not match `signing_key`. An earlier
+version of the file used word boundaries on both sides and silently passed `access_token` and
+`signing_key` straight through to the HTTP response. The correct shape is **unanchored on the left,
+`\b`-terminated on the right**, which catches compound names while still not matching `keyword`.
+Adopted a deliberately stricter rule than core had, because a client cannot depend on a field being
+present in an error body.
+**Evidence:** two tests, `toBody strips a cause or stack…` and `D-008 toBody also drops api_key…`.
+The second exists purely because the first fix was wrong in exactly the same way.
+
+## D-009 — `verify_chain` has no clock override, so `at_time` is reported as not honoured
+
+**Date:** 2026-10-04 · **Raised by:** WP-03 · **Spec item:** §8.3 `at_time`, EC-TIME-3
+**Decision:** `/v1/verify` accepts `at_time` but returns the verdict it **actually performed at `now`**,
+plus `at_time_not_honoured: true`, the verbatim reason, and an `at_time_check` block containing our
+own iat/exp window evaluation clearly labelled *advisory*.
+**Reason:** `verification/chain.py` at the pinned commit hardcodes `now = int(time.time())` with no
+parameter to override it (verified in the installed source before writing any code). So an honest
+as-of-capture-time verification is **impossible**, not merely unimplemented.
+The alternative — computing a plausible as-of verdict ourselves and returning it — would put an
+unverifiable claim into an evidence packet that a merchant files with PayPal and a judge re-verifies
+publicly. A fabricated answer in that position is far worse than a flagged gap. Returning the real
+verdict plus an explicit, machine-readable flag means the Gate and the Defender can decide what to do
+with it, and a reader can see the limitation.
+**Evidence:** `apps/vi/.venv/…/verification/chain.py:166` — `now = int(time.time())`.
+**Consequence:** EC-TIME-3 cannot be fully closed in sandbox. Recorded in `docs/edge-cases.json`
+with `status: blocked` and the reason. Raised for upstream in `docs/HUMAN_TODO.md` H-08.
+
+## D-010 — Three places the pinned VI library's real behaviour differs from spec §8.3
+
+**Date:** 2026-10-04 · **Raised by:** WP-03 · **Pinned commit:** `356c29635f1c44df7de02edb58699ca9f29bece6`
+**Decision:** adapt to the library, and document each divergence in code comments and in the
+vi-service README.
+
+1. **`/v1/l2/finalize` must return the finished SD-JWT, not `header.payload.signature`.**
+   In autonomous mode the two open mandates *are* SD disclosures. Returning only three segments makes
+   `verify_chain` fail with *"L2 delegate_payload resolved zero mandate disclosures"*. The spec's
+   route table `{l2}` is correct only when read as the complete SD-JWT.
+2. **`UserMandate.prompt_summary` is silently dropped.** The field exists on the model, but
+   `create_layer2_autonomous` never reads it, so it reaches neither the payload nor the disclosures.
+   §8.3 lists it in the `l2/prepare` request. The service accepts it and must **not** present it to a
+   user as signed content. A test asserts this so the day upstream fixes it, the test fails loudly
+   rather than the UI quietly starting to over-promise.
+3. **`check_constraints` lists `budget` / `recurrence` / `agent_recurrence` in `checked` while
+   evaluating none of them** (its own comment says "Network-enforced constraints"). Passing that
+   through would tell the Gate its job is done. The service moves them to `skipped` with that exact
+   reason, so the Gate knows what it still owes — which is the whole point of spec D19.
+
+Two smaller ones, handled inline: `resolve_disclosures` does **not** resolve the standalone
+merchant/item disclosures, so constraint SD-refs must be resolved explicitly or `allowed_payees`
+degrades to a pass on an unchecked constraint; and `es256_verify` returns `False` rather than raising
+on a wrong-length signature, so the 64-byte length is enforced explicitly.
+**Evidence:** all read from the installed source at the pinned commit; see the docstrings in
+`apps/vi/src/vi_service/{l2,l3,verify,checkout_jwt}.py` and `tests/test_constraints_fixture.py`.
+
+## D-011 — `l3_jti` is derived, not read from the L3
+
+**Date:** 2026-10-04 · **Raised by:** WP-03 · **Spec item:** §7.2 `checkout_attempts.l3_jti` UNIQUE
+**Decision:** `jti` = base64url SHA-256 of the L3a issuer JWT.
+**Reason:** The L3 payload the library produces has **no `jti` claim**, but §7.2 requires a unique
+`l3_jti` and §8.10 check 7 uses it as the replay defence (EC-IDEM-1, EC-MER-2). Deriving it from the
+signed token gives the two properties that matter: it is content-bound (a mutated L3 has a different
+replay id) and it is **deterministic** (a retried request produces the same id, so an idempotent
+retry cannot consume its own replay protection). A random `jti` per attempt would have the opposite
+behaviour.
+**Evidence:** `apps/vi/src/vi_service/l3.py`.

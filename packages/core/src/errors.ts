@@ -20,6 +20,13 @@ export const CS_ERROR_CODES = [
   'CS_FORBIDDEN',
   'CS_CURRENCY_MISMATCH',
   'CS_ROUNDING',
+  // Not in spec §8.1's original registry; added by DECISIONS D-007, with the reason recorded there.
+  //   CS_RATE_LIMITED — *our* rate limiter (vi-service public routes, Judge Mode concurrency cap).
+  //                    Deliberately NOT PP_RATE_LIMITED, which would tell a buyer that PayPal is
+  //                    throttling us when the constraint is ours.
+  //   CS_INTERNAL    — an unhandled fault, so a 500 is never reported to a user as bad input.
+  'CS_RATE_LIMITED',
+  'CS_INTERNAL',
   // --- verifiable intent chain ---
   'VI_CHAIN_INVALID',
   'VI_SIGNATURE_MISMATCH',
@@ -95,6 +102,8 @@ const RETRYABLE: ReadonlySet<CsErrorCode> = new Set<CsErrorCode>([
   'PP_RATE_LIMITED',
   'PP_UNAVAILABLE',
   'LLM_UNAVAILABLE',
+  // Our own limiter: a client that backs off and retries will succeed, so it must be told so.
+  'CS_RATE_LIMITED',
 ])
 
 /**
@@ -110,6 +119,9 @@ const USER_MESSAGES: Partial<Record<CsErrorCode, string>> = {
   CS_CURRENCY_MISMATCH:
     'Your limit and this purchase are in different currencies, so we did not convert them. Create a mandate in the store currency.',
   CS_ROUNDING: 'That amount has more decimal places than its currency allows, so we refused to round it.',
+  CS_RATE_LIMITED: 'Too many requests just now. Please wait a moment and try again.',
+  CS_INTERNAL:
+    'Something went wrong on our side. Nothing was charged. We have the details and will fix it.',
   VI_CHAIN_INVALID: 'The signed mandate could not be verified, so we stopped.',
   VI_SIGNATURE_MISMATCH: 'The signature did not match the key in the mandate, so we stopped.',
   VI_EXPIRED: 'Your mandate expired. Ask for a new one and we will continue.',
@@ -205,12 +217,16 @@ export interface CsErrorBody {
  * services produce one error contract (spec §8.0 rule 3).
  *
  * Defence in depth: a `details` bag can hold anything, including a `cause` Error, a stack trace, or
- * a key such as `access_token` someone threaded through by mistake. Those are stripped here rather
- * than trusted, because this function's output crosses a trust boundary to a browser and must not
- * become an information leak. The pattern is unanchored on purpose — `access_token` and `x-api-key`
- * must be caught, not just the bare words.
+ * a credential someone threaded through by mistake. Those are stripped here rather than trusted,
+ * because this function's output crosses a trust boundary to a browser.
+ *
+ * The patterns are **unanchored on the left and `\b`-terminated on the right**, which is the only
+ * shape that catches compound names. `_` is a word character in JavaScript, so `\bkey\b` does *not*
+ * match `signing_key` and `\btoken\b` does *not* match `access_token` — an earlier version of this
+ * file had exactly that bug, and a test now pins the behaviour.
  */
-const NEVER_SERIALISE = /(cause|stack|secret|password|token|authorization|cookie|credential|private)/i
+const NEVER_SERIALISE =
+  /(cause|stack|secret|password|token|authorization|cookie|credential|private|key|kid|client_id|session_id|clientid)/i
 
 function safeDetails(details: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!details) return undefined
@@ -236,8 +252,13 @@ export function toBody(e: CsError): CsErrorBody {
   }
 }
 
-/** Turn anything thrown into a `CsError`. Never let a raw `unknown` escape a module. */
-export function toCsError(cause: unknown, fallbackCode: CsErrorCode = 'CS_VALIDATION'): CsError {
+/**
+ * Turn anything thrown into a `CsError`. Never let a raw `unknown` escape a module.
+ *
+ * Defaults to `CS_INTERNAL` rather than `CS_VALIDATION`, because an exception that reaches this
+ * function is an unhandled fault, not user input.
+ */
+export function toCsError(cause: unknown, fallbackCode: CsErrorCode = 'CS_INTERNAL'): CsError {
   if (typeof cause === 'object' && cause !== null && 'code' in cause && 'message' in cause) {
     const maybe = cause as { code: unknown; message: unknown; userMessage?: unknown; details?: unknown }
     if (isCsErrorCode(maybe.code) && typeof maybe.message === 'string') {
@@ -258,12 +279,18 @@ export function toCsError(cause: unknown, fallbackCode: CsErrorCode = 'CS_VALIDA
   return csError(fallbackCode, typeof cause === 'string' ? cause : JSON.stringify(cause), undefined, { cause })
 }
 
-/** Run `fn`, converting any throw into `err(toCsError(e))`. The workhorse of the `Result` style. */
+/**
+ * Run `fn`, converting any throw into `err(toCsError(e))`. The workhorse of the `Result` style.
+ *
+ * The fallback code defaults to `CS_INTERNAL`, not `CS_VALIDATION`: an exception reaching this point
+ * is an unhandled fault, and reporting it to a user as "check your input" sends them off to fix
+ * something that was never wrong (DECISIONS D-007).
+ */
 export async function attempt<T>(fn: () => Promise<T>, fallbackCode?: CsErrorCode): Promise<Result<T, CsError>> {
   try {
     return ok(await fn())
   } catch (e) {
-    return err(toCsError(e, fallbackCode))
+    return err(toCsError(e, fallbackCode ?? 'CS_INTERNAL'))
   }
 }
 

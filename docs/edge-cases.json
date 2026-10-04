@@ -452,7 +452,7 @@
       "userFacing": "n/a",
       "specLine": 1120,
       "status": "done",
-      "notes": "Handled in packages/core (WP-01): withinValidity applies the 300s skew the VI library uses"
+      "notes": "packages/core/src/clock.ts withinValidity applies VI_CLOCK_SKEW_SECONDS (default 300, the library default), and apps/vi threads clock_skew_seconds into verify_chain. Tests: packages/core/test/core.test.ts, apps/vi/tests/test_verify.py."
     },
     {
       "id": "EC-TIME-3",
@@ -466,7 +466,9 @@
       "declaredTest": "U",
       "userFacing": "Packet: \"Valid at time of purchase (14:01 IST, 5 Oct); expired 12 Oct as designed\"",
       "specLine": 1121,
-      "status": "todo"
+      "status": "blocked",
+      "notes": "apps/vi/tests/test_verify.py::test_EC_TIME_3_at_time_is_flagged_as_not_honoured and ::test_EC_TIME_3_at_time_within_the_window_is_reported_as_such. PARTIAL: the pinned verify_chain (commit 356c296) reads time.time() internally and takes no clock override, so /v1/verify CANNOT produce a real as-of verdict. It returns the verification it did perform at now, plus at_time_not_honoured=true, the reason, and an advisory within_validity_at window check computed by vi-service. A real as-of verification needs a now parameter in the library (docs/HUMAN_TODO.md). Defender-side EC-TIME-3 (verify twice, at capture time and now, and state both in the packet) is WP-15.",
+      "blockedReason": "verify_chain at the pinned VI commit has no clock override (chain.py:166 hardcodes now = int(time.time())), so as-of-capture-time verification is impossible, not merely unimplemented. apps/vi returns the real verdict at now plus at_time_not_honoured:true. Upstream request raised as HUMAN_TODO H-08; see DECISIONS D-009."
     },
     {
       "id": "EC-TIME-4",
@@ -509,7 +511,7 @@
       "userFacing": "\"Respond by Tue 20 Oct, 5:29 AM IST\"",
       "specLine": 1124,
       "status": "done",
-      "notes": "Handled in packages/core (WP-01): formatIst/formatIstHuman render IST explicitly with no tz database"
+      "notes": "packages/core/src/clock.ts formatIst/formatIstHuman render IST explicitly with a fixed +05:30 offset (no tz database needed, and exact since 1945). Test: packages/core/test/core.test.ts."
     },
     {
       "id": "EC-FX-1",
@@ -891,7 +893,8 @@
       "declaredTest": "U",
       "userFacing": "Compromise → \"Security update: re-approve mandates\"",
       "specLine": 1171,
-      "status": "todo"
+      "status": "done",
+      "notes": "apps/vi/src/vi_service/keys.py: POST /v1/keys/rotate retires the current key and GET /v1/jwks returns retired public keys with a status field, so evidence signed by an old kid still verifies. Test: apps/vi/tests/test_keys.py (AT-M3.9)."
     },
     {
       "id": "EC-KEY-3",
@@ -905,7 +908,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1172,
-      "status": "todo"
+      "status": "done",
+      "notes": "apps/vi/src/vi_service/verify.py accepts a checkout JWT from an ACTIVE or RETIRED-but-not-after merchant kid, per Gate check 5 in spec 8.10. Test: apps/vi/tests/test_checkout_jwt.py."
     },
     {
       "id": "EC-KEY-4",

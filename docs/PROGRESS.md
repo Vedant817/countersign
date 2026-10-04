@@ -22,7 +22,7 @@ Legend for lanes: **A** platform/CI/docs · **B** crypto/Gate/verifier · **C** 
 | WP-00 | Repo scaffold, CI, Render blueprint, AGENTS.md | A | n/a | 3h | wip | | AT-WP00 |
 | WP-01 | `packages/core` — ids, money, errors, clock | A | 00 | 3h | done | `chore: add Countersign spec`+ (see git log) | AT-M1 ✅ 86 tests |
 | WP-02 | `packages/db` — schema + migrations + seed | A | 01 | 4h | todo | | AT-M2 |
-| WP-03 | `apps/vi` — vi-service (Python FastAPI) | B | 00 | 8h | todo | | AT-M3 |
+| WP-03 | `apps/vi` — vi-service (Python FastAPI) | B | 00 | 8h | done | _(this commit)_ | AT-M3 ✅ 181 tests |
 | WP-04 | `packages/vi-client` | B | 01, 03 | 2h | todo | | AT-M4 |
 | WP-05 | Browser keystore + WebAuthn step-up | B | 04 | 5h | todo | | AT-M5 · **C3(a)** |
 | WP-06 | `packages/paypal` — typed REST client | C | 01 | 10h | todo | | AT-M6 |
@@ -79,3 +79,9 @@ Legend for lanes: **A** platform/CI/docs · **B** crypto/Gate/verifier · **C** 
   the pinned VI commit `356c29635f1c44df7de02edb58699ca9f29bece6` confirmed on GitHub (see
   DECISIONS D-003). **WP-01 `packages/core` complete**: 86 tests green, lint + typecheck clean,
   11 of 109 edge cases now have a referencing test.
+- **2026-10-04** — **WP-02 `packages/db` complete** (26 tables, 27 enums, 16 CHECK constraints,
+  17 unique indexes, migrations committed, 64 tests). **WP-03 `apps/vi` complete** (181 pytest tests,
+  all eleven AT-M3 acceptance tests). Both raise findings recorded in DECISIONS D-007…D-011; the
+  most consequential is that the pinned VI library's `verify_chain` has no clock override, so
+  EC-TIME-3 is flagged `blocked` rather than faked (HUMAN_TODO H-08 asks upstream).
+  24 of 109 edge cases now have a referencing test.

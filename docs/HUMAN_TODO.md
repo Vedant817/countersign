@@ -113,6 +113,34 @@ one, it will add the exact request to the top of this file and continue with eve
 
 ---
 
+## H-08 — Ask upstream Verifiable Intent for a clock override on `verify_chain`
+
+**Blocks:** full closure of **EC-TIME-3** (verify "as of capture time"). Everything else proceeds.
+
+The Dispute Defender is supposed to re-verify a chain **as it stood at capture time**, not only now,
+because a mandate that expired after the purchase must still be evidence that the purchase was
+authorised. At the pinned commit `verify_chain` hardcodes `now = int(time.time())` with no parameter
+to override it, so this cannot be done honestly today.
+
+Our service therefore returns the real verdict **at `now`** plus
+`at_time_not_honoured: true` and the reason, rather than fabricating an as-of answer — see
+`docs/DECISIONS.md` D-009. We would rather ship a flagged gap than an unverifiable claim in a packet
+we file with PayPal.
+
+**What to ask for** (Discord / an issue on
+<https://github.com/agent-intent/verifiable-intent>):
+
+> `verify_chain` needs an optional `at_time: int | None = None` parameter that replaces
+> `now = int(time.time())` when computing `exp` / `iat` validity, passed through to
+> `_is_expired` and `_is_future_dated`. Without it a signed chain cannot be verified as of a past
+> moment, which blocks dispute evidence for mandates that expired after the purchase.
+
+**Interim behaviour if upstream says no or does not respond:** keep the flag, show it in the S-18
+Defender workspace as "verified now; as-of-capture verification unavailable with the pinned library",
+and say so in the README's honest-limits section. No code change needed — only copy.
+
+---
+
 ## Not blocked, tracking anyway
 
 - Vault "Save without purchase" JS SDK v6 needs a real browser popup (Playwright, Chromium) — an
