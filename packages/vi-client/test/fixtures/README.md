@@ -8,13 +8,13 @@ A **transport** double: it replaces `fetch` and nothing else. The client under t
 header assembly, real URL building, real retry loop, real backoff and real zod validation.
 
 Every response body in it is transcribed from `apps/vi/src/vi_service/models.py`, and each one cites
-the pydantic class it came from. Nothing about vi's *behaviour* is asserted here — "does a wrong
+the pydantic class it came from. Nothing about vi's _behaviour_ is asserted here — "does a wrong
 browser signature really produce `VI_SIGNATURE_MISMATCH`" is a claim about the service and about the
 library, and it belongs in `apps/vi`'s own 181 pytest tests and in this package's contract suite
 (`*.contract.test.ts`), not here.
 
 AGENTS.md engineering rule 5 ("never fake PayPal behaviour") is about PayPal, and vi is not PayPal —
-so the constraint is different in kind. The real risk for *this* package is not a fake service but a
+so the constraint is different in kind. The real risk for _this_ package is not a fake service but a
 **fake schema**: a response shape invented here that the service does not actually send would let a
 schema-drift check pass while the client was wrong. That is why the drift fixture below exists and why
 the shapes here are transcribed with a citation rather than written from memory.

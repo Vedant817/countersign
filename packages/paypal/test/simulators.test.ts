@@ -63,7 +63,9 @@ describe('createBuyerDispute (§10.2 #18, report §1/#1)', () => {
   it('POSTs multipart/form-data with one `input` part — not a JSON body', async () => {
     // `transaction_id` / `dispute_reason` as JSON were both wrong: the endpoint is
     // `multipart/form-data` and is not in `SPEC-D` at all. `TGL` is the only source.
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.sandbox.createBuyerDispute(BUYER_EMAIL, {
       disputed_transactions: [{ buyer_transaction_id: CAPTURE_ID }],
       reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
@@ -88,7 +90,9 @@ describe('createBuyerDispute (§10.2 #18, report §1/#1)', () => {
   })
 
   it('never sends the invented `transaction_id` or `dispute_reason` names', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     await client.sandbox.createBuyerDispute(BUYER_EMAIL, {
       disputed_transactions: [{ buyer_transaction_id: CAPTURE_ID }],
       reason: 'UNAUTHORISED',
@@ -103,7 +107,9 @@ describe('createBuyerDispute (§10.2 #18, report §1/#1)', () => {
   })
 
   it('carries `extensions` when the caller supplies it', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     await client.sandbox.createBuyerDispute(BUYER_EMAIL, {
       disputed_transactions: [{ buyer_transaction_id: CAPTURE_ID }],
       reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
@@ -113,7 +119,9 @@ describe('createBuyerDispute (§10.2 #18, report §1/#1)', () => {
         merchandise_dispute_properties: { issue_type: 'PRODUCT' },
       },
     })
-    const input = JSON.parse(await partText(formParts(callTo(fetchImpl.calls, '/v1/customer/disputes'))[0]!.value))
+    const input = JSON.parse(
+      await partText(formParts(callTo(fetchImpl.calls, '/v1/customer/disputes'))[0]!.value),
+    )
     expect(input.extensions).toEqual({
       merchant_contacted: true,
       merchant_contacted_outcome: 'NO_RESPONSE',
@@ -122,12 +130,17 @@ describe('createBuyerDispute (§10.2 #18, report §1/#1)', () => {
   })
 
   it('sends the unsigned PayPal-Auth-Assertion, header included in `typ: JWT`', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     await client.sandbox.createBuyerDispute(BUYER_EMAIL, {
       disputed_transactions: [{ buyer_transaction_id: CAPTURE_ID }],
       reason: 'UNAUTHORISED',
     })
-    const assertion = headerOf(callTo(fetchImpl.calls, '/v1/customer/disputes'), 'paypal-auth-assertion')
+    const assertion = headerOf(
+      callTo(fetchImpl.calls, '/v1/customer/disputes'),
+      'paypal-auth-assertion',
+    )
     expect(assertion).toBeDefined()
     const parsed = parseUnsignedAuthAssertion(assertion ?? '')
     expect(parsed.ok).toBe(true)
@@ -214,7 +227,10 @@ describe('processChargeback (§10.2 #18, report §27/#2)', () => {
   it('refuses to build a body with no merchant id, amount or seller transaction', async () => {
     const { client, fetchImpl } = makeClient(tokenResponse())
     const noMerchant = await client.sandbox.processChargeback({ ...chargeback(), merchantId: '  ' })
-    const noTxn = await client.sandbox.processChargeback({ ...chargeback(), sellerTransactionId: '' })
+    const noTxn = await client.sandbox.processChargeback({
+      ...chargeback(),
+      sellerTransactionId: '',
+    })
     const noAmount = await client.sandbox.processChargeback({
       ...chargeback(),
       // @ts-expect-error amount is required: PayPal documents transaction.amount.
@@ -242,7 +258,9 @@ describe('processChargeback (§10.2 #18, report §27/#2)', () => {
 
 describe('changeReason (§10.2 #18, report §30/#13)', () => {
   it('sends {reason, note, item_info[]} in an `input` part, not a bare JSON body', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.sandbox.changeReason(DISPUTE_ID, {
       reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
       note: 'Product is not as advertised',
@@ -286,7 +304,9 @@ describe('changeReason (§10.2 #18, report §30/#13)', () => {
 
 describe('acceptOffer / denyOffer (report §30/#12)', () => {
   it('sends {note}, never the invented {payer_note}', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.sandbox.acceptOffer(DISPUTE_ID, 'I am ok with the refund offered.')
     expect(result.ok).toBe(true)
     const body = jsonBody<Record<string, unknown>>(callTo(fetchImpl.calls, '/accept-offer'))
@@ -313,7 +333,9 @@ describe('acceptOffer / denyOffer (report §30/#12)', () => {
   })
 
   it('denyOffer still sends {note}, which was already correct', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.sandbox.denyOffer(DISPUTE_ID, 'refund offer is very low.')
     expect(result.ok).toBe(true)
     expect(jsonBody<Record<string, unknown>>(callTo(fetchImpl.calls, '/deny-offer'))).toEqual({
@@ -326,16 +348,24 @@ describe('requireEvidence and adjudicate (§10.2 #18, report §28/§29)', () => 
   it('requireEvidence sends {action} and adjudicate {adjudication_outcome}', async () => {
     // Verified against SPEC-D and TGL: `action` is BUYER_EVIDENCE | SELLER_EVIDENCE and
     // `adjudication_outcome` is BUYER_FAVOR | SELLER_FAVOR, both plain JSON bodies.
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     expect((await client.sandbox.requireEvidence(DISPUTE_ID, 'SELLER_EVIDENCE')).ok).toBe(true)
     expect((await client.sandbox.adjudicate(DISPUTE_ID, 'SELLER_FAVOR')).ok).toBe(true)
-    expect(jsonBody(callTo(fetchImpl.calls, '/require-evidence'))).toEqual({ action: 'SELLER_EVIDENCE' })
-    expect(jsonBody(callTo(fetchImpl.calls, '/adjudicate'))).toEqual({ adjudication_outcome: 'SELLER_FAVOR' })
+    expect(jsonBody(callTo(fetchImpl.calls, '/require-evidence'))).toEqual({
+      action: 'SELLER_EVIDENCE',
+    })
+    expect(jsonBody(callTo(fetchImpl.calls, '/adjudicate'))).toEqual({
+      adjudication_outcome: 'SELLER_FAVOR',
+    })
   })
 
   it('refuses an action or outcome outside the documented enums', async () => {
     const { client, fetchImpl } = makeClient(tokenResponse())
-    expect((await client.sandbox.requireEvidence(DISPUTE_ID, 'NOPE' as 'SELLER_EVIDENCE')).ok).toBe(false)
+    expect((await client.sandbox.requireEvidence(DISPUTE_ID, 'NOPE' as 'SELLER_EVIDENCE')).ok).toBe(
+      false,
+    )
     expect((await client.sandbox.adjudicate(DISPUTE_ID, 'NOPE' as 'SELLER_FAVOR')).ok).toBe(false)
     expect(fetchImpl.calls).toHaveLength(0)
   })

@@ -202,8 +202,14 @@ export const ENDPOINT_POLICIES: Readonly<Record<string, EndpointPolicy>> = {
   'POST /v2/checkout/orders/{id}/track': { retry: 'same-request-id', sendRequestId: false },
 
   // --- payments v2 [B14] ---
-  'POST /v2/payments/authorizations/{id}/capture': { retry: 'same-request-id', sendRequestId: true },
-  'POST /v2/payments/authorizations/{id}/reauthorize': { retry: 'same-request-id', sendRequestId: true },
+  'POST /v2/payments/authorizations/{id}/capture': {
+    retry: 'same-request-id',
+    sendRequestId: true,
+  },
+  'POST /v2/payments/authorizations/{id}/reauthorize': {
+    retry: 'same-request-id',
+    sendRequestId: true,
+  },
   'POST /v2/payments/authorizations/{id}/void': { retry: 'same-request-id', sendRequestId: true },
   'GET /v2/payments/authorizations/{id}': { retry: 'same-request-id', sendRequestId: false },
   'GET /v2/payments/captures/{id}': { retry: 'same-request-id', sendRequestId: false },
@@ -221,28 +227,58 @@ export const ENDPOINT_POLICIES: Readonly<Record<string, EndpointPolicy>> = {
   //     because §8.15/§8.16 mandate one for the filing call. ---
   'GET /v1/customer/disputes': { retry: 'same-request-id', sendRequestId: false },
   'GET /v1/customer/disputes/{id}': { retry: 'same-request-id', sendRequestId: false },
-  'POST /v1/customer/disputes/{id}/provide-evidence': { retry: 're-read-required', sendRequestId: true },
-  'POST /v1/customer/disputes/{id}/accept-claim': { retry: 're-read-required', sendRequestId: true },
+  'POST /v1/customer/disputes/{id}/provide-evidence': {
+    retry: 're-read-required',
+    sendRequestId: true,
+  },
+  'POST /v1/customer/disputes/{id}/accept-claim': {
+    retry: 're-read-required',
+    sendRequestId: true,
+  },
   'POST /v1/customer/disputes/{id}/make-offer': { retry: 're-read-required', sendRequestId: true },
-  'POST /v1/customer/disputes/{id}/send-message': { retry: 're-read-required', sendRequestId: true },
+  'POST /v1/customer/disputes/{id}/send-message': {
+    retry: 're-read-required',
+    sendRequestId: true,
+  },
   'POST /v1/customer/disputes/{id}/appeal': { retry: 're-read-required', sendRequestId: true },
-  'POST /v1/customer/disputes/{id}/acknowledge-return-item': { retry: 're-read-required', sendRequestId: true },
-  'POST /v1/customer/disputes/{id}/provide-supporting-info': { retry: 're-read-required', sendRequestId: true },
+  'POST /v1/customer/disputes/{id}/acknowledge-return-item': {
+    retry: 're-read-required',
+    sendRequestId: true,
+  },
+  'POST /v1/customer/disputes/{id}/provide-supporting-info': {
+    retry: 're-read-required',
+    sendRequestId: true,
+  },
   'POST /v1/customer/disputes/{id}/escalate': { retry: 're-read-required', sendRequestId: true },
 
   // --- notifications [V14] ---
   // Signature verification has no side effects, so retrying it is harmless. It is also on the
   // webhook hot path where EC-PP-5 (slow verify) says respond 200 and verify afterwards.
-  'POST /v1/notifications/verify-webhook-signature': { retry: 'same-request-id', sendRequestId: false },
+  'POST /v1/notifications/verify-webhook-signature': {
+    retry: 'same-request-id',
+    sendRequestId: false,
+  },
 
   // --- sandbox-only simulators [S29]: no `paypal_request_id` documented anywhere, and unreachable
   //     outside a sandbox env ---
   'POST /v1/customer/disputes': { retry: 're-read-required', sendRequestId: false },
-  'POST /v2/customer-support/process-chargeback': { retry: 're-read-required', sendRequestId: false },
-  'POST /v1/customer/disputes/{id}/require-evidence': { retry: 're-read-required', sendRequestId: false },
+  'POST /v2/customer-support/process-chargeback': {
+    retry: 're-read-required',
+    sendRequestId: false,
+  },
+  'POST /v1/customer/disputes/{id}/require-evidence': {
+    retry: 're-read-required',
+    sendRequestId: false,
+  },
   'POST /v1/customer/disputes/{id}/adjudicate': { retry: 're-read-required', sendRequestId: false },
-  'POST /v1/customer/disputes/{id}/change-reason': { retry: 're-read-required', sendRequestId: false },
-  'POST /v1/customer/disputes/{id}/accept-offer': { retry: 're-read-required', sendRequestId: false },
+  'POST /v1/customer/disputes/{id}/change-reason': {
+    retry: 're-read-required',
+    sendRequestId: false,
+  },
+  'POST /v1/customer/disputes/{id}/accept-offer': {
+    retry: 're-read-required',
+    sendRequestId: false,
+  },
   'POST /v1/customer/disputes/{id}/deny-offer': { retry: 're-read-required', sendRequestId: false },
 } as const
 
@@ -488,7 +524,10 @@ export class PayPalClient {
     })
   }
 
-  async createPaymentToken(setupTokenId: string, o?: CallOpts): Promise<Result<PaymentToken, CsError>> {
+  async createPaymentToken(
+    setupTokenId: string,
+    o?: CallOpts,
+  ): Promise<Result<PaymentToken, CsError>> {
     if (typeof setupTokenId !== 'string' || setupTokenId.trim() === '') {
       return err(csError('CS_VALIDATION', 'createPaymentToken needs a setupTokenId'))
     }
@@ -530,7 +569,10 @@ export class PayPalClient {
   // Orders v2 (§10.2 #5-8)
   // -------------------------------------------------------------------------
 
-  async createOrder(body: CreateOrderReq, o: CallOpts & { requestId: string }): Promise<Result<Order, CsError>> {
+  async createOrder(
+    body: CreateOrderReq,
+    o: CallOpts & { requestId: string },
+  ): Promise<Result<Order, CsError>> {
     const parsed = this.parseBody(createOrderReqSchema, body, 'createOrder')
     if (!parsed.ok) return parsed
     const bad = this.requireRequestId(o, 'createOrder')
@@ -556,7 +598,10 @@ export class PayPalClient {
     })
   }
 
-  async authorizeOrder(id: string, o: CallOpts & { requestId: string }): Promise<Result<Order, CsError>> {
+  async authorizeOrder(
+    id: string,
+    o: CallOpts & { requestId: string },
+  ): Promise<Result<Order, CsError>> {
     const bad = this.requireId(id, 'authorizeOrder')
     if (bad) return err(bad)
     const badId = this.requireRequestId(o, 'authorizeOrder')
@@ -571,7 +616,10 @@ export class PayPalClient {
     })
   }
 
-  async captureOrder(id: string, o: CallOpts & { requestId: string }): Promise<Result<Order, CsError>> {
+  async captureOrder(
+    id: string,
+    o: CallOpts & { requestId: string },
+  ): Promise<Result<Order, CsError>> {
     const bad = this.requireId(id, 'captureOrder')
     if (bad) return err(bad)
     const badId = this.requireRequestId(o, 'captureOrder')
@@ -655,7 +703,10 @@ export class PayPalClient {
   }
 
   /** §10.2 #9: release the remainder of an authorization (EC-STOCK-1). 204 No Content. */
-  async voidAuthorization(authId: string, o: CallOpts & { requestId: string }): Promise<Result<void, CsError>> {
+  async voidAuthorization(
+    authId: string,
+    o: CallOpts & { requestId: string },
+  ): Promise<Result<void, CsError>> {
     const bad = this.requireId(authId, 'voidAuthorization')
     if (bad) return err(bad)
     const badId = this.requireRequestId(o, 'voidAuthorization')
@@ -784,7 +835,11 @@ export class PayPalClient {
     })
   }
 
-  async acceptClaim(id: string, body: AcceptClaimReq, o: CallOpts = {}): Promise<Result<Links, CsError>> {
+  async acceptClaim(
+    id: string,
+    body: AcceptClaimReq,
+    o: CallOpts = {},
+  ): Promise<Result<Links, CsError>> {
     const bad = this.requireId(id, 'acceptClaim')
     if (bad) return err(bad)
     const parsed = this.parseBody(acceptClaimReqSchema, body, 'acceptClaim')
@@ -799,7 +854,11 @@ export class PayPalClient {
     })
   }
 
-  async makeOffer(id: string, body: MakeOfferReq, o: CallOpts = {}): Promise<Result<Links, CsError>> {
+  async makeOffer(
+    id: string,
+    body: MakeOfferReq,
+    o: CallOpts = {},
+  ): Promise<Result<Links, CsError>> {
     const bad = this.requireId(id, 'makeOffer')
     if (bad) return err(bad)
     const parsed = this.parseBody(makeOfferReqSchema, body, 'makeOffer')
@@ -814,7 +873,11 @@ export class PayPalClient {
     })
   }
 
-  async sendMessage(id: string, message: string, o: CallOpts = {}): Promise<Result<Links, CsError>> {
+  async sendMessage(
+    id: string,
+    message: string,
+    o: CallOpts = {},
+  ): Promise<Result<Links, CsError>> {
     const bad = this.requireId(id, 'sendMessage')
     if (bad) return err(bad)
     if (typeof message !== 'string' || message.trim() === '') {
@@ -869,12 +932,16 @@ export class PayPalClient {
     if (!current.ok) return current
     if (!isAppealable(current.value)) {
       return err(
-        csError('CS_VALIDATION', `Dispute ${id} cannot be appealed: PayPal did not offer the "appeal" link`, {
-          dispute_id: current.value.dispute_id,
-          dispute_state: current.value.dispute_state,
-          // The caller needs the deadline, not just a refusal: an appealable window is time-limited.
-          seller_response_due_date: current.value.seller_response_due_date,
-        }),
+        csError(
+          'CS_VALIDATION',
+          `Dispute ${id} cannot be appealed: PayPal did not offer the "appeal" link`,
+          {
+            dispute_id: current.value.dispute_id,
+            dispute_state: current.value.dispute_state,
+            // The caller needs the deadline, not just a refusal: an appealable window is time-limited.
+            seller_response_due_date: current.value.seller_response_due_date,
+          },
+        ),
       )
     }
 
@@ -888,7 +955,11 @@ export class PayPalClient {
     })
   }
 
-  async acknowledgeReturnItem(id: string, body: AckReturnReq, o: CallOpts = {}): Promise<Result<Links, CsError>> {
+  async acknowledgeReturnItem(
+    id: string,
+    body: AckReturnReq,
+    o: CallOpts = {},
+  ): Promise<Result<Links, CsError>> {
     const bad = this.requireId(id, 'acknowledgeReturnItem')
     if (bad) return err(bad)
     const parsed = this.parseBody(ackReturnReqSchema, body, 'acknowledgeReturnItem')
@@ -1083,7 +1154,9 @@ export class PayPalClient {
     const debugId = extractDebugId(response.headers)
     const text = await safeText(response)
     const contentType = headerValue(response.headers, 'content-type') ?? ''
-    const body_ = contentType.includes('json') ? (parseJson(text) as PayPalErrorBody | undefined) : undefined
+    const body_ = contentType.includes('json')
+      ? (parseJson(text) as PayPalErrorBody | undefined)
+      : undefined
     const retryAfterHeader = headerValue(response.headers, 'retry-after')
 
     // §8.6 "Always log paypal-debug-id": on success as much as on failure.
@@ -1129,7 +1202,9 @@ export class PayPalClient {
           {
             status: response.status,
             paypal_debug_id: debugId,
-            issues: checked.error.issues.slice(0, 8).map((i) => ({ path: i.path.join('.'), message: i.message })),
+            issues: checked.error.issues
+              .slice(0, 8)
+              .map((i) => ({ path: i.path.join('.'), message: i.message })),
             body_keys: typeof value === 'object' && value !== null ? Object.keys(value) : undefined,
           },
         ),
@@ -1200,7 +1275,10 @@ export class PayPalClient {
    * network error, 5xx). A 429 is **not** unreachable — PayPal is up and asking us to slow down, so it
    * must not count toward the outage that opens the circuit breaker.
    */
-  private async attemptBudgetLoop<T>(call: TransportCall<T>, policy: EndpointPolicy): Promise<AttemptOutcome<T>> {
+  private async attemptBudgetLoop<T>(
+    call: TransportCall<T>,
+    policy: EndpointPolicy,
+  ): Promise<AttemptOutcome<T>> {
     let lastError: CsError = csError('CS_INTERNAL', 'no attempt was made')
     let unreachable = false
 
@@ -1214,26 +1292,42 @@ export class PayPalClient {
       const status = numericDetail(lastError, 'status')
 
       if (!lastError.retryable || attempt >= this.maxAttempts || policy.retry === 'never') {
-        return { ok: false, error: lastError, unreachable, ...(status !== undefined ? { status } : {}) }
+        return {
+          ok: false,
+          error: lastError,
+          unreachable,
+          ...(status !== undefined ? { status } : {}),
+        }
       }
 
       // EC-IDEM-3. An ambiguous failure on an endpoint whose idempotency support is unverified must
       // not be retried blindly: the caller re-reads the resource (GET order/capture/dispute) and
       // decides. A 429 is exempt — the request was refused, not executed.
       const ambiguous = lastError.details?.['ambiguous'] === true
-      if (policy.retry === 're-read-required' && ambiguous && lastError.code !== 'PP_RATE_LIMITED') {
+      if (
+        policy.retry === 're-read-required' &&
+        ambiguous &&
+        lastError.code !== 'PP_RATE_LIMITED'
+      ) {
         this.log.warn('not auto-retrying an ambiguous failure on a non-idempotent endpoint', {
           path: call.path,
           policy_key: call.policyKey,
           code: lastError.code,
         })
-        return { ok: false, error: lastError, unreachable, ...(status !== undefined ? { status } : {}) }
+        return {
+          ok: false,
+          error: lastError,
+          unreachable,
+          ...(status !== undefined ? { status } : {}),
+        }
       }
 
       // `Retry-After` is honoured as a floor: with `Retry-After: 2` we wait at least 2 000 ms even if
       // the jitter drew 3 ms (AT-M6.3).
       const retryAfterMs = parseRetryAfter(
-        typeof lastError.details?.['retry_after'] === 'string' ? lastError.details['retry_after'] : undefined,
+        typeof lastError.details?.['retry_after'] === 'string'
+          ? lastError.details['retry_after']
+          : undefined,
         this.clock.nowMs(),
       )
       const delay = nextDelayMs({ attempt, retryAfterMs, cfg: this.backoff })
@@ -1283,13 +1377,19 @@ export class PayPalClient {
   }
 
   /** Validate a request body before it becomes a network call. */
-  private parseBody<S extends z.ZodType>(schema: S, value: unknown, method: string): Result<z.output<S>, CsError> {
+  private parseBody<S extends z.ZodType>(
+    schema: S,
+    value: unknown,
+    method: string,
+  ): Result<z.output<S>, CsError> {
     const parsed = schema.safeParse(value)
     if (parsed.success) return ok(parsed.data)
     return err(
       csError('CS_VALIDATION', `${method} received a body that does not match the PayPal schema`, {
         method,
-        issues: parsed.error.issues.slice(0, 8).map((i) => ({ path: i.path.join('.'), message: i.message })),
+        issues: parsed.error.issues
+          .slice(0, 8)
+          .map((i) => ({ path: i.path.join('.'), message: i.message })),
       }),
     )
   }
@@ -1303,12 +1403,17 @@ function validateClientOpts(opts: PayPalClientOpts): CsError | null {
   const missing: string[] = []
   if (typeof opts?.baseUrl !== 'string' || opts.baseUrl.trim() === '') missing.push('baseUrl')
   if (typeof opts?.clientId !== 'string' || opts.clientId.trim() === '') missing.push('clientId')
-  if (typeof opts?.clientSecret !== 'string' || opts.clientSecret.trim() === '') missing.push('clientSecret')
+  if (typeof opts?.clientSecret !== 'string' || opts.clientSecret.trim() === '')
+    missing.push('clientSecret')
   if (!opts?.clock || typeof opts.clock.nowMs !== 'function') missing.push('clock')
   if (missing.length > 0) {
-    return csError('CS_VALIDATION', `PayPalClient is missing required options: ${missing.join(', ')}`, {
-      missing,
-    })
+    return csError(
+      'CS_VALIDATION',
+      `PayPalClient is missing required options: ${missing.join(', ')}`,
+      {
+        missing,
+      },
+    )
   }
   try {
     new URL(opts.baseUrl)
@@ -1320,7 +1425,9 @@ function validateClientOpts(opts: PayPalClientOpts): CsError | null {
 
 /** `?a=1&b=2`, skipping undefined. Keys are sorted so a request URL is reproducible in a test. */
 export function toQueryString(params: Record<string, unknown>): string {
-  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  const entries = Object.entries(params).filter(
+    ([, v]) => v !== undefined && v !== null && v !== '',
+  )
   if (entries.length === 0) return ''
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   const search = new URLSearchParams()
@@ -1368,9 +1475,14 @@ function coerceWebhookEvent(raw: unknown): Result<unknown, CsError> {
       return ok(JSON.parse(raw) as unknown)
     } catch (e) {
       return err(
-        csError('CS_VALIDATION', 'The webhook body is not valid JSON, so it cannot be verified', undefined, {
-          cause: e,
-        }),
+        csError(
+          'CS_VALIDATION',
+          'The webhook body is not valid JSON, so it cannot be verified',
+          undefined,
+          {
+            cause: e,
+          },
+        ),
       )
     }
   }

@@ -69,7 +69,7 @@ for (const name of packages) {
 
 for (const app of ['worker']) {
   const dir = join(ROOT, 'apps', app)
-  writeFileSync(join(dir, 'vitest.config.ts'), pkgVitest(app).replaceAll("../../", "../../"))
+  writeFileSync(join(dir, 'vitest.config.ts'), pkgVitest(app).replaceAll('../../', '../../'))
   writeFileSync(join(dir, 'tsconfig.json'), tsconfig(2))
   writeFileSync(join(dir, 'tsconfig.build.json'), tsconfigBuild(2))
 }

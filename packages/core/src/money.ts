@@ -54,7 +54,9 @@ export function currency(value: unknown): Currency {
 export function money(minor: bigint | number | string, cur: Currency): Money {
   const m = typeof minor === 'bigint' ? minor : BigInt(minor)
   if (m < 0n) {
-    throw csError('CS_VALIDATION', 'Money cannot be negative in a Money value', { minor: String(m) })
+    throw csError('CS_VALIDATION', 'Money cannot be negative in a Money value', {
+      minor: String(m),
+    })
   }
   return { minor: m, currency: cur }
 }
@@ -127,12 +129,19 @@ export function max(a: Money, b: Money): Money {
  * A finite upper bound check that returns a reason instead of throwing.
  * The Gate needs "and *why*", so it uses this rather than comparing bigints inline.
  */
-export function exceedsCap(a: Money, cap: Money): { ok: true } | { ok: false; over: Money; code: CsErrorCode } {
+export function exceedsCap(
+  a: Money,
+  cap: Money,
+): { ok: true } | { ok: false; over: Money; code: CsErrorCode } {
   if (a.currency !== cap.currency) {
     return { ok: false, over: a, code: 'CS_CURRENCY_MISMATCH' }
   }
   if (a.minor > cap.minor) {
-    return { ok: false, over: { minor: a.minor - cap.minor, currency: a.currency }, code: 'GATE_BUDGET_EXCEEDED' }
+    return {
+      ok: false,
+      over: { minor: a.minor - cap.minor, currency: a.currency },
+      code: 'GATE_BUDGET_EXCEEDED',
+    }
   }
   return { ok: true }
 }
@@ -244,7 +253,8 @@ export function allocate(total: Money, weights: readonly bigint[]): Money[] {
     throw csError('CS_VALIDATION', 'allocate needs at least one weight')
   }
   for (const w of weights) {
-    if (w < 0n) throw csError('CS_VALIDATION', 'allocate weights must be non-negative', { weight: String(w) })
+    if (w < 0n)
+      throw csError('CS_VALIDATION', 'allocate weights must be non-negative', { weight: String(w) })
   }
   const sumWeights = weights.reduce((a, b) => a + b, 0n)
   if (sumWeights === 0n) {
@@ -314,7 +324,8 @@ export function allocateWithRemainderLast(total: Money, weights: readonly bigint
     throw csError('CS_VALIDATION', 'allocateWithRemainderLast needs at least one weight')
   }
   for (const w of weights) {
-    if (w < 0n) throw csError('CS_VALIDATION', 'allocate weights must be non-negative', { weight: String(w) })
+    if (w < 0n)
+      throw csError('CS_VALIDATION', 'allocate weights must be non-negative', { weight: String(w) })
   }
   const W = weights.reduce((a, b) => a + b, 0n)
   if (W === 0n) {
@@ -332,12 +343,15 @@ export function allocateWithRemainderLast(total: Money, weights: readonly bigint
 }
 
 /** Ratio check: does `amount` fall inside `[min, max]`? Used by the Gate's amount-range check. */
-export function withinRange(amount: Money, range: { currency: Currency; min?: number; max?: number }):
-  | { ok: true }
-  | { ok: false; reason: 'CURRENCY' | 'BELOW_MIN' | 'ABOVE_MAX' } {
+export function withinRange(
+  amount: Money,
+  range: { currency: Currency; min?: number; max?: number },
+): { ok: true } | { ok: false; reason: 'CURRENCY' | 'BELOW_MIN' | 'ABOVE_MAX' } {
   if (amount.currency !== range.currency) return { ok: false, reason: 'CURRENCY' }
-  if (range.min !== undefined && amount.minor < BigInt(range.min)) return { ok: false, reason: 'BELOW_MIN' }
-  if (range.max !== undefined && amount.minor > BigInt(range.max)) return { ok: false, reason: 'ABOVE_MAX' }
+  if (range.min !== undefined && amount.minor < BigInt(range.min))
+    return { ok: false, reason: 'BELOW_MIN' }
+  if (range.max !== undefined && amount.minor > BigInt(range.max))
+    return { ok: false, reason: 'ABOVE_MAX' }
   return { ok: true }
 }
 
@@ -351,6 +365,9 @@ export function withinRange(amount: Money, range: { currency: Currency; min?: nu
  * already gone and the only honest response is to refuse.
  */
 export function parseMoneyInput(raw: string, cur: Currency): Money {
-  const cleaned = raw.trim().replace(/^[^\d.-]+/, '').replace(/,/g, '')
+  const cleaned = raw
+    .trim()
+    .replace(/^[^\d.-]+/, '')
+    .replace(/,/g, '')
   return fromPayPalValue(cleaned, cur)
 }

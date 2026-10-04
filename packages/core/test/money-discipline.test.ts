@@ -27,7 +27,10 @@ function runChecker(files: Record<string, string>): string {
       writeFileSync(join(src, name), body, 'utf8')
     }
     try {
-      return execFileSync(process.execPath, [CHECKER, '--root', dir], { encoding: 'utf8', stdio: 'pipe' })
+      return execFileSync(process.execPath, [CHECKER, '--root', dir], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+      })
     } catch (e) {
       // The checker exits 1 on violations and prints the report to stderr.
       return `${(e as { stdout?: string }).stdout ?? ''}${(e as { stderr?: string }).stderr ?? ''}`
@@ -84,7 +87,8 @@ describe('check-money-discipline.mjs', () => {
 
   it('exempts tests and scripts, where writing 129.99 is the point', () => {
     const out = runChecker({
-      'money.test.ts': 'it("rejects 1.005", () => { expect(fromPayPalValue("1.005","USD")).toThrow() })',
+      'money.test.ts':
+        'it("rejects 1.005", () => { expect(fromPayPalValue("1.005","USD")).toThrow() })',
     })
     expect(out).toContain('clean')
   })

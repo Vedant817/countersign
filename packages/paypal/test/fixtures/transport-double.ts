@@ -41,7 +41,8 @@ export const DOC = {
   /** Customer Disputes v1. */
   disputes: 'https://developer.paypal.com/docs/api/customer-disputes/v1/',
   /** `provide-evidence` (the multipart upload). Cited by spec §10.2 #14. */
-  provideEvidence: 'https://developer.paypal.com/api/customer-disputes/v1/disputes-provide-evidence',
+  provideEvidence:
+    'https://developer.paypal.com/api/customer-disputes/v1/disputes-provide-evidence',
   /**
    * "Use Disputes API" — the only PayPal page with worked cURL for every seller dispute action, and
    * the source for the `{evidences:[…]}` input shape, the `file1` file field names and the
@@ -127,7 +128,9 @@ function toResponse(spec: FakeResponseSpec, index: number): Response {
   // PayPal sends the same id in the `PayPal-Debug-Id` header and in the body's `debug_id`. The double
   // mirrors that, so a test cannot accidentally assert on one while the other says something else.
   const bodyDebugId =
-    typeof spec.body === 'object' && spec.body !== null && typeof (spec.body as { debug_id?: unknown }).debug_id === 'string'
+    typeof spec.body === 'object' &&
+    spec.body !== null &&
+    typeof (spec.body as { debug_id?: unknown }).debug_id === 'string'
       ? (spec.body as { debug_id: string }).debug_id
       : undefined
   const headers = new Headers({
@@ -168,7 +171,8 @@ export function fakeFetch(responder: Stub): FetchDouble {
   const single = !queue && typeof responder !== 'function' ? (responder as FakeResponseSpec) : null
 
   const impl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     const record: RecordedCall = {
       index: calls.length,
       url,
@@ -181,7 +185,7 @@ export function fakeFetch(responder: Stub): FetchDouble {
 
     const spec = queue
       ? (queue[Math.min(calls.length - 1, queue.length - 1)] as FakeResponseSpec)
-      : single ?? (await (responder as Responder)(record))
+      : (single ?? (await (responder as Responder)(record)))
     return toResponse(spec, record.index)
   }
 
@@ -244,7 +248,9 @@ export function routedFetch(
  * PayPal documents `access_token`, `token_type`, `expires_in`, `scope` and `app_id`. `expires_in` is
  * seconds; the client caches for `expires_in - 60` (spec §8.6).
  */
-export function tokenResponse(overrides: { expiresIn?: number; token?: string } = {}): FakeResponseSpec {
+export function tokenResponse(
+  overrides: { expiresIn?: number; token?: string } = {},
+): FakeResponseSpec {
   return {
     status: 200,
     body: {
@@ -309,7 +315,11 @@ export function orderResponse(
       payer: {},
       create_time: '2026-10-04T12:00:00Z',
       links: [
-        { href: `https://api-m.sandbox.paypal.com/v2/checkout/orders/${id}`, rel: 'self', method: 'GET' },
+        {
+          href: `https://api-m.sandbox.paypal.com/v2/checkout/orders/${id}`,
+          rel: 'self',
+          method: 'GET',
+        },
         {
           href: `https://api-m.sandbox.paypal.com/v2/checkout/orders/${id}/capture`,
           rel: 'approve',
@@ -341,7 +351,13 @@ export function authorizationResponse(
       create_time: '2026-10-04T12:00:00Z',
       update_time: '2026-10-04T12:00:01Z',
       seller_protection: { status: 'ELIGIBLE', dispute_categories: ['ITEM_NOT_RECEIVED'] },
-      links: [{ href: `https://api-m.sandbox.paypal.com/v2/payments/authorizations/${id}`, rel: 'self', method: 'GET' }],
+      links: [
+        {
+          href: `https://api-m.sandbox.paypal.com/v2/payments/authorizations/${id}`,
+          rel: 'self',
+          method: 'GET',
+        },
+      ],
     },
   }
 }
@@ -352,7 +368,13 @@ export function authorizationResponse(
  * `final_capture` and `seller_receivable_breakdown` are the fields the receipt and EC-FX-2 read.
  */
 export function captureResponse(
-  overrides: { id?: string; status?: string; value?: string; finalCapture?: boolean; invoiceId?: string } = {},
+  overrides: {
+    id?: string
+    status?: string
+    value?: string
+    finalCapture?: boolean
+    invoiceId?: string
+  } = {},
 ): FakeResponseSpec {
   const id = overrides.id ?? '3C679366HH908993F'
   return {
@@ -373,7 +395,13 @@ export function captureResponse(
       },
       create_time: '2026-10-04T12:04:59Z',
       update_time: '2026-10-04T12:05:00Z',
-      links: [{ href: `https://api-m.sandbox.paypal.com/v2/payments/captures/${id}`, rel: 'self', method: 'GET' }],
+      links: [
+        {
+          href: `https://api-m.sandbox.paypal.com/v2/payments/captures/${id}`,
+          rel: 'self',
+          method: 'GET',
+        },
+      ],
     },
   }
 }
@@ -402,7 +430,13 @@ export function refundResponse(
       },
       create_time: '2026-10-04T12:09:59Z',
       update_time: '2026-10-04T12:10:00Z',
-      links: [{ href: `https://api-m.sandbox.paypal.com/v2/payments/refunds/${id}`, rel: 'self', method: 'GET' }],
+      links: [
+        {
+          href: `https://api-m.sandbox.paypal.com/v2/payments/refunds/${id}`,
+          rel: 'self',
+          method: 'GET',
+        },
+      ],
     },
   }
 }
@@ -422,7 +456,11 @@ export function setupTokenResponse(overrides: { id?: string } = {}): FakeRespons
       id,
       status: 'CREATED',
       payment_source: {
-        paypal: { usage_type: 'MERCHANT', usage_pattern: 'IMMEDIATE', experience_context: { return_url: 'x' } },
+        paypal: {
+          usage_type: 'MERCHANT',
+          usage_pattern: 'IMMEDIATE',
+          experience_context: { return_url: 'x' },
+        },
       },
       links: [
         {
@@ -430,7 +468,11 @@ export function setupTokenResponse(overrides: { id?: string } = {}): FakeRespons
           rel: 'approve',
           method: 'POST',
         },
-        { href: `https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/${id}`, rel: 'self', method: 'GET' },
+        {
+          href: `https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/${id}`,
+          rel: 'self',
+          method: 'GET',
+        },
       ],
     },
   }
@@ -467,7 +509,13 @@ export function paymentTokenResponse(
       },
       create_time: '2026-10-04T12:00:00Z',
       update_time: '2026-10-04T12:00:00Z',
-      links: [{ href: `https://api-m.sandbox.paypal.com/v3/vault/payment-tokens/${id}`, rel: 'self', method: 'GET' }],
+      links: [
+        {
+          href: `https://api-m.sandbox.paypal.com/v3/vault/payment-tokens/${id}`,
+          rel: 'self',
+          method: 'GET',
+        },
+      ],
     },
   }
 }
@@ -489,26 +537,29 @@ export function paymentTokenResponse(
  * `links` includes an `appeal` HATEOAS link unless `appealable: false`, because that link — not
  * `dispute_state` — is what determines whether the dispute may be appealed (report §9/#17).
  */
-export function disputeResponse(overrides: {
-  id?: string
-  status?: string
-  state?: string
-  reason?: string
-  stage?: string
-  sellerTransactionId?: string
-  buyerTransactionId?: string
-  dueDate?: string
-  /** One entry of `evidences[]`; `notes` is a single string, ≤ 2000 chars. */
-  notes?: string
-  appealable?: boolean
-} = {}): FakeResponseSpec {
+export function disputeResponse(
+  overrides: {
+    id?: string
+    status?: string
+    state?: string
+    reason?: string
+    stage?: string
+    sellerTransactionId?: string
+    buyerTransactionId?: string
+    dueDate?: string
+    /** One entry of `evidences[]`; `notes` is a single string, ≤ 2000 chars. */
+    notes?: string
+    appealable?: boolean
+  } = {},
+): FakeResponseSpec {
   const id = overrides.id ?? 'PP-D-2781AB12CD34'
   const base = `https://api-m.sandbox.paypal.com/v1/customer/disputes/${id}`
   const links: Record<string, unknown>[] = [
     { href: base, rel: 'self', method: 'GET' },
     { href: `${base}/provide-evidence`, rel: 'provide-evidence', method: 'POST' },
   ]
-  if (overrides.appealable !== false) links.push({ href: `${base}/appeal`, rel: 'appeal', method: 'POST' })
+  if (overrides.appealable !== false)
+    links.push({ href: `${base}/appeal`, rel: 'appeal', method: 'POST' })
   return {
     status: 200,
     body: {
@@ -540,7 +591,9 @@ export function disputeResponse(overrides: {
           evidence_type: 'PROOF_OF_FULFILLMENT',
           notes: overrides.notes ?? 'Shipped 1 Oct via UPS.',
           date: '2026-10-04T12:00:00Z',
-          evidence_info: { tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }] },
+          evidence_info: {
+            tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }],
+          },
           documents: [{ name: 'label.pdf', size: 1_024, type: 'application/pdf' }],
         },
       ],
@@ -566,10 +619,17 @@ export function disputeListResponse(count = 1): FakeResponseSpec {
   return {
     status: 200,
     body: {
-      items: Array.from({ length: count }, (_v, i) =>
-        (disputeResponse({ id: `PP-D-2781AB12CD3${i}` }).body as Record<string, unknown>),
+      items: Array.from(
+        { length: count },
+        (_v, i) => disputeResponse({ id: `PP-D-2781AB12CD3${i}` }).body as Record<string, unknown>,
       ),
-      links: [{ href: 'https://api-m.sandbox.paypal.com/v1/customer/disputes?page_size=10', rel: 'self', method: 'GET' }],
+      links: [
+        {
+          href: 'https://api-m.sandbox.paypal.com/v1/customer/disputes?page_size=10',
+          rel: 'self',
+          method: 'GET',
+        },
+      ],
     },
   }
 }
@@ -582,7 +642,9 @@ export function disputeListResponse(count = 1): FakeResponseSpec {
  * OpenAPI for this endpoint at all, so which of `dispute_id` / `id` is the real field is the sandbox
  * probe's answer; the response schema accepts both.
  */
-export function chargebackResponse(overrides: { disputeId?: string; status?: number } = {}): FakeResponseSpec {
+export function chargebackResponse(
+  overrides: { disputeId?: string; status?: number } = {},
+): FakeResponseSpec {
   const disputeId = overrides.disputeId ?? 'PP-CB-2781AB12CD34'
   return {
     status: overrides.status ?? 201,
@@ -611,7 +673,13 @@ export function linksResponse(rel = 'self'): FakeResponseSpec {
   return {
     status: 200,
     body: {
-      links: [{ href: 'https://api-m.sandbox.paypal.com/v1/customer/disputes/PP-D-2781AB12CD34', rel, method: 'GET' }],
+      links: [
+        {
+          href: 'https://api-m.sandbox.paypal.com/v1/customer/disputes/PP-D-2781AB12CD34',
+          rel,
+          method: 'GET',
+        },
+      ],
     },
   }
 }
@@ -633,8 +701,17 @@ export function paypalErrorResponse(
       name,
       message: description,
       debug_id: `DEBUG-${name}`,
-      details: issue === undefined ? [] : [{ issue, description, field: "/purchase_units/@reference_id=='default'" }],
-      links: [{ href: 'https://developer.paypal.com/docs/api/orders/v2/#error-UNPROCESSABLE_ENTITY', rel: 'information_link', method: 'GET' }],
+      details:
+        issue === undefined
+          ? []
+          : [{ issue, description, field: "/purchase_units/@reference_id=='default'" }],
+      links: [
+        {
+          href: 'https://developer.paypal.com/docs/api/orders/v2/#error-UNPROCESSABLE_ENTITY',
+          rel: 'information_link',
+          method: 'GET',
+        },
+      ],
     },
   }
 }
@@ -643,7 +720,10 @@ export function paypalErrorResponse(
 export function serviceUnavailableResponse(): FakeResponseSpec {
   // PayPal's edge sometimes returns an HTML error page rather than JSON. Both are handled, and this
   // one is the harder case, so the retry tests use it.
-  return { status: 503, text: '<html><head><title>503 Service Temporarily Unavailable</title></head></html>' }
+  return {
+    status: 503,
+    text: '<html><head><title>503 Service Temporarily Unavailable</title></head></html>',
+  }
 }
 
 /** 429 with `Retry-After`. Doc: {@link DOC.rateLimiting}. */
@@ -680,7 +760,9 @@ export function unauthorizedResponse(): FakeResponseSpec {
 }
 
 /** `verify-webhook-signature` response. Doc: {@link DOC.webhooks}. */
-export function verifyWebhookResponse(status: 'SUCCESS' | 'FAILURE' | 'SOMETHING_NEW' = 'SUCCESS'): FakeResponseSpec {
+export function verifyWebhookResponse(
+  status: 'SUCCESS' | 'FAILURE' | 'SOMETHING_NEW' = 'SUCCESS',
+): FakeResponseSpec {
   return { status: 200, body: { verification_status: status } }
 }
 
@@ -690,13 +772,15 @@ export function verifyWebhookResponse(status: 'SUCCESS' | 'FAILURE' | 'SOMETHING
  * `custom_id` is the evidence hash D18 stamps into PayPal's own records and `invoice_id` is our
  * `ord_…`. The amount is a **decimal string**, because that is PayPal's money shape — never a float.
  */
-export function createOrderTestDouble(overrides: {
-  intent?: 'CAPTURE' | 'AUTHORIZE'
-  value?: string
-  vaultId?: string
-  invoiceId?: string
-  customId?: string
-} = {}): {
+export function createOrderTestDouble(
+  overrides: {
+    intent?: 'CAPTURE' | 'AUTHORIZE'
+    value?: string
+    vaultId?: string
+    invoiceId?: string
+    customId?: string
+  } = {},
+): {
   intent: 'CAPTURE' | 'AUTHORIZE'
   purchase_units: {
     reference_id: string
@@ -798,7 +882,9 @@ export interface CapturingLogger {
  * (spec §8.6 "Logging"). The level defaults to `debug` deliberately: the success log lives at debug,
  * so a logger left at `info` would hide the very thing the requirement is about.
  */
-export function capturingLogger(level: 'debug' | 'info' | 'warn' | 'error' = 'debug'): CapturingLogger {
+export function capturingLogger(
+  level: 'debug' | 'info' | 'warn' | 'error' = 'debug',
+): CapturingLogger {
   const logs: CapturedLog[] = []
   return {
     level,
@@ -840,9 +926,13 @@ export function jsonBody<T = Record<string, unknown>>(call: RecordedCall): T {
 export type FormPartValue = string | Blob
 
 /** Every multipart field on a recorded call, as `{name, value, fileName}` triples. */
-export function formParts(call: RecordedCall): { name: string; value: FormPartValue; fileName?: string }[] {
+export function formParts(
+  call: RecordedCall,
+): { name: string; value: FormPartValue; fileName?: string }[] {
   if (!(call.body instanceof FormData)) {
-    throw new Error(`Expected a FormData body on ${call.method} ${call.url}, got ${typeof call.body}`)
+    throw new Error(
+      `Expected a FormData body on ${call.method} ${call.url}, got ${typeof call.body}`,
+    )
   }
   const out: { name: string; value: FormPartValue; fileName?: string }[] = []
   call.body.forEach((value, name) => {

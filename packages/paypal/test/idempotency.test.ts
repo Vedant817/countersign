@@ -45,7 +45,9 @@ describe('the four formats from §8.6', () => {
   })
 
   it('cs:{captureId}:ref:{refundId}', () => {
-    expect(refundRequestId('3C679366HH908993F', refundId)).toBe(`cs:3C679366HH908993F:ref:${refundId}`)
+    expect(refundRequestId('3C679366HH908993F', refundId)).toBe(
+      `cs:3C679366HH908993F:ref:${refundId}`,
+    )
   })
 
   it('cs:{disputeId}:{action}:{packetVersion}', () => {
@@ -70,9 +72,15 @@ describe('determinism', () => {
   it('the same inputs always produce the same id — that is the whole mechanism', () => {
     // EC-IDEM-2: a retry of a timed-out create must be deduplicated against the first attempt.
     expect(orderCreateRequestId(attemptId)).toBe(orderCreateRequestId(attemptId))
-    expect(captureRequestId(paypalAuthId, shipmentId)).toBe(captureRequestId(paypalAuthId, shipmentId))
-    expect(refundRequestId('3C679366HH908993F', refundId)).toBe(refundRequestId('3C679366HH908993F', refundId))
-    expect(disputeActionRequestId(disputeId, 'file', 2)).toBe(disputeActionRequestId(disputeId, 'file', 2))
+    expect(captureRequestId(paypalAuthId, shipmentId)).toBe(
+      captureRequestId(paypalAuthId, shipmentId),
+    )
+    expect(refundRequestId('3C679366HH908993F', refundId)).toBe(
+      refundRequestId('3C679366HH908993F', refundId),
+    )
+    expect(disputeActionRequestId(disputeId, 'file', 2)).toBe(
+      disputeActionRequestId(disputeId, 'file', 2),
+    )
   })
 
   it('different inputs produce different ids, so payments never collide', () => {
@@ -93,8 +101,12 @@ describe('determinism', () => {
   it('a new packet version is a new id; the same version is the same id', () => {
     // §8.15/§8.16: re-filing v2 must not be deduplicated against v1, and re-sending v2 after a timeout
     // must be.
-    expect(disputeActionRequestId(disputeId, 'file', 2)).not.toBe(disputeActionRequestId(disputeId, 'file', 1))
-    expect(disputeActionRequestId(disputeId, 'file', 2)).toBe(disputeActionRequestId(disputeId, 'file', 2))
+    expect(disputeActionRequestId(disputeId, 'file', 2)).not.toBe(
+      disputeActionRequestId(disputeId, 'file', 1),
+    )
+    expect(disputeActionRequestId(disputeId, 'file', 2)).toBe(
+      disputeActionRequestId(disputeId, 'file', 2),
+    )
   })
 
   it('accepts a string packet version as well as a number', () => {
@@ -190,11 +202,13 @@ describe('measureRequestId / observedRequestIdLengths', () => {
 
   it('a PayPal dispute id is usable in the dispute slot too', () => {
     // The sandbox simulator and the API both use ids like `PP-D-2781XXXX`, which contain a hyphen.
-    const result = measureRequestId(disputeActionRequestId('PP-D-2781AB12CD34' as DisputeId, 'file', 1))
+    const result = measureRequestId(
+      disputeActionRequestId('PP-D-2781AB12CD34' as DisputeId, 'file', 1),
+    )
     expect(result.ok).toBe(true)
   })
 
-  it('records that PayPal\'s two length figures contradict each other', () => {
+  it("records that PayPal's two length figures contradict each other", () => {
     // Report §32/#21: the OpenAPI declares `maxLength: 10000` while the idempotency prose recommends
     // a UUID "because it meets the 38 single-byte character limit". Both are kept as named values so
     // the C-probe has something to measure against; neither is enforced.
@@ -216,7 +230,9 @@ describe('measureRequestId / observedRequestIdLengths', () => {
     // is the size of the exposure, stated as a number.
     const longest = Math.max(...Object.values(report).map((r) => r.length))
     expect(longest).toBe(55)
-    expect(Object.values(report).filter((r) => r.length > PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS)).toHaveLength(4)
+    expect(
+      Object.values(report).filter((r) => r.length > PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS),
+    ).toHaveLength(4)
     expect(report['cs:{paypalDisputeId}:file:1']?.length).toBeLessThanOrEqual(
       PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS,
     )

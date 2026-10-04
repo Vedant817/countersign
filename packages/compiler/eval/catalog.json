@@ -1,9 +1,21 @@
 {
   "_comment": "The catalog every compiler eval runs against. Committed rather than generated so the cached CI run and the live nightly run score the *same* items, and a score is comparable between them. Prices are integer minor units (spec §0); the loader turns them into bigint, so no amount is ever a float. Mirrors packages/compiler/test/helpers.ts, and test/eval.golden.test.ts asserts the two agree.",
   "merchants": [
-    { "id": "mrc_northwind", "name": "Northwind Outfitters", "website": "https://northwind.countersign.test" },
-    { "id": "mrc_contoso", "name": "Contoso Supply", "website": "https://contoso.countersign.test" },
-    { "id": "mrc_fabrikam", "name": "Fabrikam Home", "website": "https://fabrikam.countersign.test" }
+    {
+      "id": "mrc_northwind",
+      "name": "Northwind Outfitters",
+      "website": "https://northwind.countersign.test"
+    },
+    {
+      "id": "mrc_contoso",
+      "name": "Contoso Supply",
+      "website": "https://contoso.countersign.test"
+    },
+    {
+      "id": "mrc_fabrikam",
+      "name": "Fabrikam Home",
+      "website": "https://fabrikam.countersign.test"
+    }
   ],
   "skus": [
     {

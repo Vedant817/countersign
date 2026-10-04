@@ -40,7 +40,9 @@ describe('hasBlockingAmbiguities — the one predicate §8.8 hands the UI', () =
   })
 
   it('reads nothing but the array, so it cannot drift from the rule it gates', () => {
-    const compiled = { ambiguities: [] as Ambiguity[] } as unknown as Parameters<typeof hasBlockingAmbiguities>[0]
+    const compiled = { ambiguities: [] as Ambiguity[] } as unknown as Parameters<
+      typeof hasBlockingAmbiguities
+    >[0]
     expect(hasBlockingAmbiguities(compiled)).toBe(false)
   })
 })
@@ -90,7 +92,9 @@ describe('capOptions', () => {
   })
 
   it('never offers "no limit"', () => {
-    const options = capOptions([usd(12999n)]).join(' ').toLowerCase()
+    const options = capOptions([usd(12999n)])
+      .join(' ')
+      .toLowerCase()
     expect(options).not.toContain('no limit')
     expect(options).not.toContain('unlimited')
   })
@@ -139,8 +143,16 @@ describe('currencyAmbiguity', () => {
 })
 
 describe('mergeAmbiguities', () => {
-  const modelOne: Ambiguity = { field: 'preferences.size', question: 'Which size?', options: ['S', 'M'] }
-  const modelTwo: Ambiguity = { field: 'preferences.color', question: 'Which colour?', options: ['Slate'] }
+  const modelOne: Ambiguity = {
+    field: 'preferences.size',
+    question: 'Which size?',
+    options: ['S', 'M'],
+  }
+  const modelTwo: Ambiguity = {
+    field: 'preferences.color',
+    question: 'Which colour?',
+    options: ['Slate'],
+  }
   const required: Ambiguity = { field: AMOUNT_CAP_FIELD, question: 'How much?', options: [] }
 
   it('keeps both when the fields differ', () => {
@@ -151,7 +163,7 @@ describe('mergeAmbiguities', () => {
     ])
   })
 
-  it('lets the compiler\'s own question win on a duplicate field', () => {
+  it("lets the compiler's own question win on a duplicate field", () => {
     // The attack this closes: a model-written question about `amount_range.max` carrying a "$1,000,000"
     // option. The required phrasing is the one whose options are known to be signable, so it must not be
     // displaced — while the field keeps the position the model gave it, so the order stays stable.

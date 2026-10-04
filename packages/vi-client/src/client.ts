@@ -123,7 +123,12 @@ export const realSleep: Sleep = (ms) =>
  * budgets the whole Gate decision at p95 400 ms. Full jitter rather than a fixed wait, because three
  * concurrent Gate decisions that all hit the same blip would otherwise retry in lockstep.
  */
-export function retryDelayCeilingMs(attempt: number, baseMs = 100, factor = 2, capMs = 2_000): number {
+export function retryDelayCeilingMs(
+  attempt: number,
+  baseMs = 100,
+  factor = 2,
+  capMs = 2_000,
+): number {
   if (attempt < 1) return 0
   const raw = baseMs * factor ** (attempt - 1)
   return Math.min(capMs, Number.isFinite(raw) ? raw : capMs)
@@ -200,7 +205,9 @@ export function shouldRetry(decision: RetryDecision): RetryVerdict {
   }
   const status = decision.status ?? 0
   if (status >= 500) {
-    return budgetLeft ? { retry: true, reason: 'server-error' } : { retry: false, reason: 'budget-exhausted' }
+    return budgetLeft
+      ? { retry: true, reason: 'server-error' }
+      : { retry: false, reason: 'budget-exhausted' }
   }
   // Every non-5xx non-2xx. 4xx by definition, and per the rule above, not retried.
   return { retry: false, reason: 'client-error' }
@@ -309,7 +316,8 @@ export function mapViError(input: MapViErrorInput): CsError {
   const inner = isRecord(body?.error) ? body.error : undefined
 
   const code = typeof inner?.code === 'string' && isCsErrorCode(inner.code) ? inner.code : undefined
-  const fallback = code ?? (STATUS_FALLBACK[input.status] ?? (input.status >= 500 ? 'CS_INTERNAL' : 'CS_VALIDATION'))
+  const fallback =
+    code ?? STATUS_FALLBACK[input.status] ?? (input.status >= 500 ? 'CS_INTERNAL' : 'CS_VALIDATION')
   const message =
     typeof inner?.message === 'string' && inner.message !== ''
       ? `${where} -> ${input.status}: ${inner.message}`
@@ -356,7 +364,10 @@ export function transportError(args: {
   readonly timeoutMs: number
   readonly attempts: number
 }): CsError {
-  const detail = args.cause instanceof Error && args.cause.message !== '' ? args.cause.message : String(args.cause)
+  const detail =
+    args.cause instanceof Error && args.cause.message !== ''
+      ? args.cause.message
+      : String(args.cause)
   return csError(
     'CS_INTERNAL',
     `${args.method} ${args.path} failed before a response was received${
@@ -392,9 +403,13 @@ export function transportError(args: {
 export function jsonSafeBody(value: unknown, path = '$'): unknown {
   if (typeof value === 'bigint') {
     if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) {
-      throw csError('CS_VALIDATION', `Money at ${path} exceeds the safe integer range and cannot be sent as JSON`, {
-        path,
-      })
+      throw csError(
+        'CS_VALIDATION',
+        `Money at ${path} exceeds the safe integer range and cannot be sent as JSON`,
+        {
+          path,
+        },
+      )
     }
     return Number(value)
   }
@@ -464,11 +479,10 @@ export class ViClient {
     this.clock = options.clock
     // Bound so a `fetch` handed in as a bare function reference still finds its `this` (undici).
     this.fetchImpl = options.fetchImpl
-      ? ((url, init) => options.fetchImpl!(url, init))
-      : ((url, init) => fetch(url, init))
+      ? (url, init) => options.fetchImpl!(url, init)
+      : (url, init) => fetch(url, init)
     this.sleep = options.sleep ?? realSleep
-    this.log =
-      options.logger ??
+    this.log = options.logger ??
       // A silent default: this client runs inside Next route handlers and the worker, where a logger
       // is already ambient, and an unconfigured logger writing to stdout on every Gate decision would
       // be noise rather than signal.
@@ -486,7 +500,13 @@ export class ViClient {
    * ciphertext. The plaintext private key never leaves the service (spec D5).
    */
   async mintAgentKey(req: MintAgentKeyRequest): Promise<Result<MintAgentKeyResponse, CsError>> {
-    return this.call('POST', '/v1/keys/agent', mintAgentKeyRequestSchema, mintAgentKeyResponseSchema, req)
+    return this.call(
+      'POST',
+      '/v1/keys/agent',
+      mintAgentKeyRequestSchema,
+      mintAgentKeyResponseSchema,
+      req,
+    )
   }
 
   /**
@@ -496,7 +516,13 @@ export class ViClient {
    * evidence signed before the rotation still verifies (spec EC-KEY-2, EC-KEY-3).
    */
   async rotateKey(req: RotateKeyRequest): Promise<Result<RotateKeyResponse, CsError>> {
-    return this.call('POST', '/v1/keys/rotate', rotateKeyRequestSchema, rotateKeyResponseSchema, req)
+    return this.call(
+      'POST',
+      '/v1/keys/rotate',
+      rotateKeyRequestSchema,
+      rotateKeyResponseSchema,
+      req,
+    )
   }
 
   /**
@@ -539,7 +565,13 @@ export class ViClient {
    * off it.
    */
   async finalizeL2(req: L2FinalizeRequest): Promise<Result<L2FinalizeResponse, CsError>> {
-    return this.call('POST', '/v1/l2/finalize', l2FinalizeRequestSchema, l2FinalizeResponseSchema, req)
+    return this.call(
+      'POST',
+      '/v1/l2/finalize',
+      l2FinalizeRequestSchema,
+      l2FinalizeResponseSchema,
+      req,
+    )
   }
 
   /**
@@ -549,7 +581,13 @@ export class ViClient {
    * reaches the wire (EC-FX-6).
    */
   async createCheckoutJwt(req: CheckoutJwtRequest): Promise<Result<CheckoutJwtResponse, CsError>> {
-    return this.call('POST', '/v1/checkout-jwt', checkoutJwtRequestSchema, checkoutJwtResponseSchema, req)
+    return this.call(
+      'POST',
+      '/v1/checkout-jwt',
+      checkoutJwtRequestSchema,
+      checkoutJwtResponseSchema,
+      req,
+    )
   }
 
   /**
@@ -590,7 +628,13 @@ export class ViClient {
    * Like {@link verify}, `chain_valid: false` comes back as `ok(...)`.
    */
   async publicVerify(req: PublicVerifyRequest): Promise<Result<PublicVerifyResponse, CsError>> {
-    return this.call('POST', '/v1/public/verify', publicVerifyRequestSchema, publicVerifyResponseSchema, req)
+    return this.call(
+      'POST',
+      '/v1/public/verify',
+      publicVerifyRequestSchema,
+      publicVerifyResponseSchema,
+      req,
+    )
   }
 
   /**
@@ -610,7 +654,9 @@ export class ViClient {
    * `valid: false`, not a 4xx, because the whole point of the route is to be asked "is this thing
    * good?" and get told. A diagnostic for WP-09's checkout work.
    */
-  async verifyCheckoutJwt(checkoutJwt: string): Promise<Result<CheckoutJwtVerifyResponse, CsError>> {
+  async verifyCheckoutJwt(
+    checkoutJwt: string,
+  ): Promise<Result<CheckoutJwtVerifyResponse, CsError>> {
     if (typeof checkoutJwt !== 'string' || checkoutJwt.trim() === '') {
       return {
         ok: false,
@@ -647,7 +693,10 @@ export class ViClient {
     if (!contract) {
       return {
         ok: false,
-        error: csError('CS_INTERNAL', `No route contract registered for ${method} ${path}`, { method, path }),
+        error: csError('CS_INTERNAL', `No route contract registered for ${method} ${path}`, {
+          method,
+          path,
+        }),
       }
     }
 
@@ -672,7 +721,9 @@ export class ViClient {
             {
               method,
               path: contract.path,
-              issues: checked.error.issues.slice(0, 8).map((i) => ({ path: i.path.join('.'), message: i.message })),
+              issues: checked.error.issues
+                .slice(0, 8)
+                .map((i) => ({ path: i.path.join('.'), message: i.message })),
             },
           ),
         }
@@ -710,18 +761,39 @@ export class ViClient {
           timeoutMs: this.timeoutMs,
           attempts: attempt,
         })
-        const verdict = shouldRetry({ kind: timedOut ? 'timeout' : 'connection', attempt, maxRetries: this.maxRetries })
+        const verdict = shouldRetry({
+          kind: timedOut ? 'timeout' : 'connection',
+          attempt,
+          maxRetries: this.maxRetries,
+        })
         if (verdict.retry) {
           await this.backoff(attempt, method, contract.path, error.code, verdict.reason)
           continue
         }
-        return { ok: false, error: { ...error, details: { ...error.details, elapsed_ms: this.clock.nowMs() - startedAt } } }
+        return {
+          ok: false,
+          error: {
+            ...error,
+            details: { ...error.details, elapsed_ms: this.clock.nowMs() - startedAt },
+          },
+        }
       }
 
       if (!response.ok) {
         const body_ = await safeJson(response)
-        const error = mapViError({ status: response.status, body: body_, method, path: contract.path, attempts: attempt })
-        const verdict = shouldRetry({ kind: 'response', status: response.status, attempt, maxRetries: this.maxRetries })
+        const error = mapViError({
+          status: response.status,
+          body: body_,
+          method,
+          path: contract.path,
+          attempts: attempt,
+        })
+        const verdict = shouldRetry({
+          kind: 'response',
+          status: response.status,
+          attempt,
+          maxRetries: this.maxRetries,
+        })
         if (verdict.retry) {
           await this.backoff(attempt, method, contract.path, error.code, verdict.reason)
           continue
@@ -742,7 +814,9 @@ export class ViClient {
             `${method} ${contract.path} returned ${response.status} with a body this client does not recognise`,
             {
               status: response.status,
-              issues: checked.error.issues.slice(0, 8).map((i) => ({ path: i.path.join('.'), message: i.message })),
+              issues: checked.error.issues
+                .slice(0, 8)
+                .map((i) => ({ path: i.path.join('.'), message: i.message })),
               body_keys: isRecord(value) ? Object.keys(value) : undefined,
             },
           ),
@@ -755,11 +829,15 @@ export class ViClient {
     // future edit that breaks that invariant fails loudly rather than returning `undefined`.
     return {
       ok: false,
-      error: csError('CS_INTERNAL', `${method} ${contract.path} exhausted its retry loop without a verdict`, {
-        method,
-        path: contract.path,
-        max_retries: this.maxRetries,
-      }),
+      error: csError(
+        'CS_INTERNAL',
+        `${method} ${contract.path} exhausted its retry loop without a verdict`,
+        {
+          method,
+          path: contract.path,
+          max_retries: this.maxRetries,
+        },
+      ),
     }
   }
 
@@ -772,7 +850,14 @@ export class ViClient {
     reason: string,
   ): Promise<void> {
     const delay = retryDelayMs(attempt)
-    this.log.warn('retrying vi call', { method, path, attempt, next_attempt_in_ms: delay, code, reason })
+    this.log.warn('retrying vi call', {
+      method,
+      path,
+      attempt,
+      next_attempt_in_ms: delay,
+      code,
+      reason,
+    })
     await this.sleep(delay)
   }
 }

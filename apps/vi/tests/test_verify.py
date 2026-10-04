@@ -658,9 +658,7 @@ def test_network_enforced_constraints_are_reported_as_skipped_not_checked(
     assert "mandate.payment.amount_range" in report.checked
 
 
-def test_skipped_entries_are_objects_not_strings(
-    client, auth: dict[str, str], full_chain
-) -> None:
+def test_skipped_entries_are_objects_not_strings(client, auth: dict[str, str], full_chain) -> None:
     """`skipped` must be `{type, reason}[]`, never a mix of strings and annotated strings.
 
     The failure this prevents is quiet and expensive: a Gate asking

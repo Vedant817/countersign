@@ -102,9 +102,15 @@ const STATUS_TO_CODE: Readonly<Record<number, CsErrorCode>> = {
 }
 
 /** Codes whose retryability the registry in `@countersign/core` already sets to `true`. */
-const RETRYABLE_CODES: ReadonlySet<CsErrorCode> = new Set<CsErrorCode>(['PP_RATE_LIMITED', 'PP_UNAVAILABLE'])
+const RETRYABLE_CODES: ReadonlySet<CsErrorCode> = new Set<CsErrorCode>([
+  'PP_RATE_LIMITED',
+  'PP_UNAVAILABLE',
+])
 
-export type HeaderBag = Headers | Readonly<Record<string, string | readonly string[] | undefined>> | undefined
+export type HeaderBag =
+  | Headers
+  | Readonly<Record<string, string | readonly string[] | undefined>>
+  | undefined
 
 /**
  * Read one header, case-insensitively, from anything `fetch` might have handed us.
@@ -262,7 +268,9 @@ export function networkError(args: {
   timedOut?: boolean
 }): CsError {
   const message =
-    args.cause instanceof Error && args.cause.message !== '' ? args.cause.message : String(args.cause)
+    args.cause instanceof Error && args.cause.message !== ''
+      ? args.cause.message
+      : String(args.cause)
   return csError(
     'PP_UNAVAILABLE',
     `${args.method} ${args.path} failed before a response was received${args.timedOut ? ' (timeout)' : ''}: ${message}`,

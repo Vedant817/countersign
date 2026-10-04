@@ -154,13 +154,13 @@ From the PayPal account manager, on the `countersign-sandbox` REST app (H-01 ste
    - `https://uri.paypal.com/services/disputes/create` (`DISPUTE_CREATE`)
    - `https://uri.paypal.com/services/disputes/update-buyer` (`UPDATE_BUYER`)
 2. Complete one interactive **"Log in with PayPal"** consent flow with the sandbox buyer
-   (`PAYPAL_BUYER_EMAIL`). The simulator asserts the buyer with an *unsigned* `PayPal-Auth-Assertion`,
+   (`PAYPAL_BUYER_EMAIL`). The simulator asserts the buyer with an _unsigned_ `PayPal-Auth-Assertion`,
    but the consent step still has to happen once by hand — a script cannot skip it.
 3. Note the **merchant id** of the Business account (Dashboard → account details) and the
    **seller-side transaction id** from the business account's activity. Both are now required inputs
    to `sandbox.processChargeback` (`merchant_id`, `transaction.id_enc`); the client cannot infer either.
 4. Note the **buyer-side transaction id** for the same capture. `POST /v1/customer/disputes` takes
-   `disputed_transactions[].buyer_transaction_id`, which is the id from the *buyer's* view of the
+   `disputed_transactions[].buyer_transaction_id`, which is the id from the _buyer's_ view of the
    transaction, not the merchant's capture id. A capture id alone cannot simulate a dispute.
 
 **Then give an agent** (in a git-ignored `.env.local`, never a tracked file):
@@ -183,8 +183,8 @@ PAYPAL_BUYER_CONSENT_DONE=true
 PayPal contradicts itself and only a probe or an answer settles it:
 
 - the OpenAPI (`components.parameters.paypal_request_id`) declares **`maxLength: 10000`**;
-- <https://developer.paypal.com/api/rest/reference/idempotency> says *"PayPal recommends that you use
-  the UUID standard … because it meets the **38 single-byte character limit**."*
+- <https://developer.paypal.com/api/rest/reference/idempotency> says _"PayPal recommends that you use
+  the UUID standard … because it meets the **38 single-byte character limit**."_
 
 Our worst case is **55 characters** (`cs:{authId}:cap:{shipmentId}`), and **four of our five** formats
 already exceed 38 — not just the capture one. `captureRequestId` is the one to look at first because
@@ -199,7 +199,7 @@ decision (record it in `docs/DECISIONS.md`).
 > idempotency reference page states) or **10 000** (as `maxLength` in the API reference schema)? Do
 > non-UUID values longer than 38 characters get rejected? Is the limit per API or global?
 
-**Interim behaviour if PayPal does not answer:** `REQUEST_ID_MAX_CHARS = 255` remains *our own* budget
+**Interim behaviour if PayPal does not answer:** `REQUEST_ID_MAX_CHARS = 255` remains _our own_ budget
 and is labelled as such. The C-probe settles it empirically in one experiment — send 38, 39 and 10 001
 characters to `POST /v2/payments/authorizations/{id}/capture` and record which are accepted.
 `packages/paypal/IDEMPOTENCY.md` → "Header length" has the recipe.

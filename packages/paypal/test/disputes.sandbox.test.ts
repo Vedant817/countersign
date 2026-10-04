@@ -31,7 +31,8 @@ import {
   ppMoney,
 } from './fixtures/sandbox-env'
 
-const NEEDS_BUYER = 'PAYPAL_BUYER_EMAIL is absent (§6): the buyer-dispute simulator asserts the buyer identity.'
+const NEEDS_BUYER =
+  'PAYPAL_BUYER_EMAIL is absent (§6): the buyer-dispute simulator asserts the buyer identity.'
 const NEEDS_CAPTURE =
   'PAYPAL_TEST_CAPTURE_ID is absent: run client.sandbox.test.ts first and reuse the capture it creates, ' +
   'or export a card-funded capture id (a vault capture with no card behind it cannot be charged back — §10.1 step 5).'
@@ -125,7 +126,10 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
 
     // --- 3. ask for seller evidence, then file it (multipart) ---
     const required = await client.sandbox.requireEvidence(dispute.dispute_id, 'SELLER_EVIDENCE')
-    expect(required.ok, required.ok ? '' : `${required.error.code}: ${required.error.message}`).toBe(true)
+    expect(
+      required.ok,
+      required.ok ? '' : `${required.error.code}: ${required.error.message}`,
+    ).toBe(true)
 
     const filed = await client.provideEvidence(
       dispute.dispute_id,
@@ -137,7 +141,9 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
             notes:
               'Shipped 1 Oct via UPS, tracking 1Z999AA10123456784. The signed read-back the buyer ' +
               'approved is included as the second page of this packet.',
-            evidence_info: { tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }] },
+            evidence_info: {
+              tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }],
+            },
           },
         ],
       },
@@ -156,7 +162,10 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
 
     // --- 5. adjudicate in our favour and confirm the outcome ([B16]) ---
     const adjudicated = await client.sandbox.adjudicate(dispute.dispute_id, 'SELLER_FAVOR')
-    expect(adjudicated.ok, adjudicated.ok ? '' : `${adjudicated.error.code}: ${adjudicated.error.message}`).toBe(true)
+    expect(
+      adjudicated.ok,
+      adjudicated.ok ? '' : `${adjudicated.error.code}: ${adjudicated.error.message}`,
+    ).toBe(true)
   })
 
   it('accepts and denies a merchant offer as the buyer (§8.16 AT)', async () => {
@@ -173,7 +182,10 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
     // `accept-offer` takes `{note}` — not `{payer_note}` — and answers 200 or **202** when the money
     // movement is delayed (report §30/#12). Both count as success here.
     const accepted = await client.sandbox.acceptOffer(withOffer.dispute_id, 'Accepted, thanks.')
-    expect(accepted.ok, accepted.ok ? '' : `${accepted.error.code}: ${accepted.error.message}`).toBe(true)
+    expect(
+      accepted.ok,
+      accepted.ok ? '' : `${accepted.error.code}: ${accepted.error.message}`,
+    ).toBe(true)
   })
 
   it('an oversize file is refused locally, so the sandbox is never asked', async () => {
@@ -183,9 +195,13 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
       contentType: 'application/pdf',
       content: new Uint8Array(MAX_EVIDENCE_FILE_BYTES),
     }
-    const result = await client.provideEvidence('PP-D-DOES-NOT-EXIST', {
-      evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT', notes: 'x' }],
-    }, [oversize])
+    const result = await client.provideEvidence(
+      'PP-D-DOES-NOT-EXIST',
+      {
+        evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT', notes: 'x' }],
+      },
+      [oversize],
+    )
     // Rejected before any HTTP call, so the bogus dispute id is never used.
     expect(result.ok).toBe(false)
     if (result.ok) return

@@ -34,6 +34,7 @@ exempt `pg-boss`, `next`, `zod` and `vitest` in `pnpm-workspace.yaml`.
 hand (D-003), so the policy is relaxed for exactly the pins the spec requires and left in force for
 everything else.
 **Evidence:**
+
 ```
 $ pnpm install
  ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION
@@ -50,6 +51,7 @@ The pinned Verifiable Intent commit was confirmed via the GitHub API.
 **Reason:** The brief requires that PayPal endpoints, package names and API fields be verified rather
 than invented. Package availability is the same class of claim.
 **Evidence:**
+
 ```
 next@16.3.8 => 16.3.8        ai@7.0.127 => 7.0.127          zod@4.6.5 => 4.6.5
 react@19.3.0 => 19.3.0      @ai-sdk/openai@4.0.83 => 4.0.83 @ai-sdk/mcp@2.0.66 => 2.0.66
@@ -64,6 +66,7 @@ pytest  9.1.1   present=True   httpx   0.28.1 present=True   cryptography 50.0.2
 $ GET api.github.com/repos/agent-intent/verifiable-intent/commits/356c29635f1c44df7de02edb58699ca9f29bece6
 sha=356c29635f1c44df7de02edb58699ca9f29bece6  date=2026-04-20  msg="Merge pull request #23 from agent-intent/fix/field-alignment-v2"
 ```
+
 https://github.com/agent-intent/verifiable-intent
 
 ## D-004 — Monorepo TypeScript uses `moduleResolution: Bundler`, not `NodeNext`
@@ -150,7 +153,7 @@ The second exists purely because the first fix was wrong in exactly the same way
 **Date:** 2026-10-04 · **Raised by:** WP-03 · **Spec item:** §8.3 `at_time`, EC-TIME-3
 **Decision:** `/v1/verify` accepts `at_time` but returns the verdict it **actually performed at `now`**,
 plus `at_time_not_honoured: true`, the verbatim reason, and an `at_time_check` block containing our
-own iat/exp window evaluation clearly labelled *advisory*.
+own iat/exp window evaluation clearly labelled _advisory_.
 **Reason:** `verification/chain.py` at the pinned commit hardcodes `now = int(time.time())` with no
 parameter to override it (verified in the installed source before writing any code). So an honest
 as-of-capture-time verification is **impossible**, not merely unimplemented.
@@ -170,8 +173,8 @@ with `status: blocked` and the reason. Raised for upstream in `docs/HUMAN_TODO.m
 vi-service README.
 
 1. **`/v1/l2/finalize` must return the finished SD-JWT, not `header.payload.signature`.**
-   In autonomous mode the two open mandates *are* SD disclosures. Returning only three segments makes
-   `verify_chain` fail with *"L2 delegate_payload resolved zero mandate disclosures"*. The spec's
+   In autonomous mode the two open mandates _are_ SD disclosures. Returning only three segments makes
+   `verify_chain` fail with _"L2 delegate_payload resolved zero mandate disclosures"_. The spec's
    route table `{l2}` is correct only when read as the complete SD-JWT.
 2. **`UserMandate.prompt_summary` is silently dropped.** The field exists on the model, but
    `create_layer2_autonomous` never reads it, so it reaches neither the payload nor the disclosures.
@@ -214,6 +217,7 @@ concrete corrections, kept verbatim at `docs/verification/paypal-api-2026-10-04.
 
 **Date:** 2026-10-04
 **Decision:** Rewrite the simulator bodies to match PayPal's documented forms. Specifically:
+
 - `POST /v1/customer/disputes` is **not in the OpenAPI at all**. Per the test-go-live page it is
   `multipart/form-data` with one `input` JSON part holding
   `disputed_transactions[{buyer_transaction_id}]`, `reason`, `dispute_amount`, `extensions`. The code
@@ -234,12 +238,13 @@ trusted a secondary source. The audit read the machine-readable specs from
 Orders 2.32, Vault 3.4, Notifications 1.11) rather than the rendered docs.
 
 **Where PayPal's own documentation is incomplete, the choice made was the conservative one:**
+
 - `change-reason` is sent as `multipart/form-data`, not `multipart/related`, because `fetch` +
   `FormData` cannot produce `multipart/related` without hand-writing the boundary — and a guessed
   boundary is a bare 400. Identical part name and payload. Recorded as an open probe item.
 - `accept_claim_type` is described in prose but **absent from the OpenAPI request body**. Kept, marked
   as the one item only a sandbox probe can settle.
-**Evidence:** `docs/verification/paypal-api-2026-10-04.md` items 1, 27, 30, 12.
+  **Evidence:** `docs/verification/paypal-api-2026-10-04.md` items 1, 27, 30, 12.
 
 ### D-013 — The dispute→capture join key is `disputed_transactions[].seller_transaction_id`
 
@@ -248,7 +253,7 @@ Orders 2.32, Vault 3.4, Notifications 1.11) rather than the rendered docs.
 `disputed_transactions[0].seller_transaction_id`. The Defender's ingest must use it.
 **Reason:** The code read `seller_transaction_id` from the **top level** of the dispute resource.
 PayPal sends it only inside `disputed_transactions[]`. This is not cosmetic: that id is the join key
-from a dispute back to the capture we authorized (spec §7.2, R-REF-1 / R-DSP-*). Reading the wrong
+from a dispute back to the capture we authorized (spec §7.2, R-REF-1 / R-DSP-\*). Reading the wrong
 path returns `undefined`, and a Defender that maps a dispute to no capture lands on R-NOCHAIN-1 and
 tells the merchant "No mandate on this payment. Countersign can't help here" — a **false and
 business-damaging** answer, on exactly the case the product exists to win.
@@ -262,8 +267,8 @@ Also renamed in the response schema: `dispute_reason` → `reason`, `disputed_am
 **Decision:** `isAppealable(d)` checks for the **`appeal` link** in the dispute's HATEOAS `links`,
 with `dispute_state === 'APPEALABLE'` kept as a secondary signal only.
 **Reason:** Spec §8.16 / §12.11 EC-DSP-6 gate the appeal on `dispute_state = APPEALABLE`. The value
-is real, but PayPal states twice, in both the API reference and the disputes guide, that *eligibility
-is signalled by the presence of the `appeal` link*: "If this link does not appear, you cannot appeal
+is real, but PayPal states twice, in both the API reference and the disputes guide, that _eligibility
+is signalled by the presence of the `appeal` link_: "If this link does not appear, you cannot appeal
 the dispute." So `APPEALABLE` alone can be true while an appeal would be rejected. Gating on the
 authoritative signal costs one extra `GET` and prevents filing an appeal PayPal refuses.
 **Evidence:** audit item 17; `https://developer.paypal.com/platforms/disputes/handle-disputes/use-disputes-api`.
@@ -272,10 +277,12 @@ authoritative signal costs one extra `GET` and prevents filing an appeal PayPal 
 
 **Date:** 2026-10-04 · **Deviation from the spec's §8.6 class listing**
 **Decision:**
+
 ```
 sandbox.processChargeback(sellerTxnId, reason)  ->  sandbox.processChargeback(opts: ProcessChargebackOpts)
 sandbox.changeReason(id, reason)                 ->  sandbox.changeReason(id, body: ChangeReasonBody)
 ```
+
 **Reason:** PayPal's documented bodies require facts that do not fit two positional arguments:
 `merchant_id` (our Business account), `transaction.amount`, `financial_institution.processor`, and
 `item_info[]`. Neither value can be inferred by the client, and inventing defaults for them would be
@@ -289,6 +296,7 @@ PayPal's own one-shot vault example uses for spec D17's capture.
 
 **Date:** 2026-10-04 · **Spec item:** §8.12 subscribed events, EC-WH-1, EC-TIME-5
 **Decision:**
+
 1. **`PAYMENT.REFUND.COMPLETED` does not exist.** Refund completion is `PAYMENT.CAPTURE.REFUNDED`.
    Removed from the event list; `PAYMENT.CAPTURE.DENIED` (documented, and PayPal-recommended for the
    checkout flow) added.
@@ -304,16 +312,17 @@ latency optimisation. Knowing which events are fictional changes what the reconc
 a cron that assumes a webhook will tell an expired authorisation to a buyer is a wrong statement
 about money.
 **Evidence:** audit items 14 and 26; `components/event_names` in the PayPal OpenAPI specs.
+
 ## D-017 — How `docs/EDGE_CASES.md` decides what "covered" means
 
 **Date:** 2026-10-04
 **Decision:** Three statuses, enforced by `scripts/ec-coverage.mjs`:
 
-| Status | Meaning | Gate |
-|---|---|---|
-| `done` | handling exists **and** a test exercises it **and** nothing else is owed | counts as covered |
-| `wip` | a real test exists for the part that is built, but the owning work package has not landed | not covered; reported separately |
-| `blocked` | cannot be done in sandbox; `blockedReason` is **required** | allowed to be uncovered |
+| Status    | Meaning                                                                                   | Gate                             |
+| --------- | ----------------------------------------------------------------------------------------- | -------------------------------- |
+| `done`    | handling exists **and** a test exercises it **and** nothing else is owed                  | counts as covered                |
+| `wip`     | a real test exists for the part that is built, but the owning work package has not landed | not covered; reported separately |
+| `blocked` | cannot be done in sandbox; `blockedReason` is **required**                                | allowed to be uncovered          |
 
 Anything else uncovered fails CI. Two supporting decisions matter more than the table:
 
@@ -324,8 +333,8 @@ Anything else uncovered fails CI. Two supporting decisions matter more than the 
 2. **`gen-edge-cases.mjs --check` compares only the spec-derived fields**, not `status`/`notes`/
    `blockedReason`. Those three are hand-maintained, so a whole-file comparison would make the
    staleness gate fail forever the moment a human did the job the file exists for — which trains
-   people to ignore the gate. The check now asks the only question that matters: *does the spec still
-   say what the catalogue says it says?* Verified by temporarily editing the spec and confirming the
+   people to ignore the gate. The check now asks the only question that matters: _does the spec still
+   say what the catalogue says it says?_ Verified by temporarily editing the spec and confirming the
    check fires on exactly the changed row.
 
 **Current state:** 38 of 109 cases have a referencing test — 24 `done`, 15 `wip`, 1 `blocked`
@@ -341,13 +350,14 @@ the rest, so the ledger doubles as the queue for WP-21.
 "**No LLM** anywhere in M10". That is the project central claim, and a line in a README is not a
 control — the first well-meaning refactor that reaches for a model to "make the Gate smarter" would
 silently make the product core claim false. A lint error makes that impossible to merge.
-**Honest limit:** this is a *direct-import* control. An LLM reached by reflection, or through a
+**Honest limit:** this is a _direct-import_ control. An LLM reached by reflection, or through a
 package that wraps one, would not be caught. The mitigation is that `packages/gate` dependency list
 is reviewed alongside this rule, and that `jose` — the only crypto dependency — has no transitive
 runtime dependency that could pull in a model client.
 **Evidence:** `eslint.config.mjs` `GATE_LLM_BAN`. The rule is active in `pnpm lint` today; the Gate
 package is still a stub, so the ban gets its first real exercise in WP-10 — which is exactly why the
 WP-10 reviewer should check it rather than assume it.
+
 ## D-019 — `constraints.skipped` is `{type, reason}[]`, because a string array silently disarms spec D19
 
 **Date:** 2026-10-04 · **Raised by:** WP-04 building the vi-client · **Spec item:** D19, §8.10 check 8
@@ -358,7 +368,7 @@ object**.
 **Reason — this is the most dangerous shape bug found so far, and it was found by the consumer
 rather than the producer.** The library appends `budget`, `recurrence` and `agent_recurrence` to
 `checked` while evaluating none of them (its own source comment calls them "Network-enforced"), so
-vi-service moved them into `skipped`. But it appended a *reason* to each entry:
+vi-service moved them into `skipped`. But it appended a _reason_ to each entry:
 
 ```
 "mandate.payment.budget — Network-enforced constraints. Not evaluated by verifiable_intent; …"
@@ -367,7 +377,9 @@ vi-service moved them into `skipped`. But it appended a *reason* to each entry:
 A Gate implementing check 8 naturally writes:
 
 ```ts
-if (!verify.constraints.skipped.includes('mandate.payment.budget')) { /* nothing to enforce */ }
+if (!verify.constraints.skipped.includes('mandate.payment.budget')) {
+  /* nothing to enforce */
+}
 ```
 
 That expression is **`false` while a user-signed budget cap sits unevaluated**, so the Gate concludes
@@ -376,7 +388,7 @@ does not check budgets; that one array shape would have undone the single most i
 deterministic check in the product, and it would have failed **open** — in favour of spending.
 
 **Why the fix is split across wire and type.** The schema accepts both shapes so that parsing a
-vi-service which has not been redeployed does not *throw* — a throw there fails the Gate's verify
+vi-service which has not been redeployed does not _throw_ — a throw there fails the Gate's verify
 step, which is worse than a missing field. But the schema ends in `.transform()`, and that is the
 load-bearing part: a plain `z.union` types the element as `string | {…}`, and `(string | Obj)[]
 .includes(string)` **still compiles**. The transform makes the output type `{type, reason}`, so the
@@ -391,3 +403,43 @@ now carries `@ts-expect-error`, which fails to compile if the transform is ever 
 **Consequence for WP-10:** the Gate must call `pendingNetworkEnforcement(skipped)` from
 `@countersign/vi-client` and treat a non-empty result as an obligation, not as information. It must
 never read `constraints.satisfied` as covering a network-enforced constraint.
+
+## D-020 — M9's logic ships inside `packages/gate`, because splitting it creates a dependency cycle
+
+**Date:** 2026-10-04 · **Raised by:** WP-09 and WP-10 built together · **Spec item:** §5, §8.9, §8.10
+**Decision:** The **logic** of spec §8.9 (catalog, cart arithmetic, price lock, checkout session, stock,
+MCP tool schemas) lives in `packages/gate/src/merchant/`. The **HTTP surface** — `apps/web/api/checkout`
+and the MCP route — stays in `apps/web`, as §5 says it should, and each handler is a few lines over these
+functions. Nothing in `apps/web` is written yet; WP-17's UI and WP-14's MCP route consume these exports.
+
+**Reason — two things forced it, and the second is the one that matters.**
+
+1. **The price lock is a shared value, not a shared idea.** Gate check 5 binds the L3b to
+   `checkout_sessions.checkout_hash` and check 6 compares `price_lock_exp` against the one
+   `clock.nowSec()`. Those two checks and the `create_checkout` that _produces_ both values cannot live
+   in different packages without one importing the other, because the Gate must verify a value the
+   catalog produced and neither can own a private copy of it. A cycle between the policy engine and the
+   catalog that prices its inputs is not a layering, it is a knot — and a knot in a payments path is
+   exactly where §8.0 rule 8 says to stop behind an interface instead.
+2. **The parts with bugs in them are not the parts that need Next.** The price-lock arithmetic, the
+   `untrusted_text` wrapper and the last-unit stock race have no HTTP in them. Shipping them inside a
+   route handler would have meant testing them through a Next server; §5's tree is a placement of _routes_,
+   not a statement that price-lock arithmetic belongs in a React app.
+
+**Honest limit:** §5's tree is now not literally true for M9's logic, and this is a deviation from the
+blueprint rather than a reading of it. What is preserved is the property §5 was expressing — the merchant
+catalog is not part of the decision engine — by keeping every §8.9 operation behind the
+`MerchantCatalogStore` / `MerchantCheckoutStore` ports, so `apps/web` can implement them over Postgres
+without this package ever knowing about a table it does not own. `packages/ledger` stayed a separate
+package (D-000's tree is kept for it) because it has no cycle risk: it depends on `packages/db` only.
+
+**Evidence:** `packages/gate/src/merchant/index.ts` (module header states both reasons);
+`packages/gate/test/merchant.test.ts` — AT-M9.1–AT-M9.4, 34 tests, no Next and no database;
+`packages/gate/src/checks.ts` checks 5 and 6 read the values `merchant/` writes;
+`packages/gate/README.md` §"§8.9".
+
+**Also recorded here, because it is the kind of thing that gets lost:** while building check 9, a real
+off-by-one was found in `walletCapCheckIn` (`packages/db/repos/budget.ts`, WP-02) — it adds the current
+attempt's RESERVE entry into the spend it compares against, so the effective wallet cap is `cap − cart`.
+Per AGENTS.md rule 8 this package does not edit that file; `packages/gate/test/budget.test.ts` pins the
+observed behaviour next to the intended value, so WP-02's fix shows up as exactly one failing assertion.

@@ -67,9 +67,7 @@ _AT_TIME_REASON = (
 AT_TIME_NOT_HONOURED_REASON = _AT_TIME_REASON
 
 
-def classify_constraint_report(
-    checked: list[str], skipped: list[str]
-) -> list[SkippedConstraint]:
+def classify_constraint_report(checked: list[str], skipped: list[str]) -> list[SkippedConstraint]:
     """Move the three network-enforced constraint types out of `checked` into `skipped`.
 
     Returns the corrected `skipped` list.

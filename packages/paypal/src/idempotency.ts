@@ -44,7 +44,14 @@
  * conflict, and the C-probe settles it.
  */
 import { csError, ok, err } from '@countersign/core'
-import type { AttemptId, CsError, DisputeId, RefundRowId, Result, ShipmentId } from '@countersign/core'
+import type {
+  AttemptId,
+  CsError,
+  DisputeId,
+  RefundRowId,
+  Result,
+  ShipmentId,
+} from '@countersign/core'
 
 /**
  * Our local budget for a `PayPal-Request-Id` value, in characters.
@@ -167,17 +174,25 @@ export function disputeActionRequestId(
 function normaliseVersion(version: number | string): string {
   if (typeof version === 'number') {
     if (!Number.isInteger(version) || version < 0 || version > 999_999_999) {
-      throw csError('CS_VALIDATION', `packetVersion must be a non-negative integer, got ${String(version)}`, {
-        packetVersion: String(version),
-      })
+      throw csError(
+        'CS_VALIDATION',
+        `packetVersion must be a non-negative integer, got ${String(version)}`,
+        {
+          packetVersion: String(version),
+        },
+      )
     }
     return String(version)
   }
   const v = version.trim()
   if (v === '' || !SAFE_CHARS.test(v)) {
-    throw csError('CS_VALIDATION', `packetVersion is not a safe id token: ${JSON.stringify(version)}`, {
-      packetVersion: v,
-    })
+    throw csError(
+      'CS_VALIDATION',
+      `packetVersion is not a safe id token: ${JSON.stringify(version)}`,
+      {
+        packetVersion: v,
+      },
+    )
   }
   return v
 }
@@ -212,10 +227,14 @@ export function validateRequestId(value: unknown): Result<string, CsError> {
   const bad = [...value].find((ch) => !SAFE_CHARS.test(ch))
   if (bad !== undefined) {
     return err(
-      csError('CS_VALIDATION', `PayPal-Request-Id contains a character that is not header-safe: ${JSON.stringify(bad)}`, {
-        character: bad,
-        value,
-      }),
+      csError(
+        'CS_VALIDATION',
+        `PayPal-Request-Id contains a character that is not header-safe: ${JSON.stringify(bad)}`,
+        {
+          character: bad,
+          value,
+        },
+      ),
     )
   }
   if (value.length > REQUEST_ID_MAX_CHARS) {
@@ -268,18 +287,30 @@ export function observedRequestIdLengths(): Record<string, RequestIdLengthReport
     'cs:{attemptId}:create': orderCreateRequestId(attemptId),
     'cs:{authId}:cap:{shipmentId}': captureRequestId(paypalAuthId, shipmentId),
     'cs:{captureId}:ref:{refundId}': refundRequestId(paypalAuthId, refundId),
-    'cs:{disputeId}:{action}:{packetVersion}': disputeActionRequestId(disputeId, 'escalate', 999_999_999),
+    'cs:{disputeId}:{action}:{packetVersion}': disputeActionRequestId(
+      disputeId,
+      'escalate',
+      999_999_999,
+    ),
     // PayPal's own dispute ids (e.g. PP-D-2781XXXX) must also be usable in the slot.
-    'cs:{paypalDisputeId}:file:1': disputeActionRequestId('PP-D-2781AB12CD34' as DisputeId, 'file', 1),
+    'cs:{paypalDisputeId}:file:1': disputeActionRequestId(
+      'PP-D-2781AB12CD34' as DisputeId,
+      'file',
+      1,
+    ),
   }
 
   const out: Record<string, RequestIdLengthReport> = {}
   for (const [fmt, value] of Object.entries(cases)) {
     const report = measureRequestId(value)
     if (!report.ok) {
-      throw csError('CS_INTERNAL', `Generated request id failed validation: ${report.error.message}`, {
-        format: fmt,
-      })
+      throw csError(
+        'CS_INTERNAL',
+        `Generated request id failed validation: ${report.error.message}`,
+        {
+          format: fmt,
+        },
+      )
     }
     out[fmt] = report.value
   }

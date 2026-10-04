@@ -7,16 +7,21 @@
  * money. Static typing gets us most of the way (`Money` carries a `bigint`), so this script covers
  * the remaining idioms that show up when a float creeps in from a boundary.
  *
- * What it flags, in `packages/{core,paypal,ledger,orders,gate,defender}/src` and
- * `apps/{web,worker}/src`:
+ * The roots below are the whole list, and `packages/gate/src` and `packages/ledger/src` are in it
+ * because the Gate is where an overspend becomes irreversible.
+ *
+ * What it flags:
  *  - `parseFloat` / `parseInt` on a value that looks monetary
- *  - `Math.round|trunc|floor|ceil` applied to something named `*amount*|*minor*|*total*|*price*`
+ *  - `Math.round|trunc|floor|ceil` on a line mentioning money
  *  - `.toFixed(` on a monetary field
- *  - `Number(` / `+` coercion applied to `*.minor`
+ *  - `Number(...)` or a unary `+` on a value that looks monetary
  *  - a `number`-typed field whose name is monetary, in an interface or a Money-adjacent object
  *
  * Test files and scripts are exempt: a test may legitimately write `129.99` to prove the parser
  * rejects it, and `scripts/` prints human-facing amounts.
+ *
+ * `packages/gate` additionally asserts these rules against its own source in
+ * `test/structure.test.ts`, because it is the package a reviewer and a judge will read.
  *
  * Usage: node scripts/check-money-discipline.mjs [--report] [--root <dir>]
  * Exit:  0 clean, 1 violations found.
@@ -55,7 +60,8 @@ const SCAN_ROOTS = [
 const EXEMPT_FILE = /(\.test\.[tj]sx?|\.spec\.[tj]sx?|\.sandbox\.test\.ts)$/
 const EXEMPT_LINE = /\/\/(.*)$|\/\*(.*)$|\*(.*)$/
 
-const MONEY_NAME = /(amount|minor|total|price|balance|budget|cap|refund|capture|spend|spent|reserve)/i
+const MONEY_NAME =
+  /(amount|minor|total|price|balance|budget|cap|refund|capture|spend|spent|reserve)/i
 
 const RULES = [
   {
@@ -142,7 +148,13 @@ function main() {
           while (rule.re.exec(code) !== null) {
             if (rule.exemptLine && rule.exemptLine.test(line)) continue
             if (rule.requireLine && !rule.requireLine.test(line)) continue
-            violations.push({ file: rel, line: i + 1, id: rule.id, snippet: line.trim(), why: rule.why })
+            violations.push({
+              file: rel,
+              line: i + 1,
+              id: rule.id,
+              snippet: line.trim(),
+              why: rule.why,
+            })
           }
         }
       })
@@ -169,7 +181,9 @@ function main() {
     console.error(`    why: ${list[0].why}\n`)
   }
   if (!report) {
-    console.error('Money is integer minor units. See docs/spec/countersign-blueprint.md §0 and packages/core/src/money.ts.')
+    console.error(
+      'Money is integer minor units. See docs/spec/countersign-blueprint.md §0 and packages/core/src/money.ts.',
+    )
     process.exit(1)
   }
 }

@@ -71,8 +71,8 @@ export default function LandingPage() {
         Agent payments that hold up afterwards.
       </h1>
       <p className="mt-5 max-w-2xl text-pretty text-lg text-[--color-ink-soft]">
-        Others make agents that can pay. Countersign makes agent payments that survive a dispute — for
-        the user, the merchant and PayPal. A signed{' '}
+        Others make agents that can pay. Countersign makes agent payments that survive a dispute —
+        for the user, the merchant and PayPal. A signed{' '}
         <a
           className="underline underline-offset-4"
           href="https://github.com/agent-intent/verifiable-intent"
@@ -81,8 +81,8 @@ export default function LandingPage() {
         >
           Verifiable Intent
         </a>{' '}
-        mandate is checked by a deterministic Gate before any PayPal order exists, and the same signed
-        chain becomes the evidence packet if the buyer later claims they never authorised it.
+        mandate is checked by a deterministic Gate before any PayPal order exists, and the same
+        signed chain becomes the evidence packet if the buyer later claims they never authorised it.
       </p>
 
       <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -122,12 +122,18 @@ export default function LandingPage() {
       </section>
 
       <section className="mt-16" aria-labelledby="how-it-works">
-        <h2 id="how-it-works" className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+        <h2
+          id="how-it-works"
+          className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]"
+        >
           How it works
         </h2>
         <ol className="mt-6 space-y-6">
           {STEPS.map((s) => (
-            <li key={s.n} className="grid gap-2 border-l-2 border-[--color-rule] pl-5 sm:grid-cols-[2rem_1fr]">
+            <li
+              key={s.n}
+              className="grid gap-2 border-l-2 border-[--color-rule] pl-5 sm:grid-cols-[2rem_1fr]"
+            >
               <span className="font-mono text-sm text-[--color-signed]">{s.n}</span>
               <div>
                 <h3 className="font-semibold">{s.title}</h3>
@@ -150,7 +156,8 @@ export default function LandingPage() {
       </section>
 
       <footer className="mt-16 border-t border-[--color-rule] pt-6 text-sm text-[--color-ink-faint]">
-        Built on the PayPal sandbox · Verifiable Intent (Apache-2.0) · Apache-2.0. Sandbox only — see{' '}
+        Built on the PayPal sandbox · Verifiable Intent (Apache-2.0) · Apache-2.0. Sandbox only —
+        see{' '}
         <Link href="/status" className="underline underline-offset-4">
           status
         </Link>{' '}

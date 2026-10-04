@@ -56,7 +56,9 @@ export function catalogOf(projection: CatalogProjection): CatalogReader {
 }
 
 /** A reader that always fails, for the "catalog unavailable" path. */
-export function failingCatalog(code: 'CS_NOT_FOUND' | 'CS_VALIDATION' = 'CS_NOT_FOUND'): CatalogReader {
+export function failingCatalog(
+  code: 'CS_NOT_FOUND' | 'CS_VALIDATION' = 'CS_NOT_FOUND',
+): CatalogReader {
   return {
     read: async (): Promise<Result<CatalogProjection>> =>
       err(csError(code, 'The store list did not load', {}, { retryable: true })),
@@ -175,7 +177,11 @@ function extractText(prompt: unknown): string {
     const parts: string[] = []
     if (Array.isArray(content)) {
       for (const part of content) {
-        if (typeof part === 'object' && part !== null && (part as { type?: unknown }).type === 'text') {
+        if (
+          typeof part === 'object' &&
+          part !== null &&
+          (part as { type?: unknown }).type === 'text'
+        ) {
           const value = (part as { text?: unknown }).text
           if (typeof value === 'string') parts.push(value)
         }

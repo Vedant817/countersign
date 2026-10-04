@@ -17,6 +17,7 @@
   "dependencies": {
     "@countersign/core": "workspace:*",
     "@countersign/db": "workspace:*",
+    "@countersign/ledger": "workspace:*",
     "@countersign/vi-client": "workspace:*",
     "@countersign/paypal": "workspace:*",
     "jose": "6.2.12",

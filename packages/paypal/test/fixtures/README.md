@@ -18,11 +18,11 @@ captured from a sandbox, and **there is deliberately no `fixtures/<date>/` direc
 with hand-written JSON would be the exact dishonesty rule 5 forbids: a future reader could not tell a
 capture from a guess, and a test built on a guess would look identical to a test built on the API.
 
-| Path | Status | What it is |
-|---|---|---|
-| `fixtures/<date>/*.json` | **absent** | Reserved for real captures. Created only by `scripts/capture-fixture.ts`. |
-| `transport-double.ts` | **doc-derived stand-in** | A `fetch` substitute plus hand-written PayPal *response shapes*. |
-| `sandbox-env.ts` | **real** | Reads real credentials from the environment and builds a real client for the sandbox suites. |
+| Path                     | Status                   | What it is                                                                                   |
+| ------------------------ | ------------------------ | -------------------------------------------------------------------------------------------- |
+| `fixtures/<date>/*.json` | **absent**               | Reserved for real captures. Created only by `scripts/capture-fixture.ts`.                    |
+| `transport-double.ts`    | **doc-derived stand-in** | A `fetch` substitute plus hand-written PayPal _response shapes_.                             |
+| `sandbox-env.ts`         | **real**                 | Reads real credentials from the environment and builds a real client for the sandbox suites. |
 
 ## `transport-double.ts` — a transport double, not a PayPal mock
 
@@ -39,21 +39,21 @@ The distinction matters, so it is worth being precise:
 - **Every response shape is written from the published PayPal documentation**, and each carries its
   source URL in a doc comment. The `DOC` map at the top of the file is the index:
 
-  | Constant | Document |
-  |---|---|
-  | `DOC.auth` | https://developer.paypal.com/api/rest/authentication/ |
-  | `DOC.orders` | https://developer.paypal.com/docs/api/orders/v2/ |
-  | `DOC.payments` | https://developer.paypal.com/docs/api/payments/v2/ |
-  | `DOC.vault` | https://developer.paypal.com/docs/api/vault/v3/ |
-  | `DOC.disputes` | https://developer.paypal.com/docs/api/customer-disputes/v1/ |
-  | `DOC.provideEvidence` | https://developer.paypal.com/api/customer-disputes/v1/disputes-provide-evidence |
-  | `DOC.disputesGuide` | https://developer.paypal.com/platforms/disputes/handle-disputes/use-disputes-api |
-  | `DOC.evidenceFiles` | https://developer.paypal.com/disputes/supported-file-sizes-types |
-  | `DOC.disputesSetup` | https://developer.paypal.com/disputes/set-up |
-  | `DOC.webhooks` | https://developer.paypal.com/api/rest/webhooks/event-names/ |
-  | `DOC.idempotency` | https://developer.paypal.com/api/rest/reference/idempotency/ |
-  | `DOC.rateLimiting` | https://developer.paypal.com/api/rest/reference/rate-limiting/ |
-  | `DOC.sandboxDisputes` | https://developer.paypal.com/disputes/test-go-live |
+  | Constant              | Document                                                                         |
+  | --------------------- | -------------------------------------------------------------------------------- |
+  | `DOC.auth`            | https://developer.paypal.com/api/rest/authentication/                            |
+  | `DOC.orders`          | https://developer.paypal.com/docs/api/orders/v2/                                 |
+  | `DOC.payments`        | https://developer.paypal.com/docs/api/payments/v2/                               |
+  | `DOC.vault`           | https://developer.paypal.com/docs/api/vault/v3/                                  |
+  | `DOC.disputes`        | https://developer.paypal.com/docs/api/customer-disputes/v1/                      |
+  | `DOC.provideEvidence` | https://developer.paypal.com/api/customer-disputes/v1/disputes-provide-evidence  |
+  | `DOC.disputesGuide`   | https://developer.paypal.com/platforms/disputes/handle-disputes/use-disputes-api |
+  | `DOC.evidenceFiles`   | https://developer.paypal.com/disputes/supported-file-sizes-types                 |
+  | `DOC.disputesSetup`   | https://developer.paypal.com/disputes/set-up                                     |
+  | `DOC.webhooks`        | https://developer.paypal.com/api/rest/webhooks/event-names/                      |
+  | `DOC.idempotency`     | https://developer.paypal.com/api/rest/reference/idempotency/                     |
+  | `DOC.rateLimiting`    | https://developer.paypal.com/api/rest/reference/rate-limiting/                   |
+  | `DOC.sandboxDisputes` | https://developer.paypal.com/disputes/test-go-live                               |
 
 - **The shapes here were audited on 2026-10-04** against the OpenAPI and `developer.paypal.com`
   ([`../../../docs/verification/paypal-api-2026-10-04.md`](../../../docs/verification/paypal-api-2026-10-04.md)).
@@ -64,21 +64,21 @@ The distinction matters, so it is worth being precise:
 
 - **It also carries the time and logging doubles** (`fixedClock`-based `testClock`, `recordingSleep`,
   `capturingLogger`). Those are not PayPal fakes at all: `Date.now()` is banned in this codebase
-  (spec §8.1) and a retry that really slept would be both slow and incapable of asserting a *duration*.
+  (spec §8.1) and a retry that really slept would be both slow and incapable of asserting a _duration_.
 
 ## The three things the double deliberately does not do
 
 1. **It never returns a 2xx with a shape we have not modelled**, unless a test asks for one. The
    client's schemas are `loose`, so a field PayPal adds later cannot break them — and if it ever does,
    the error is `CS_INTERNAL` with the issue list, not a silent `undefined`.
-2. **It never invents a PayPal *limit*.** No maximum header length, no rate-limit threshold, no
+2. **It never invents a PayPal _limit_.** No maximum header length, no rate-limit threshold, no
    maximum file size. Where a real limit is needed it is written `UNVERIFIED` in code and in
-   `IDEMPOTENCY.md`. The one exception is the evidence file sizes, which PayPal *does* document
+   `IDEMPOTENCY.md`. The one exception is the evidence file sizes, which PayPal _does_ document
    ("less than 10 MB per file", "up to 50 MB per API call") and which are enforced as decimal —
    `MAX_EVIDENCE_FILE_BYTES` / `MAX_EVIDENCE_TOTAL_BYTES` in `src/multipart.ts` are that page's numbers,
    not this file's.
 3. **It never asserts idempotency.** The 503 → 503 → 200 sequence in `client.retry.test.ts` proves the
-   *client* re-sends the same request id. It cannot prove PayPal deduplicates it. The probe that can is
+   _client_ re-sends the same request id. It cannot prove PayPal deduplicates it. The probe that can is
    `client.sandbox.test.ts`, gated behind real credentials.
 
 ## What replaces this file

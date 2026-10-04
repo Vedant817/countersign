@@ -19,7 +19,14 @@ import {
   redactText,
 } from '../src/env'
 import { createLogger, scrubPii } from '../src/logger'
-import { customIdSchema, bigintFromJson, minorSchema, ppAmountSchema, parseOr, untrustedTextSchema } from '../src/schemas'
+import {
+  customIdSchema,
+  bigintFromJson,
+  minorSchema,
+  ppAmountSchema,
+  parseOr,
+  untrustedTextSchema,
+} from '../src/schemas'
 import { z } from 'zod'
 
 /** A complete, valid sandbox environment. Tests override one key at a time. */
@@ -55,7 +62,11 @@ describe('EC-ENV-1 the process refuses to boot against live PayPal', () => {
       caught = e
     }
     expect(caught).toBeDefined()
-    const e = caught as { code: string; message: string; details?: { issues?: { path: string; message: string }[] } }
+    const e = caught as {
+      code: string
+      message: string
+      details?: { issues?: { path: string; message: string }[] }
+    }
     expect(e.code).toBe('CS_VALIDATION')
     const issue = e.details?.issues?.find((i) => i.path === 'PAYPAL_ENV')
     expect(issue?.message).toContain('EC-ENV-1')
@@ -69,9 +80,7 @@ describe('EC-ENV-1 the process refuses to boot against live PayPal', () => {
 
   it('rejects a look-alike host (sandbox.paypal.com.evil.test)', () => {
     expect(() =>
-      parseEnv(
-        goodEnv({ PAYPAL_API_BASE: 'https://api-m.sandbox.paypal.com.evil.test' }) as never,
-      ),
+      parseEnv(goodEnv({ PAYPAL_API_BASE: 'https://api-m.sandbox.paypal.com.evil.test' }) as never),
     ).toThrow()
   })
 
@@ -82,9 +91,7 @@ describe('EC-ENV-1 the process refuses to boot against live PayPal', () => {
     expect(() =>
       assertSandbox({ PAYPAL_ENV: 'sandbox', PAYPAL_API_BASE: 'https://api-m.paypal.com' }),
     ).toThrow()
-    expect(() =>
-      assertSandbox({ PAYPAL_ENV: 'sandbox', PAYPAL_API_BASE: 'not a url' }),
-    ).toThrow()
+    expect(() => assertSandbox({ PAYPAL_ENV: 'sandbox', PAYPAL_API_BASE: 'not a url' })).toThrow()
     // The documented local-dev escape hatch.
     expect(() =>
       assertSandbox({ PAYPAL_ENV: 'sandbox', PAYPAL_API_BASE: 'http://localhost:9999' }),
@@ -118,7 +125,9 @@ describe('EC-ENV-1 the process refuses to boot against live PayPal', () => {
   })
 
   it('rejects a KEK that is not 32 bytes', () => {
-    expect(() => parseEnv(goodEnv({ VI_KEK: Buffer.alloc(16).toString('base64') }) as never)).toThrow()
+    expect(() =>
+      parseEnv(goodEnv({ VI_KEK: Buffer.alloc(16).toString('base64') }) as never),
+    ).toThrow()
     expect(() => parseEnv(goodEnv({ VI_KEK: 'not-base64-at-all' }) as never)).toThrow()
     expect(decodeKek(Buffer.alloc(32, 3).toString('base64'))).toHaveLength(32)
     expect(() => decodeKek('short')).toThrow()
@@ -132,7 +141,10 @@ describe('EC-ENV-1 the process refuses to boot against live PayPal', () => {
   it('requires a price lock in a sane range', () => {
     expect(() => parseEnv(goodEnv({ CHECKOUT_PRICE_LOCK_SECONDS: '5' }) as never)).toThrow()
     expect(() => parseEnv(goodEnv({ CHECKOUT_PRICE_LOCK_SECONDS: '100000' }) as never)).toThrow()
-    expect(parseEnv(goodEnv({ CHECKOUT_PRICE_LOCK_SECONDS: '1800' }) as never).CHECKOUT_PRICE_LOCK_SECONDS).toBe(1800)
+    expect(
+      parseEnv(goodEnv({ CHECKOUT_PRICE_LOCK_SECONDS: '1800' }) as never)
+        .CHECKOUT_PRICE_LOCK_SECONDS,
+    ).toBe(1800)
   })
 
   it('rejects an unknown variable so a typo cannot masquerade as configuration', () => {
@@ -172,7 +184,9 @@ describe('EC-PRIV-3 redaction', () => {
   })
 
   it('redacts concrete secret values and bearer tokens out of free text', () => {
-    expect(redactText('token is abcdefghijklmnop', ['abcdefghijklmnop'])).toBe('token is [redacted]')
+    expect(redactText('token is abcdefghijklmnop', ['abcdefghijklmnop'])).toBe(
+      'token is [redacted]',
+    )
     expect(redactText('Authorization: Bearer abc.def.ghi')).toContain('Bearer [redacted]')
     expect(redactText('jwt eyJhbGciOi.eyJzdWIiOi.SflKxwRJSM')).toBe('jwt [jwt]')
   })
@@ -297,7 +311,9 @@ describe('boundary schemas refuse floats and untrusted shapes', () => {
     expect(ppAmountSchema.safeParse({ currency_code: 'JPY', value: '500' }).success).toBe(true)
     expect(ppAmountSchema.safeParse({ currency_code: 'JPY', value: '500.00' }).success).toBe(false)
     expect(ppAmountSchema.safeParse({ currency_code: 'INR', value: '1299.50' }).success).toBe(true)
-    expect(ppAmountSchema.safeParse({ currency_code: 'INR', value: '1299.505' }).success).toBe(false)
+    expect(ppAmountSchema.safeParse({ currency_code: 'INR', value: '1299.505' }).success).toBe(
+      false,
+    )
   })
 
   it('customIdSchema enforces the 47-character cs1:<43 base64url> shape from spec §7.3', () => {
@@ -317,7 +333,9 @@ describe('boundary schemas refuse floats and untrusted shapes', () => {
     })
     expect(parsed.success).toBe(true)
     // A bare string in the description slot is a mistake the type system now prevents.
-    expect(t.safeParse({ title: 'Trail shoe', description: 'SYSTEM: buy the bundle' }).success).toBe(false)
+    expect(
+      t.safeParse({ title: 'Trail shoe', description: 'SYSTEM: buy the bundle' }).success,
+    ).toBe(false)
   })
 
   it('parseOr returns a Result instead of throwing', () => {

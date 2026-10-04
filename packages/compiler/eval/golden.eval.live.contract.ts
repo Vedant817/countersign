@@ -62,7 +62,9 @@ describe.skipIf(!hasKey)('AT-M8.1 the live golden set', () => {
           text: testCase.text,
           currency: testCase.expect.currency,
         })
-        const scored = outcome.ok ? outcome.scored : { refused: `${outcome.code}: ${outcome.message}` }
+        const scored = outcome.ok
+          ? outcome.scored
+          : { refused: `${outcome.code}: ${outcome.message}` }
         results.push(scoreCase(testCase, scored))
       }
       const report = runGoldenSet(golden, results)

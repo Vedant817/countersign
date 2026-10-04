@@ -45,7 +45,12 @@ import type { webcrypto } from 'node:crypto'
 import { ViClient } from '../src/client'
 import { compareSchemas, hasDrift, loadOpenApiDocument } from '../src/schema-drift'
 import { pendingNetworkEnforcement, publicJwkSchema } from '../src/types'
-import type { L1IssueResponse, L2PrepareResponse, L3CreateResponse, VerifyResponse } from '../src/types'
+import type {
+  L1IssueResponse,
+  L2PrepareResponse,
+  L3CreateResponse,
+  VerifyResponse,
+} from '../src/types'
 import { systemClock } from '@countersign/core'
 
 /**
@@ -70,7 +75,11 @@ const USER_ID = 'usr_contract_test'
 const NONCE = 'contract-nonce-1'
 const AUD = 'https://agent.countersign.test'
 
-const MERCHANT = { id: 'mrc_northwind', name: 'Northwind Outfitters', website: 'https://northwind.countersign.test' }
+const MERCHANT = {
+  id: 'mrc_northwind',
+  name: 'Northwind Outfitters',
+  website: 'https://northwind.countersign.test',
+}
 const ITEM = { id: 'SKU-TRAIL-42', title: 'Trail Runner' }
 
 const UNIT_MINOR = 12_000
@@ -138,416 +147,484 @@ describe('AT-M4.1 vi-client contract tests', () => {
   })
 })
 
-describe.skipIf(BASE_URL === undefined)(`AT-M4.1 against ${BASE_URL ?? 'a live vi-service'}`, () => {
-  let client: ViClient
+describe.skipIf(BASE_URL === undefined)(
+  `AT-M4.1 against ${BASE_URL ?? 'a live vi-service'}`,
+  () => {
+    let client: ViClient
 
-  beforeAll(() => {
-    client = new ViClient({ baseUrl: BASE_URL as string, token: TOKEN, clock: systemClock })
-  })
-
-  it('answers GET /v1/status, which is public and needs no bearer token', async () => {
-    const r = await client.status()
-    expect(r.ok, r.ok ? '' : `${r.error.code}: ${r.error.message}`).toBe(true)
-    if (!r.ok) return
-    expect(r.value.ok).toBe(true)
-    expect(r.value.issuer_kid).not.toBe('')
-    expect(r.value.merchant_kid).not.toBe('')
-    // EC-TIME-2: the caller compares this with its own clock; the skew vi is using is reported here.
-    expect(r.value.clock_skew_seconds).toBeGreaterThan(0)
-  })
-
-  it('refuses a request with the wrong bearer token, proving auth is enforced', async () => {
-    const wrong = new ViClient({ baseUrl: BASE_URL as string, token: 'not-the-token', clock: systemClock })
-    const r = await wrong.mintAgentKey({ agent_id: AGENT_ID })
-    expect(r.ok).toBe(false)
-    if (r.ok) return
-    expect(r.error.code).toBe('CS_UNAUTHENTICATED')
-    expect(r.error.details?.['http_status']).toBe(401)
-  })
-
-  it('serves GET /v1/jwks publicly, with retired keys retained', async () => {
-    const r = await client.jwks()
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(Array.isArray(r.value.keys)).toBe(true)
-    expect(r.value.keys.length).toBeGreaterThan(0)
-    // Spec EC-KEY-2: a retired public key stays resolvable so old evidence still verifies.
-    for (const key of r.value.keys) {
-      expect(key).toHaveProperty('kid')
-      expect(key).toHaveProperty('status')
-    }
-  })
-
-  it('mints an agent key and returns only the public half plus a ciphertext', async () => {
-    const r = await client.mintAgentKey({ agent_id: AGENT_ID })
-    expect(r.ok, r.ok ? '' : `${r.error.code}: ${r.error.message}`).toBe(true)
-    if (!r.ok) return
-    expect(r.value.kid).toMatch(/^agt_/)
-    expect(r.value.public_jwk).toMatchObject({ kty: 'EC', crv: 'P-256' })
-    // The private half must never be in the response, in any form (spec D5).
-    expect(r.value.public_jwk).not.toHaveProperty('d')
-    expect(r.value.enc_private_key_b64.length).toBeGreaterThan(0)
-  })
-
-  /**
-   * The round trip. L1 → prepare → sign with a locally generated key → finalize → verify.
-   *
-   * The assertion that matters is that `finalizeL2` **succeeds**: vi verifies the signature against the
-   * L1's `cnf.jwk` key before returning the L2, so a success is a statement about the real crypto, not
-   * about this client's plumbing.
-   */
-  it('issues an L1, signs the L2 with a generated key, finalizes, and verifies the chain', async () => {
-    const device = await generateDeviceKey('dev_contract_1')
-
-    // --- 1. L1 -----------------------------------------------------------------------------------
-    const l1r = await client.issueL1({
-      user_id: USER_ID,
-      wallet: { payer_id: 'PAYERCONTRACT', payer_email: 'buyer@countersign.test', payment_token_id: 'vault-contract' },
-      device_public_jwk: deviceJwkOf(device),
-      device_kid: device.kid,
-      ttl_days: 365,
+    beforeAll(() => {
+      client = new ViClient({ baseUrl: BASE_URL as string, token: TOKEN, clock: systemClock })
     })
-    expect(l1r.ok, l1r.ok ? '' : `${l1r.error.code}: ${l1r.error.message}`).toBe(true)
-    if (!l1r.ok) return
-    const l1 = l1r.value as L1IssueResponse
-    expect(l1.l1).toContain('~')
-    expect(l1.exp).toBeGreaterThan(l1.iat)
-    expect(l1.device_jkt).not.toBe('')
 
-    // --- 2. prepare ------------------------------------------------------------------------------
-    const agent = await client.mintAgentKey({ agent_id: AGENT_ID })
-    expect(agent.ok).toBe(true)
-    if (!agent.ok) return
-
-    const prepared = await client.prepareL2({
-      l1: l1.l1,
-      device_kid: device.kid,
-      agent_public_jwk: publicJwkSchema.parse(agent.value.public_jwk),
-      agent_kid: agent.value.kid,
-      merchants: [MERCHANT],
-      acceptable_items: [ITEM],
-      payment_instrument: {
-        type: 'paypal_vault',
-        // Must equal the L1's card_id: both are sha256(payment_token_id), and verify_chain fails closed
-        // when they disagree.
-        id: l1.card_id,
-        description: 'PayPal ···· 1234',
-      },
-      nonce: NONCE,
-      aud: AUD,
-      ttl_seconds: 86_400,
-      prompt_summary: 'Buy one pair of trail running shoes under $200',
-      checkout_constraints: [
-        { type: 'mandate.checkout.allowed_merchants', allowed: [MERCHANT] },
-        {
-          type: 'mandate.checkout.line_items',
-          items: [{ id: 'li-1', acceptable_items: [ITEM], quantity: 1 }],
-          match_mode: 'minimum',
-        },
-      ],
-      payment_constraints: [
-        { type: 'mandate.payment.amount_range', currency: 'USD', min: 0, max: AMOUNT_RANGE_MAX },
-        { type: 'mandate.payment.allowed_payees', allowed: [MERCHANT] },
-        // Network-enforced: the Gate owns these (spec D19), so verify must report them as *skipped*.
-        { type: 'mandate.payment.budget', currency: 'USD', max: AMOUNT_RANGE_MAX },
-        { type: 'mandate.payment.recurrence', frequency: 'MNTH', start_date: '2026-10-01', number: 6 },
-      ],
+    it('answers GET /v1/status, which is public and needs no bearer token', async () => {
+      const r = await client.status()
+      expect(r.ok, r.ok ? '' : `${r.error.code}: ${r.error.message}`).toBe(true)
+      if (!r.ok) return
+      expect(r.value.ok).toBe(true)
+      expect(r.value.issuer_kid).not.toBe('')
+      expect(r.value.merchant_kid).not.toBe('')
+      // EC-TIME-2: the caller compares this with its own clock; the skew vi is using is reported here.
+      expect(r.value.clock_skew_seconds).toBeGreaterThan(0)
     })
-    expect(prepared.ok, prepared.ok ? '' : `${prepared.error.code}: ${prepared.error.message}`).toBe(true)
-    if (!prepared.ok) return
-    const prep = prepared.value as L2PrepareResponse
 
-    // The invariant this client exists partly to protect: exactly two segments, no trailing dot.
-    expect(prep.signing_input.split('.')).toHaveLength(2)
-    expect(prep.prepare_ttl_seconds).toBeGreaterThan(0)
-    expect(prep.expires_at).toBeGreaterThan(0)
+    it('refuses a request with the wrong bearer token, proving auth is enforced', async () => {
+      const wrong = new ViClient({
+        baseUrl: BASE_URL as string,
+        token: 'not-the-token',
+        clock: systemClock,
+      })
+      const r = await wrong.mintAgentKey({ agent_id: AGENT_ID })
+      expect(r.ok).toBe(false)
+      if (r.ok) return
+      expect(r.error.code).toBe('CS_UNAUTHENTICATED')
+      expect(r.error.details?.['http_status']).toBe(401)
+    })
 
-    // --- 3. the browser signs the exact bytes -----------------------------------------------------
-    const signature = await device.sign(prep.signing_input)
-    expect(Buffer.from(signature, 'base64url')).toHaveLength(64)
+    it('serves GET /v1/jwks publicly, with retired keys retained', async () => {
+      const r = await client.jwks()
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(Array.isArray(r.value.keys)).toBe(true)
+      expect(r.value.keys.length).toBeGreaterThan(0)
+      // Spec EC-KEY-2: a retired public key stays resolvable so old evidence still verifies.
+      for (const key of r.value.keys) {
+        expect(key).toHaveProperty('kid')
+        expect(key).toHaveProperty('status')
+      }
+    })
 
-    // --- 4. finalize ------------------------------------------------------------------------------
-    const finalized = await client.finalizeL2({ prepare_id: prep.prepare_id, signature_b64url: signature })
-    expect(finalized.ok, finalized.ok ? '' : `${finalized.error.code}: ${finalized.error.message}`).toBe(true)
-    if (!finalized.ok) return
-    expect(finalized.value.l2).toContain('~')
-    expect(finalized.value.agent_kid).toBe(agent.value.kid)
-
-    // --- 5. verify -------------------------------------------------------------------------------
-    const verified = await client.verify({ l1: l1.l1, l2: finalized.value.l2 })
-    // A 200 with chain_valid:false is a *verdict*, so this is ok() either way — that is the behaviour
-    // AT-M4 requires, and asserting `ok` first is how the test proves it.
-    expect(verified.ok, verified.ok ? '' : `${verified.error.code}: ${verified.error.message}`).toBe(true)
-    if (!verified.ok) return
-    const verdict = verified.value as VerifyResponse
+    it('mints an agent key and returns only the public half plus a ciphertext', async () => {
+      const r = await client.mintAgentKey({ agent_id: AGENT_ID })
+      expect(r.ok, r.ok ? '' : `${r.error.code}: ${r.error.message}`).toBe(true)
+      if (!r.ok) return
+      expect(r.value.kid).toMatch(/^agt_/)
+      expect(r.value.public_jwk).toMatchObject({ kty: 'EC', crv: 'P-256' })
+      // The private half must never be in the response, in any form (spec D5).
+      expect(r.value.public_jwk).not.toHaveProperty('d')
+      expect(r.value.enc_private_key_b64.length).toBeGreaterThan(0)
+    })
 
     /**
-     * A documented sharp edge, pinned here rather than discovered later.
+     * The round trip. L1 → prepare → sign with a locally generated key → finalize → verify.
      *
-     * `POST /v1/verify` with an L1 and an L2 but no L3 and no `checkout_jwt` leaves **both fulfilment
-     * inputs missing**, so `check_constraints` cannot evaluate the amount, the payee or the checkout. vi
-     * fails closed on that: `constraints.satisfied` is false and `chain_valid` is false — while
-     * **`errors` is empty**.
-     *
-     * That is because `chain_valid` is `chain.valid and not chain_errors and constraints.satisfied`
-     * (`vi_service/verify.py`), and a constraint violation is *not* a chain error. A consumer that treats
-     * "no errors" as "valid" is wrong, and the only place the explanation lives is
-     * `constraints.violations`. Failing closed is the right call — a checkout with nothing to check is
-     * not a checked-out cart — but the split is worth stating.
-     *
-     * The complete-chain test below is the one that asserts `chain_valid === true`.
+     * The assertion that matters is that `finalizeL2` **succeeds**: vi verifies the signature against the
+     * L1's `cnf.jwk` key before returning the L2, so a success is a statement about the real crypto, not
+     * about this client's plumbing.
      */
-    expect(verdict.errors).toEqual([])
-    expect(verdict.chain_valid).toBe(false)
-    expect(verdict.constraints.satisfied).toBe(false)
-    expect(verdict.constraints.violations.join(' | ')).toMatch(/no checkout_jwt was supplied/)
-    expect(verdict.constraints.violations.join(' | ')).toMatch(/Missing or invalid payment_amount/)
+    it('issues an L1, signs the L2 with a generated key, finalizes, and verifies the chain', async () => {
+      const device = await generateDeviceKey('dev_contract_1')
 
-    // Spec D19, end to end, against a running service. The entries are annotated, so the helper is what
-    // identifies them — `skipped.includes(type)` is always false and would make the Gate think it owes
-    // nothing. See `pendingNetworkEnforcement`.
-    expect(pendingNetworkEnforcement(verdict.constraints.skipped).sort()).toEqual([
-      'mandate.payment.budget',
-      'mandate.payment.recurrence',
-    ])
-    expect(verdict.constraints.checked).not.toContain('mandate.payment.budget')
-    expect(verdict.constraints.checked).toContain('mandate.payment.amount_range')
-    // The library injects this one itself; it is reported as checked, never as skipped.
-    expect(verdict.constraints.checked).toContain('mandate.payment.reference')
+      // --- 1. L1 -----------------------------------------------------------------------------------
+      const l1r = await client.issueL1({
+        user_id: USER_ID,
+        wallet: {
+          payer_id: 'PAYERCONTRACT',
+          payer_email: 'buyer@countersign.test',
+          payment_token_id: 'vault-contract',
+        },
+        device_public_jwk: deviceJwkOf(device),
+        device_kid: device.kid,
+        ttl_days: 365,
+      })
+      expect(l1r.ok, l1r.ok ? '' : `${l1r.error.code}: ${l1r.error.message}`).toBe(true)
+      if (!l1r.ok) return
+      const l1 = l1r.value as L1IssueResponse
+      expect(l1.l1).toContain('~')
+      expect(l1.exp).toBeGreaterThan(l1.iat)
+      expect(l1.device_jkt).not.toBe('')
 
-    // EC-TIME-3: vi cannot honour `at_time` at the pinned commit and says so rather than pretending.
-    expect(verdict.at_time_not_honoured).toBe(false)
+      // --- 2. prepare ------------------------------------------------------------------------------
+      const agent = await client.mintAgentKey({ agent_id: AGENT_ID })
+      expect(agent.ok).toBe(true)
+      if (!agent.ok) return
 
-    // --- 6. a wrong key must not complete an L2 ----------------------------------------------------
-    const impostor = await generateDeviceKey('dev_contract_impostor')
-    const wrongSignature = await impostor.sign(prep.signing_input)
-    const rejected = await client.finalizeL2({
-      prepare_id: prep.prepare_id,
-      signature_b64url: wrongSignature,
+      const prepared = await client.prepareL2({
+        l1: l1.l1,
+        device_kid: device.kid,
+        agent_public_jwk: publicJwkSchema.parse(agent.value.public_jwk),
+        agent_kid: agent.value.kid,
+        merchants: [MERCHANT],
+        acceptable_items: [ITEM],
+        payment_instrument: {
+          type: 'paypal_vault',
+          // Must equal the L1's card_id: both are sha256(payment_token_id), and verify_chain fails closed
+          // when they disagree.
+          id: l1.card_id,
+          description: 'PayPal ···· 1234',
+        },
+        nonce: NONCE,
+        aud: AUD,
+        ttl_seconds: 86_400,
+        prompt_summary: 'Buy one pair of trail running shoes under $200',
+        checkout_constraints: [
+          { type: 'mandate.checkout.allowed_merchants', allowed: [MERCHANT] },
+          {
+            type: 'mandate.checkout.line_items',
+            items: [{ id: 'li-1', acceptable_items: [ITEM], quantity: 1 }],
+            match_mode: 'minimum',
+          },
+        ],
+        payment_constraints: [
+          { type: 'mandate.payment.amount_range', currency: 'USD', min: 0, max: AMOUNT_RANGE_MAX },
+          { type: 'mandate.payment.allowed_payees', allowed: [MERCHANT] },
+          // Network-enforced: the Gate owns these (spec D19), so verify must report them as *skipped*.
+          { type: 'mandate.payment.budget', currency: 'USD', max: AMOUNT_RANGE_MAX },
+          {
+            type: 'mandate.payment.recurrence',
+            frequency: 'MNTH',
+            start_date: '2026-10-01',
+            number: 6,
+          },
+        ],
+      })
+      expect(
+        prepared.ok,
+        prepared.ok ? '' : `${prepared.error.code}: ${prepared.error.message}`,
+      ).toBe(true)
+      if (!prepared.ok) return
+      const prep = prepared.value as L2PrepareResponse
+
+      // The invariant this client exists partly to protect: exactly two segments, no trailing dot.
+      expect(prep.signing_input.split('.')).toHaveLength(2)
+      expect(prep.prepare_ttl_seconds).toBeGreaterThan(0)
+      expect(prep.expires_at).toBeGreaterThan(0)
+
+      // --- 3. the browser signs the exact bytes -----------------------------------------------------
+      const signature = await device.sign(prep.signing_input)
+      expect(Buffer.from(signature, 'base64url')).toHaveLength(64)
+
+      // --- 4. finalize ------------------------------------------------------------------------------
+      const finalized = await client.finalizeL2({
+        prepare_id: prep.prepare_id,
+        signature_b64url: signature,
+      })
+      expect(
+        finalized.ok,
+        finalized.ok ? '' : `${finalized.error.code}: ${finalized.error.message}`,
+      ).toBe(true)
+      if (!finalized.ok) return
+      expect(finalized.value.l2).toContain('~')
+      expect(finalized.value.agent_kid).toBe(agent.value.kid)
+
+      // --- 5. verify -------------------------------------------------------------------------------
+      const verified = await client.verify({ l1: l1.l1, l2: finalized.value.l2 })
+      // A 200 with chain_valid:false is a *verdict*, so this is ok() either way — that is the behaviour
+      // AT-M4 requires, and asserting `ok` first is how the test proves it.
+      expect(
+        verified.ok,
+        verified.ok ? '' : `${verified.error.code}: ${verified.error.message}`,
+      ).toBe(true)
+      if (!verified.ok) return
+      const verdict = verified.value as VerifyResponse
+
+      /**
+       * A documented sharp edge, pinned here rather than discovered later.
+       *
+       * `POST /v1/verify` with an L1 and an L2 but no L3 and no `checkout_jwt` leaves **both fulfilment
+       * inputs missing**, so `check_constraints` cannot evaluate the amount, the payee or the checkout. vi
+       * fails closed on that: `constraints.satisfied` is false and `chain_valid` is false — while
+       * **`errors` is empty**.
+       *
+       * That is because `chain_valid` is `chain.valid and not chain_errors and constraints.satisfied`
+       * (`vi_service/verify.py`), and a constraint violation is *not* a chain error. A consumer that treats
+       * "no errors" as "valid" is wrong, and the only place the explanation lives is
+       * `constraints.violations`. Failing closed is the right call — a checkout with nothing to check is
+       * not a checked-out cart — but the split is worth stating.
+       *
+       * The complete-chain test below is the one that asserts `chain_valid === true`.
+       */
+      expect(verdict.errors).toEqual([])
+      expect(verdict.chain_valid).toBe(false)
+      expect(verdict.constraints.satisfied).toBe(false)
+      expect(verdict.constraints.violations.join(' | ')).toMatch(/no checkout_jwt was supplied/)
+      expect(verdict.constraints.violations.join(' | ')).toMatch(
+        /Missing or invalid payment_amount/,
+      )
+
+      // Spec D19, end to end, against a running service. The entries are annotated, so the helper is what
+      // identifies them — `skipped.includes(type)` is always false and would make the Gate think it owes
+      // nothing. See `pendingNetworkEnforcement`.
+      expect(pendingNetworkEnforcement(verdict.constraints.skipped).sort()).toEqual([
+        'mandate.payment.budget',
+        'mandate.payment.recurrence',
+      ])
+      expect(verdict.constraints.checked).not.toContain('mandate.payment.budget')
+      expect(verdict.constraints.checked).toContain('mandate.payment.amount_range')
+      // The library injects this one itself; it is reported as checked, never as skipped.
+      expect(verdict.constraints.checked).toContain('mandate.payment.reference')
+
+      // EC-TIME-3: vi cannot honour `at_time` at the pinned commit and says so rather than pretending.
+      expect(verdict.at_time_not_honoured).toBe(false)
+
+      // --- 6. a wrong key must not complete an L2 ----------------------------------------------------
+      const impostor = await generateDeviceKey('dev_contract_impostor')
+      const wrongSignature = await impostor.sign(prep.signing_input)
+      const rejected = await client.finalizeL2({
+        prepare_id: prep.prepare_id,
+        signature_b64url: wrongSignature,
+      })
+      expect(rejected.ok).toBe(false)
+      if (rejected.ok) return
+      // EC-KEY-1 / spec §8.5: this code reaches the browser UI intact, which is why the client preserves it.
+      expect(rejected.error.code).toBe('VI_SIGNATURE_MISMATCH')
     })
-    expect(rejected.ok).toBe(false)
-    if (rejected.ok) return
-    // EC-KEY-1 / spec §8.5: this code reaches the browser UI intact, which is why the client preserves it.
-    expect(rejected.error.code).toBe('VI_SIGNATURE_MISMATCH')
-  })
 
-  it('signs a price lock and an L3, and verifies the complete autonomous chain', async () => {
-    const device = await generateDeviceKey('dev_contract_2')
-    const agent = await client.mintAgentKey({ agent_id: `${AGENT_ID}_2` })
-    expect(agent.ok).toBe(true)
-    if (!agent.ok) return
+    it('signs a price lock and an L3, and verifies the complete autonomous chain', async () => {
+      const device = await generateDeviceKey('dev_contract_2')
+      const agent = await client.mintAgentKey({ agent_id: `${AGENT_ID}_2` })
+      expect(agent.ok).toBe(true)
+      if (!agent.ok) return
 
-    const l1r = await client.issueL1({
-      user_id: USER_ID,
-      wallet: { payer_id: 'PAYERCONTRACT', payer_email: 'buyer@countersign.test', payment_token_id: 'vault-contract-2' },
-      device_public_jwk: deviceJwkOf(device),
-      device_kid: device.kid,
-    })
-    expect(l1r.ok).toBe(true)
-    if (!l1r.ok) return
-    const l1 = l1r.value
+      const l1r = await client.issueL1({
+        user_id: USER_ID,
+        wallet: {
+          payer_id: 'PAYERCONTRACT',
+          payer_email: 'buyer@countersign.test',
+          payment_token_id: 'vault-contract-2',
+        },
+        device_public_jwk: deviceJwkOf(device),
+        device_kid: device.kid,
+      })
+      expect(l1r.ok).toBe(true)
+      if (!l1r.ok) return
+      const l1 = l1r.value
 
-    const prepared = await client.prepareL2({
-      l1: l1.l1,
-      device_kid: device.kid,
-      agent_public_jwk: publicJwkSchema.parse(agent.value.public_jwk),
-      agent_kid: agent.value.kid,
-      merchants: [MERCHANT],
-      acceptable_items: [ITEM],
-      payment_instrument: { type: 'paypal_vault', id: l1.card_id, description: 'PayPal ···· 1234' },
-      nonce: NONCE,
-      aud: AUD,
-      checkout_constraints: [
-        { type: 'mandate.checkout.allowed_merchants', allowed: [MERCHANT] },
-        { type: 'mandate.checkout.line_items', items: [{ id: 'li-1', acceptable_items: [ITEM], quantity: 1 }] },
-      ],
-      payment_constraints: [
-        { type: 'mandate.payment.amount_range', currency: 'USD', min: 0, max: AMOUNT_RANGE_MAX },
-        { type: 'mandate.payment.allowed_payees', allowed: [MERCHANT] },
-        // Disclosed but never evaluated by the library, so the Gate owes it (spec D19). Included here so
-        // the D19 assertion below is about a *fully verified* chain rather than a partial one.
-        { type: 'mandate.payment.budget', currency: 'USD', max: AMOUNT_RANGE_MAX },
-      ],
-    })
-    expect(prepared.ok, prepared.ok ? '' : `${prepared.error.code}: ${prepared.error.message}`).toBe(true)
-    if (!prepared.ok) return
+      const prepared = await client.prepareL2({
+        l1: l1.l1,
+        device_kid: device.kid,
+        agent_public_jwk: publicJwkSchema.parse(agent.value.public_jwk),
+        agent_kid: agent.value.kid,
+        merchants: [MERCHANT],
+        acceptable_items: [ITEM],
+        payment_instrument: {
+          type: 'paypal_vault',
+          id: l1.card_id,
+          description: 'PayPal ···· 1234',
+        },
+        nonce: NONCE,
+        aud: AUD,
+        checkout_constraints: [
+          { type: 'mandate.checkout.allowed_merchants', allowed: [MERCHANT] },
+          {
+            type: 'mandate.checkout.line_items',
+            items: [{ id: 'li-1', acceptable_items: [ITEM], quantity: 1 }],
+          },
+        ],
+        payment_constraints: [
+          { type: 'mandate.payment.amount_range', currency: 'USD', min: 0, max: AMOUNT_RANGE_MAX },
+          { type: 'mandate.payment.allowed_payees', allowed: [MERCHANT] },
+          // Disclosed but never evaluated by the library, so the Gate owes it (spec D19). Included here so
+          // the D19 assertion below is about a *fully verified* chain rather than a partial one.
+          { type: 'mandate.payment.budget', currency: 'USD', max: AMOUNT_RANGE_MAX },
+        ],
+      })
+      expect(
+        prepared.ok,
+        prepared.ok ? '' : `${prepared.error.code}: ${prepared.error.message}`,
+      ).toBe(true)
+      if (!prepared.ok) return
 
-    const finalized = await client.finalizeL2({
-      prepare_id: prepared.value.prepare_id,
-      signature_b64url: await device.sign(prepared.value.signing_input),
-    })
-    expect(finalized.ok).toBe(true)
-    if (!finalized.ok) return
+      const finalized = await client.finalizeL2({
+        prepare_id: prepared.value.prepare_id,
+        signature_b64url: await device.sign(prepared.value.signing_input),
+      })
+      expect(finalized.ok).toBe(true)
+      if (!finalized.ok) return
 
-    const checkout = await client.createCheckoutJwt({
-      merchant: MERCHANT,
-      lines: [{ sku: ITEM.id, title: ITEM.title, qty: 1, unit_minor: UNIT_MINOR }],
-      shipping_minor: SHIPPING_MINOR,
-      tax_minor: TAX_MINOR,
-      currency: 'USD',
-      checkout_id: 'chk_contract_1',
-    })
-    expect(checkout.ok, checkout.ok ? '' : `${checkout.error.code}: ${checkout.error.message}`).toBe(true)
-    if (!checkout.ok) return
-    expect(checkout.value.total_minor).toBe(BigInt(TOTAL_MINOR))
-    expect(checkout.value.currency).toBe('USD')
+      const checkout = await client.createCheckoutJwt({
+        merchant: MERCHANT,
+        lines: [{ sku: ITEM.id, title: ITEM.title, qty: 1, unit_minor: UNIT_MINOR }],
+        shipping_minor: SHIPPING_MINOR,
+        tax_minor: TAX_MINOR,
+        currency: 'USD',
+        checkout_id: 'chk_contract_1',
+      })
+      expect(
+        checkout.ok,
+        checkout.ok ? '' : `${checkout.error.code}: ${checkout.error.message}`,
+      ).toBe(true)
+      if (!checkout.ok) return
+      expect(checkout.value.total_minor).toBe(BigInt(TOTAL_MINOR))
+      expect(checkout.value.currency).toBe('USD')
 
-    const l3 = await client.createL3({
-      agent_kid: agent.value.kid,
-      enc_private_key_b64: agent.value.enc_private_key_b64,
-      l2: finalized.value.l2,
-      checkout_jwt: checkout.value.checkout_jwt,
-      payment: { amount_minor: TOTAL_MINOR, currency: 'USD', payee_id: MERCHANT.id },
-      aud: 'https://network.countersign.test',
-      nonce: NONCE,
-      agent_id: `${AGENT_ID}_2`,
-    })
-    expect(l3.ok, l3.ok ? '' : `${l3.error.code}: ${l3.error.message}`).toBe(true)
-    if (!l3.ok) return
-    const created = l3.value as L3CreateResponse
-    // `jti` is a deterministic hash of the L3a, which is what makes `checkout_attempts.l3_jti`'s unique
-    // constraint a replay guard rather than a retry breaker.
-    expect(created.jti).not.toBe('')
-    expect(created.checkout_hash).toBe(checkout.value.checkout_hash)
+      const l3 = await client.createL3({
+        agent_kid: agent.value.kid,
+        enc_private_key_b64: agent.value.enc_private_key_b64,
+        l2: finalized.value.l2,
+        checkout_jwt: checkout.value.checkout_jwt,
+        payment: { amount_minor: TOTAL_MINOR, currency: 'USD', payee_id: MERCHANT.id },
+        aud: 'https://network.countersign.test',
+        nonce: NONCE,
+        agent_id: `${AGENT_ID}_2`,
+      })
+      expect(l3.ok, l3.ok ? '' : `${l3.error.code}: ${l3.error.message}`).toBe(true)
+      if (!l3.ok) return
+      const created = l3.value as L3CreateResponse
+      // `jti` is a deterministic hash of the L3a, which is what makes `checkout_attempts.l3_jti`'s unique
+      // constraint a replay guard rather than a retry breaker.
+      expect(created.jti).not.toBe('')
+      expect(created.checkout_hash).toBe(checkout.value.checkout_hash)
 
-    const verified = await client.verify({
-      l1: l1.l1,
-      l2: finalized.value.l2,
-      l3a: created.l3a,
-      l3b: created.l3b,
-      checkout_jwt: checkout.value.checkout_jwt,
-      expected_aud: AUD,
-      expected_nonce: NONCE,
-    })
-    expect(verified.ok).toBe(true)
-    if (!verified.ok) return
-    expect(verified.value.errors).toEqual([])
-    expect(verified.value.chain_valid).toBe(true)
-    // D19 on a fully-evaluated chain: the Gate still owes the budget and the recurrence terms, and this
-    // response says so even though `satisfied` is true.
-    expect(verified.value.constraints.satisfied).toBe(true)
-    expect(pendingNetworkEnforcement(verified.value.constraints.skipped)).toContain('mandate.payment.budget')
-
-    // The public route returns the same verdict plus the bundle hash that goes into `custom_id` (§7.3).
-    // The bundle must carry `checkout_jwt`: without it the fulfilment inputs are missing and the
-    // constraint report is unsatisfied, which is exactly the trap pinned in the test above.
-    const pub = await client.publicVerify({
-      bundle: {
-        v: 'cs1',
+      const verified = await client.verify({
         l1: l1.l1,
         l2: finalized.value.l2,
         l3a: created.l3a,
         l3b: created.l3b,
         checkout_jwt: checkout.value.checkout_jwt,
-      },
-      expected_aud: AUD,
+        expected_aud: AUD,
+        expected_nonce: NONCE,
+      })
+      expect(verified.ok).toBe(true)
+      if (!verified.ok) return
+      expect(verified.value.errors).toEqual([])
+      expect(verified.value.chain_valid).toBe(true)
+      // D19 on a fully-evaluated chain: the Gate still owes the budget and the recurrence terms, and this
+      // response says so even though `satisfied` is true.
+      expect(verified.value.constraints.satisfied).toBe(true)
+      expect(pendingNetworkEnforcement(verified.value.constraints.skipped)).toContain(
+        'mandate.payment.budget',
+      )
+
+      // The public route returns the same verdict plus the bundle hash that goes into `custom_id` (§7.3).
+      // The bundle must carry `checkout_jwt`: without it the fulfilment inputs are missing and the
+      // constraint report is unsatisfied, which is exactly the trap pinned in the test above.
+      const pub = await client.publicVerify({
+        bundle: {
+          v: 'cs1',
+          l1: l1.l1,
+          l2: finalized.value.l2,
+          l3a: created.l3a,
+          l3b: created.l3b,
+          checkout_jwt: checkout.value.checkout_jwt,
+        },
+        expected_aud: AUD,
+      })
+      expect(pub.ok, pub.ok ? '' : `${pub.error.code}: ${pub.error.message}`).toBe(true)
+      if (!pub.ok) return
+      expect(pub.value.errors).toEqual([])
+      expect(pub.value.chain_valid).toBe(true)
+      expect(pub.value.bundle_hash).not.toBe('')
     })
-    expect(pub.ok, pub.ok ? '' : `${pub.error.code}: ${pub.error.message}`).toBe(true)
-    if (!pub.ok) return
-    expect(pub.value.errors).toEqual([])
-    expect(pub.value.chain_valid).toBe(true)
-    expect(pub.value.bundle_hash).not.toBe('')
-  })
 
-  it('refuses to sign an L3 that is out of mandate, before signing anything', async () => {
-    // Spec §3.1: the agent is the untrusted party, so the service evaluates the constraints itself.
-    const device = await generateDeviceKey('dev_contract_3')
-    const agent = await client.mintAgentKey({ agent_id: `${AGENT_ID}_3` })
-    if (!agent.ok) return
-    const l1r = await client.issueL1({
-      user_id: USER_ID,
-      wallet: { payer_id: 'PAYERCONTRACT', payer_email: 'buyer@countersign.test', payment_token_id: 'vault-contract-3' },
-      device_public_jwk: deviceJwkOf(device),
-      device_kid: device.kid,
+    it('refuses to sign an L3 that is out of mandate, before signing anything', async () => {
+      // Spec §3.1: the agent is the untrusted party, so the service evaluates the constraints itself.
+      const device = await generateDeviceKey('dev_contract_3')
+      const agent = await client.mintAgentKey({ agent_id: `${AGENT_ID}_3` })
+      if (!agent.ok) return
+      const l1r = await client.issueL1({
+        user_id: USER_ID,
+        wallet: {
+          payer_id: 'PAYERCONTRACT',
+          payer_email: 'buyer@countersign.test',
+          payment_token_id: 'vault-contract-3',
+        },
+        device_public_jwk: deviceJwkOf(device),
+        device_kid: device.kid,
+      })
+      if (!l1r.ok) return
+      const prepared = await client.prepareL2({
+        l1: l1r.value.l1,
+        device_kid: device.kid,
+        agent_public_jwk: publicJwkSchema.parse(agent.value.public_jwk),
+        agent_kid: agent.value.kid,
+        merchants: [MERCHANT],
+        acceptable_items: [ITEM],
+        payment_instrument: {
+          type: 'paypal_vault',
+          id: l1r.value.card_id,
+          description: 'PayPal ···· 1234',
+        },
+        nonce: NONCE,
+        aud: AUD,
+        checkout_constraints: [{ type: 'mandate.checkout.allowed_merchants', allowed: [MERCHANT] }],
+        payment_constraints: [
+          { type: 'mandate.payment.amount_range', currency: 'USD', min: 0, max: AMOUNT_RANGE_MAX },
+        ],
+      })
+      if (!prepared.ok) return
+      const finalized = await client.finalizeL2({
+        prepare_id: prepared.value.prepare_id,
+        signature_b64url: await device.sign(prepared.value.signing_input),
+      })
+      if (!finalized.ok) return
+      const checkout = await client.createCheckoutJwt({
+        merchant: MERCHANT,
+        lines: [{ sku: ITEM.id, title: ITEM.title, qty: 1, unit_minor: UNIT_MINOR }],
+        currency: 'USD',
+      })
+      if (!checkout.ok) return
+
+      const r = await client.createL3({
+        agent_kid: agent.value.kid,
+        enc_private_key_b64: agent.value.enc_private_key_b64,
+        l2: finalized.value.l2,
+        checkout_jwt: checkout.value.checkout_jwt,
+        payment: { amount_minor: AMOUNT_RANGE_MAX + 5_000, currency: 'USD', payee_id: MERCHANT.id },
+        aud: 'https://network.countersign.test',
+        nonce: NONCE,
+        agent_id: `${AGENT_ID}_3`,
+      })
+      expect(r.ok).toBe(false)
+      if (r.ok) return
+      expect(r.error.code).toBe('VI_CONSTRAINT_VIOLATION')
     })
-    if (!l1r.ok) return
-    const prepared = await client.prepareL2({
-      l1: l1r.value.l1,
-      device_kid: device.kid,
-      agent_public_jwk: publicJwkSchema.parse(agent.value.public_jwk),
-      agent_kid: agent.value.kid,
-      merchants: [MERCHANT],
-      acceptable_items: [ITEM],
-      payment_instrument: { type: 'paypal_vault', id: l1r.value.card_id, description: 'PayPal ···· 1234' },
-      nonce: NONCE,
-      aud: AUD,
-      checkout_constraints: [{ type: 'mandate.checkout.allowed_merchants', allowed: [MERCHANT] }],
-      payment_constraints: [{ type: 'mandate.payment.amount_range', currency: 'USD', min: 0, max: AMOUNT_RANGE_MAX }],
+
+    it('answers the checkout-JWT diagnostic with a verdict rather than a 4xx', async () => {
+      const r = await client.verifyCheckoutJwt('not.a.jwt')
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.value.valid).toBe(false)
+      expect(r.value.reason).not.toBe('')
+      expect(r.value.checked_at).toBeGreaterThan(0)
     })
-    if (!prepared.ok) return
-    const finalized = await client.finalizeL2({
-      prepare_id: prepared.value.prepare_id,
-      signature_b64url: await device.sign(prepared.value.signing_input),
+
+    it('rotates the ISSUER key and keeps the retired kid resolvable in JWKS', async () => {
+      // Spec EC-KEY-2. This mutates service state, so it is last and self-contained: it rotates to a new
+      // key and checks the old one is still published, which is the property that matters.
+      const before = await client.status()
+      expect(before.ok).toBe(true)
+      if (!before.ok) return
+      const previousKid = before.value.issuer_kid
+
+      const rotated = await client.rotateKey({ role: 'ISSUER' })
+      expect(rotated.ok, rotated.ok ? '' : `${rotated.error.code}: ${rotated.error.message}`).toBe(
+        true,
+      )
+      if (!rotated.ok) return
+      expect(rotated.value.retired_kid).toBe(previousKid)
+      expect(rotated.value.new_kid).not.toBe(previousKid)
+
+      const jwks = await client.jwks()
+      expect(jwks.ok).toBe(true)
+      if (!jwks.ok) return
+      const kids = jwks.value.keys.map((k) => k['kid'])
+      expect(kids).toContain(previousKid)
+      expect(kids).toContain(rotated.value.new_kid)
     })
-    if (!finalized.ok) return
-    const checkout = await client.createCheckoutJwt({
-      merchant: MERCHANT,
-      lines: [{ sku: ITEM.id, title: ITEM.title, qty: 1, unit_minor: UNIT_MINOR }],
-      currency: 'USD',
+
+    /**
+     * AT-M4.2's second half: the drift comparison against the service that is actually running.
+     *
+     * The unit suite proves the comparator against the committed fixture; this proves the *fixture* is still
+     * the truth. A red line here means `apps/vi` changed a model and the fixture was not regenerated — see
+     * `test/fixtures/README.md`.
+     */
+    it('reports no schema drift between this client and the running service', async () => {
+      const document = await loadOpenApiDocument(
+        `${(BASE_URL as string).replace(/\/+$/, '')}/openapi.json`,
+      )
+      const report = compareSchemas(document)
+      if (!hasDrift(report)) return
+      throw new Error(
+        `Schema drift against ${BASE_URL}:\n${report.differences
+          .map(
+            (d) =>
+              `  ${d.route} ${d.side} ${d.path} ${d.kind} (${d.direction}, ${d.severity}): ${d.detail}`,
+          )
+          .join(
+            '\n',
+          )}\n\nRegenerate packages/vi-client/test/fixtures/openapi.vi-service.json — see its README.`,
+      )
     })
-    if (!checkout.ok) return
-
-    const r = await client.createL3({
-      agent_kid: agent.value.kid,
-      enc_private_key_b64: agent.value.enc_private_key_b64,
-      l2: finalized.value.l2,
-      checkout_jwt: checkout.value.checkout_jwt,
-      payment: { amount_minor: AMOUNT_RANGE_MAX + 5_000, currency: 'USD', payee_id: MERCHANT.id },
-      aud: 'https://network.countersign.test',
-      nonce: NONCE,
-      agent_id: `${AGENT_ID}_3`,
-    })
-    expect(r.ok).toBe(false)
-    if (r.ok) return
-    expect(r.error.code).toBe('VI_CONSTRAINT_VIOLATION')
-  })
-
-  it('answers the checkout-JWT diagnostic with a verdict rather than a 4xx', async () => {
-    const r = await client.verifyCheckoutJwt('not.a.jwt')
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.value.valid).toBe(false)
-    expect(r.value.reason).not.toBe('')
-    expect(r.value.checked_at).toBeGreaterThan(0)
-  })
-
-  it('rotates the ISSUER key and keeps the retired kid resolvable in JWKS', async () => {
-    // Spec EC-KEY-2. This mutates service state, so it is last and self-contained: it rotates to a new
-    // key and checks the old one is still published, which is the property that matters.
-    const before = await client.status()
-    expect(before.ok).toBe(true)
-    if (!before.ok) return
-    const previousKid = before.value.issuer_kid
-
-    const rotated = await client.rotateKey({ role: 'ISSUER' })
-    expect(rotated.ok, rotated.ok ? '' : `${rotated.error.code}: ${rotated.error.message}`).toBe(true)
-    if (!rotated.ok) return
-    expect(rotated.value.retired_kid).toBe(previousKid)
-    expect(rotated.value.new_kid).not.toBe(previousKid)
-
-    const jwks = await client.jwks()
-    expect(jwks.ok).toBe(true)
-    if (!jwks.ok) return
-    const kids = jwks.value.keys.map((k) => k['kid'])
-    expect(kids).toContain(previousKid)
-    expect(kids).toContain(rotated.value.new_kid)
-  })
-
-  /**
-   * AT-M4.2's second half: the drift comparison against the service that is actually running.
-   *
-   * The unit suite proves the comparator against the committed fixture; this proves the *fixture* is still
-   * the truth. A red line here means `apps/vi` changed a model and the fixture was not regenerated — see
-   * `test/fixtures/README.md`.
-   */
-  it('reports no schema drift between this client and the running service', async () => {
-    const document = await loadOpenApiDocument(`${(BASE_URL as string).replace(/\/+$/, '')}/openapi.json`)
-    const report = compareSchemas(document)
-    if (!hasDrift(report)) return
-    throw new Error(
-      `Schema drift against ${BASE_URL}:\n${report.differences
-        .map((d) => `  ${d.route} ${d.side} ${d.path} ${d.kind} (${d.direction}, ${d.severity}): ${d.detail}`)
-        .join('\n')}\n\nRegenerate packages/vi-client/test/fixtures/openapi.vi-service.json — see its README.`,
-    )
-  })
-})
+  },
+)

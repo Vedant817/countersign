@@ -65,18 +65,20 @@ function walk(dir, out = []) {
 const ID_RE = /\b(EC-[A-Z]+-\d+)\b/g
 
 /**
- * Walks a test file and attributes every `EC-…` reference to the test that encloses it.
+ * A reference is only credited when it appears **inside a test body** — between one test declaration
+ * and the next. Two earlier versions were wrong, and both inflated the published ledger:
  *
- * The attribution rule is deliberately strict: a reference counts only if it appears **inside** a
- * test, between one test declaration and the next. An earlier version used a fixed 2-line lookbehind,
- * which credited an EC id mentioned in a file-header comment or an import block — so a file could
- * claim coverage for a case no test actually touches, and the published ledger would overstate
- * itself. A ledger that lies is worse than no ledger.
+ *  1. A fixed 2-line lookbehind credited an EC id mentioned in a file header or an import block.
+ *  2. Treating `describe(` as a test declaration opened a window at the *start of the describe block*,
+ *     so a section banner like `/* … §8.9, EC-IDEM-1 *\/` above the first `it()` was attributed to
+ *     that first test — letting a file claim a case no test touches (DECISIONS D-017 rule 1).
  *
- * A reference may therefore be:
- *  - in the test's own title, e.g. `it('EC-CAP-1 partial capture …')`,
- *  - in a comment on the lines immediately above it (the convention AGENTS.md asks for), or
- *  - anywhere in the body, which is what lets one test legitimately close several cases.
+ * So: `describe(` closes any open window and opens **none**. Only `it(`/`test(` and Python `def test_`
+ * open one. A describe-level banner naming an EC id is documentation, not coverage, and the id belongs
+ * in the individual test title where it can be traced to an assertion.
+ *
+ * Within a window, a reference in the title, in a comment, or in the body all count — which is what
+ * lets one test legitimately close several cases.
  */
 function scan(file) {
   const src = readFileSync(file, 'utf8')
@@ -84,9 +86,9 @@ function scan(file) {
   const hits = []
   const rel = relative(ROOT, file).split(sep).join('/')
 
-  // A test declaration starts a new attribution window; anything before the first one is file scope.
+  const isDescribe = (line) => /\bdescribe\s*\(/.test(line)
   const isTestDecl = (line) =>
-    /\b(?:it|test|describe)\s*\(/.test(line) || /^\s*def\s+(test_[A-Za-z0-9_]+)/.test(line)
+    /\b(?:it|test)\s*\(/.test(line) || /^\s*def\s+(test_[A-Za-z0-9_]+)/.test(line)
 
   const descRe = /\b(?:it|test|describe)\s*\(\s*(['"`])(.*?)\1/
   const fnRe = /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)/
@@ -97,6 +99,14 @@ function scan(file) {
 
   lines.forEach((line, i) => {
     const lineNo = i + 1
+
+    // A `describe` is a container, not a test: it closes whatever window was open and deliberately
+    // opens none, so an id in a describe-level banner is not credited to that block's first test.
+    if (isDescribe(line)) {
+      if (openTest) closed.push(openTest)
+      openTest = null
+      return
+    }
 
     if (isTestDecl(line)) {
       if (openTest) closed.push(openTest)
@@ -120,14 +130,18 @@ function scan(file) {
 
 /** Which test type letters a spec §12 row promised (S/U/I/E/P). */
 function declaredTypes(declaredTest) {
-  return [...new Set((declaredTest.match(/[SUIEP]/g) ?? []))].sort().join('')
+  return [...new Set(declaredTest.match(/[SUIEP]/g) ?? [])].sort().join('')
 }
 
 function build() {
   const ledger = JSON.parse(readFileSync(LEDGER, 'utf8'))
   const cases = ledger.cases
 
-  const files = [...walk(join(ROOT, 'apps')), ...walk(join(ROOT, 'packages')), ...walk(join(ROOT, 'scripts'))]
+  const files = [
+    ...walk(join(ROOT, 'apps')),
+    ...walk(join(ROOT, 'packages')),
+    ...walk(join(ROOT, 'scripts')),
+  ]
   const hits = files.flatMap(scan)
 
   const byId = new Map()
@@ -167,7 +181,9 @@ function escape(s) {
 function statusOf(r) {
   if (r.status === 'blocked') return r.testCount > 0 ? 'blocked (tested)' : 'blocked (no test)'
   if (r.testCount === 0) return r.status === 'wip' ? 'wip — no test' : 'todo — no test'
-  return r.status === 'done' ? 'done' : `${r.status} — ${r.testCount} test${r.testCount > 1 ? 's' : ''}`
+  return r.status === 'done'
+    ? 'done'
+    : `${r.status} — ${r.testCount} test${r.testCount > 1 ? 's' : ''}`
 }
 
 function render(rows, generatedAt) {
@@ -205,7 +221,9 @@ function render(rows, generatedAt) {
       out.push('')
       out.push(`## §${r.section} ${r.sectionTitle}`)
       out.push('')
-      out.push(`Owning work package(s): \`${r.wp}\` · module: \`${r.module}\` · spec line ${r.specLine}`)
+      out.push(
+        `Owning work package(s): \`${r.wp}\` · module: \`${r.module}\` · spec line ${r.specLine}`,
+      )
       out.push('')
       out.push('| ID | Scenario | Handling | Declared | Test(s) | Status |')
       out.push('|---|---|---|---|---|---|')
@@ -229,7 +247,9 @@ function render(rows, generatedAt) {
   out.push('')
   out.push('1. Write the test, naming the EC id in the title or in a comment directly above it.')
   out.push('2. Put the handling code in the module the `wp` column names.')
-  out.push('3. Set `status` to `done` in `docs/edge-cases.json` (or `blocked` with a `blockedReason`).')
+  out.push(
+    '3. Set `status` to `done` in `docs/edge-cases.json` (or `blocked` with a `blockedReason`).',
+  )
   out.push('4. Run `pnpm test:ec`. It regenerates this file and fails if anything is unclaimed.')
   out.push('')
 
@@ -240,9 +260,13 @@ function main() {
   const { rows, unknown } = build()
   const allowIncomplete = process.argv.includes('--allow-incomplete')
 
-  const unclaimed = rows.filter((r) => r.testCount === 0 && r.status !== 'blocked' && r.status !== 'dropped')
+  const unclaimed = rows.filter(
+    (r) => r.testCount === 0 && r.status !== 'blocked' && r.status !== 'dropped',
+  )
   const claimedNotDone = rows.filter((r) => r.testCount > 0 && r.status === 'todo')
-  const badStatus = rows.filter((r) => !['todo', 'wip', 'done', 'blocked', 'dropped'].includes(r.status))
+  const badStatus = rows.filter(
+    (r) => !['todo', 'wip', 'done', 'blocked', 'dropped'].includes(r.status),
+  )
   const blockedNoReason = rows.filter((r) => r.status === 'blocked' && !r.blockedReason)
 
   const generatedAt = `${new Date().toISOString().replace('T', ' ').slice(0, 16)}Z`
@@ -271,11 +295,10 @@ function main() {
   console.log(`  ${rows.reduce((n, r) => n + r.testCount, 0)} test references total\n`)
 
   const problems = []
-  if (unknown.length) problems.push(`${unknown.length} test reference(s) use an EC id outside spec §12`)
+  if (unknown.length)
+    problems.push(`${unknown.length} test reference(s) use an EC id outside spec §12`)
   if (badStatus.length) {
-    problems.push(
-      `invalid status for ${badStatus.map((r) => `${r.id}=${r.status}`).join(', ')}`,
-    )
+    problems.push(`invalid status for ${badStatus.map((r) => `${r.id}=${r.status}`).join(', ')}`)
   }
   if (blockedNoReason.length) {
     problems.push(`blocked without a reason: ${blockedNoReason.map((r) => r.id).join(', ')}`)

@@ -51,7 +51,7 @@ describe('fullJitterDelayMs', () => {
 
   it('spreads concurrent workers over the whole window (the reason for full jitter)', () => {
     const samples = Array.from({ length: 200 }, (_v, i) =>
-      fullJitterDelayMs(1, DEFAULT_BACKOFF, () => (i * 37 % 100) / 100),
+      fullJitterDelayMs(1, DEFAULT_BACKOFF, () => ((i * 37) % 100) / 100),
     )
     const distinct = new Set(samples)
     // 20 workers colliding on one retry is what turns a PayPal blip into a self-inflicted outage.

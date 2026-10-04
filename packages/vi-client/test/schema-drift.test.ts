@@ -93,7 +93,9 @@ describe('AT-M4.2: the committed OpenAPI document and the zod schemas agree', ()
     // `main.py` returns a bare `dict[str, Any]` for this route, so FastAPI emits
     // `{"type": "object", "additionalProperties": true}`. This client types it anyway, and says so.
     const report = compareSchemas(await readFixture())
-    const note = report.unverifiable.find((u) => u.route === 'GET /v1/checkout-jwt/verify' && u.side === 'response')
+    const note = report.unverifiable.find(
+      (u) => u.route === 'GET /v1/checkout-jwt/verify' && u.side === 'response',
+    )
     expect(note).toBeDefined()
     expect(note?.reason).toMatch(/opaque object/)
   })
@@ -125,9 +127,14 @@ describe('a field the service sends and the client does not model', () => {
   })
 
   it('fails the check even though it is informational, because §8.4 says the fields must not differ', () => {
-    expect(hasDrift({ differences: [stubDifference('service-only')], unverifiable: [], routesCompared: 1, routesInDocument: 1 })).toBe(
-      true,
-    )
+    expect(
+      hasDrift({
+        differences: [stubDifference('service-only')],
+        unverifiable: [],
+        routesCompared: 1,
+        routesInDocument: 1,
+      }),
+    ).toBe(true)
   })
 })
 
@@ -216,7 +223,10 @@ describe('type drift', () => {
 describe('enum drift', () => {
   it('is reported when the service adds a value the client does not accept', async () => {
     const report = await drifted((doc) => {
-      props(doc, 'RotateKeyRequest')['role'] = { type: 'string', enum: ['ISSUER', 'MERCHANT', 'GATE'] }
+      props(doc, 'RotateKeyRequest')['role'] = {
+        type: 'string',
+        enum: ['ISSUER', 'MERCHANT', 'GATE'],
+      }
     })
     const d = find(report, 'POST /v1/keys/rotate', 'role')
     expect(d?.kind).toBe('enum')
@@ -245,7 +255,9 @@ describe('enum drift', () => {
     expect(d?.direction).toBe('client-only')
     expect(d?.severity).toBe('breaking')
     // Every dropped currency is named, not just the first.
-    const named = report.differences.filter((x) => x.route === 'POST /v1/checkout-jwt' && x.kind === 'enum')
+    const named = report.differences.filter(
+      (x) => x.route === 'POST /v1/checkout-jwt' && x.kind === 'enum',
+    )
     expect(named.map((x) => x.detail).join(' ')).toContain('JPY')
     expect(named).toHaveLength(5)
   })
@@ -274,8 +286,14 @@ describe('additionalProperties drift', () => {
       paths: {
         '/v1/synthetic': {
           post: {
-            requestBody: { content: { 'application/json': { schema: body(closed.request ?? true) } } },
-            responses: { '200': { content: { 'application/json': { schema: body(closed.response ?? false) } } } },
+            requestBody: {
+              content: { 'application/json': { schema: body(closed.request ?? true) } },
+            },
+            responses: {
+              '200': {
+                content: { 'application/json': { schema: body(closed.response ?? false) } },
+              },
+            },
           },
         },
       },
@@ -286,27 +304,54 @@ describe('additionalProperties drift', () => {
     // On a request the client builds the body, so being laxer than the service means it can build a body
     // vi will reject.
     const report = compareSchemas(syntheticDoc({ request: true, response: true }), [
-      { method: 'POST', path: '/v1/synthetic', auth: 'bearer', request: LOOSE_REQUEST, response: STRICT_RESPONSE, note: '' },
+      {
+        method: 'POST',
+        path: '/v1/synthetic',
+        auth: 'bearer',
+        request: LOOSE_REQUEST,
+        response: STRICT_RESPONSE,
+        note: '',
+      },
     ])
-    const d = report.differences.find((x) => x.side === 'request' && x.kind === 'additional-properties')
+    const d = report.differences.find(
+      (x) => x.side === 'request' && x.kind === 'additional-properties',
+    )
     expect(d?.severity).toBe('breaking')
     expect(d?.detail).toMatch(/vi will reject/)
   })
 
   it('reports as breaking on a response, where a closed client would reject a valid answer', () => {
     const report = compareSchemas(syntheticDoc({ request: false, response: false }), [
-      { method: 'POST', path: '/v1/synthetic', auth: 'bearer', request: STRICT_REQUEST, response: STRICT_RESPONSE, note: '' },
+      {
+        method: 'POST',
+        path: '/v1/synthetic',
+        auth: 'bearer',
+        request: STRICT_REQUEST,
+        response: STRICT_RESPONSE,
+        note: '',
+      },
     ])
-    const d = report.differences.find((x) => x.side === 'response' && x.kind === 'additional-properties')
+    const d = report.differences.find(
+      (x) => x.side === 'response' && x.kind === 'additional-properties',
+    )
     expect(d?.severity).toBe('breaking')
     expect(d?.detail).toMatch(/legitimate response would be rejected/)
   })
 
   it('reports as informational on a request, where a closed client is harmless', () => {
     const report = compareSchemas(syntheticDoc({ request: false, response: false }), [
-      { method: 'POST', path: '/v1/synthetic', auth: 'bearer', request: STRICT_REQUEST, response: LOOSE_RESPONSE, note: '' },
+      {
+        method: 'POST',
+        path: '/v1/synthetic',
+        auth: 'bearer',
+        request: STRICT_REQUEST,
+        response: LOOSE_RESPONSE,
+        note: '',
+      },
     ])
-    const d = report.differences.find((x) => x.side === 'request' && x.kind === 'additional-properties')
+    const d = report.differences.find(
+      (x) => x.side === 'request' && x.kind === 'additional-properties',
+    )
     expect(d?.direction).toBe('service-only')
     expect(d?.severity).toBe('informational')
   })
@@ -319,11 +364,34 @@ describe('additionalProperties drift', () => {
         openapi: '3.1.0',
         paths: {
           '/v1/synthetic': {
-            post: { responses: { '200': { content: { 'application/json': { schema: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'], additionalProperties: {} } } } } } },
+            post: {
+              responses: {
+                '200': {
+                  content: {
+                    'application/json': {
+                      schema: {
+                        type: 'object',
+                        properties: { a: { type: 'string' } },
+                        required: ['a'],
+                        additionalProperties: {},
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
-      [{ method: 'POST', path: '/v1/synthetic', auth: 'bearer', response: LOOSE_RESPONSE, note: '' }],
+      [
+        {
+          method: 'POST',
+          path: '/v1/synthetic',
+          auth: 'bearer',
+          response: LOOSE_RESPONSE,
+          note: '',
+        },
+      ],
     )
     expect(report.differences).toEqual([])
   })
@@ -342,7 +410,9 @@ describe('route drift', () => {
 
   it('is reported when the service declares a route the client has no method for', async () => {
     const report = await drifted((doc) => {
-      ;(doc['paths'] as Json)['/v1/brand-new'] = { post: { responses: { '200': { description: 'ok' } } } }
+      ;(doc['paths'] as Json)['/v1/brand-new'] = {
+        post: { responses: { '200': { description: 'ok' } } },
+      }
     })
     const d = report.differences.find((x) => x.kind === 'unmodelled-route')
     expect(d?.route).toBe('POST /v1/brand-new')
@@ -406,15 +476,21 @@ describe('loadOpenApiDocument', () => {
       })
     }) as unknown as typeof fetch
 
-    const doc = await loadOpenApiDocument('http://vi:8000/openapi.json', { fetchImpl, timeoutMs: 5_000 })
+    const doc = await loadOpenApiDocument('http://vi:8000/openapi.json', {
+      fetchImpl,
+      timeoutMs: 5_000,
+    })
     expect(seen[0]?.url).toBe('http://vi:8000/openapi.json')
     expect(seen[0]?.signal).toBeInstanceOf(AbortSignal)
     expect(doc).toMatchObject({ openapi: '3.1.0' })
   })
 
   it('reports a non-200 as an error naming the status, rather than comparing garbage', async () => {
-    const fetchImpl = (async () => new Response('nope', { status: 502, statusText: 'Bad Gateway' })) as unknown as typeof fetch
-    await expect(loadOpenApiDocument('http://vi:8000/openapi.json', { fetchImpl })).rejects.toThrow(/HTTP 502/)
+    const fetchImpl = (async () =>
+      new Response('nope', { status: 502, statusText: 'Bad Gateway' })) as unknown as typeof fetch
+    await expect(loadOpenApiDocument('http://vi:8000/openapi.json', { fetchImpl })).rejects.toThrow(
+      /HTTP 502/,
+    )
   })
 
   it('reports a connection failure as an error naming the URL', async () => {
@@ -427,7 +503,9 @@ describe('loadOpenApiDocument', () => {
   })
 
   it('reports a missing file as an error, so "cannot check" never looks like "checked"', async () => {
-    await expect(loadOpenApiDocument(join(HERE, 'fixtures', 'does-not-exist.json'))).rejects.toThrow()
+    await expect(
+      loadOpenApiDocument(join(HERE, 'fixtures', 'does-not-exist.json')),
+    ).rejects.toThrow()
   })
 
   it('rejects a file that is not JSON', async () => {

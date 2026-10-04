@@ -54,7 +54,11 @@ describe('createOrder (§10.2 #5, D18)', () => {
       isToken(call) ? tokenResponse() : orderResponse({ customId: EVIDENCE_HASH }),
     )
 
-    const body = createOrderTestDouble({ intent: 'CAPTURE', customId: EVIDENCE_HASH, value: '129.99' })
+    const body = createOrderTestDouble({
+      intent: 'CAPTURE',
+      customId: EVIDENCE_HASH,
+      value: '129.99',
+    })
     const result = await client.createOrder(body, CALL_OPTS)
     expect(result.ok).toBe(true)
 
@@ -77,9 +81,14 @@ describe('createOrder (§10.2 #5, D18)', () => {
 
   it('returns the parsed order with its status and purchase units', async () => {
     const { client } = makeClient((call) =>
-      isToken(call) ? tokenResponse() : orderResponse({ status: 'CREATED', customId: EVIDENCE_HASH }),
+      isToken(call)
+        ? tokenResponse()
+        : orderResponse({ status: 'CREATED', customId: EVIDENCE_HASH }),
     )
-    const result = await client.createOrder(createOrderTestDouble({ customId: EVIDENCE_HASH }), CALL_OPTS)
+    const result = await client.createOrder(
+      createOrderTestDouble({ customId: EVIDENCE_HASH }),
+      CALL_OPTS,
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.value.id).toBe(ORDER_ID)
@@ -160,7 +169,9 @@ describe('createOrder (§10.2 #5, D18)', () => {
   })
 
   it('a 2xx body missing `id` is CS_INTERNAL, not a validation error the caller can fix', async () => {
-    const { client } = makeClient((call) => (isToken(call) ? tokenResponse() : { status: 201, body: { status: 'CREATED' } }))
+    const { client } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : { status: 201, body: { status: 'CREATED' } },
+    )
     const result = await client.createOrder(createOrderTestDouble(), CALL_OPTS)
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -181,7 +192,9 @@ describe('createOrder (§10.2 #5, D18)', () => {
 
 describe('getOrder', () => {
   it('GETs the order and sends no request id', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : orderResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : orderResponse(),
+    )
     const result = await client.getOrder(ORDER_ID)
     expect(result.ok).toBe(true)
     const call = fetchImpl.calls.find((c) => c.url.includes(`/orders/${ORDER_ID}`)) as RecordedCall
@@ -210,7 +223,9 @@ describe('getOrder', () => {
   })
 
   it('url-encodes the id so a path segment cannot be injected', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : orderResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : orderResponse(),
+    )
     await client.getOrder('a/../b?x=1')
     const call = fetchImpl.calls.find((c) => c.url.includes('/orders/')) as RecordedCall
     expect(call.url).toContain('a%2F..%2Fb%3Fx%3D1')
@@ -312,9 +327,13 @@ describe('addTracking (§10.2 #8, EC-SPLIT-1/2)', () => {
     )
     const track = { capture_id: '3C679366HH908993F', tracking_number: '1Z999AA10123456784' }
     await client.addTracking(ORDER_ID, track, CALL_OPTS)
-    await client.addTracking(ORDER_ID, { ...track, tracking_number: '1Z999AA10123456785' }, {
-      requestId: 'cs:att_01JC0Z9P7YQ8V2N3M4K5K6R7ST9:create',
-    })
+    await client.addTracking(
+      ORDER_ID,
+      { ...track, tracking_number: '1Z999AA10123456785' },
+      {
+        requestId: 'cs:att_01JC0Z9P7YQ8V2N3M4K5K6R7ST9:create',
+      },
+    )
     expect(fetchImpl.calls.filter((c) => c.url.includes('/track'))).toHaveLength(2)
   })
 

@@ -58,13 +58,7 @@ async function main(argv: readonly string[]): Promise<number> {
   const report = compareSchemas(document)
 
   if (asJson) {
-    console.log(
-      JSON.stringify(
-        { source, ...report },
-        null,
-        2,
-      ),
-    )
+    console.log(JSON.stringify({ source, ...report }, null, 2))
   } else {
     console.log(`source: ${source}`)
     console.log(formatDriftTable(report))

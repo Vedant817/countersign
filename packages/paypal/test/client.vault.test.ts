@@ -106,7 +106,9 @@ describe('createSetupToken (§8.7 step 3, [V9])', () => {
     expect(VAULT_USAGE_PATTERNS).toContain('IMMEDIATE')
     expect(VAULT_USAGE_PATTERNS).toHaveLength(12)
 
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : setupTokenResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : setupTokenResponse(),
+    )
     const result = await client.createSetupToken({
       payment_source: { paypal: { usage_type: 'MERCHANT', usage_pattern: 'IMMEDIATE' } },
     })
@@ -127,7 +129,9 @@ describe('createSetupToken (§8.7 step 3, [V9])', () => {
   })
 
   it('exposes the approve link the browser JS SDK needs', async () => {
-    const { client } = makeClient((call) => (isToken(call) ? tokenResponse() : setupTokenResponse()))
+    const { client } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : setupTokenResponse(),
+    )
     const result = await client.createSetupToken({})
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -197,7 +201,9 @@ describe('createPaymentToken (§8.7 step 4, [V9])', () => {
     // documented `customer_vault_payment_tokens_response` carries `account_id` only. A `payer_id`-only
     // read would find nothing in production.
     const { client } = makeClient((call) =>
-      isToken(call) ? tokenResponse() : paymentTokenResponse({ payerId: false, accountId: 'VYYFH3WJ4JPJQ' }),
+      isToken(call)
+        ? tokenResponse()
+        : paymentTokenResponse({ payerId: false, accountId: 'VYYFH3WJ4JPJQ' }),
     )
     const result = await client.createPaymentToken(SETUP_TOKEN_ID)
     expect(result.ok).toBe(true)
@@ -225,7 +231,9 @@ describe('createPaymentToken (§8.7 step 4, [V9])', () => {
 
   it('maps a PayPal error on token creation without leaking the body', async () => {
     const { client } = makeClient((call) =>
-      isToken(call) ? tokenResponse() : paypalErrorResponse('INVALID_REQUEST', 'INVALID_PARAMETER_VALUE', 400),
+      isToken(call)
+        ? tokenResponse()
+        : paypalErrorResponse('INVALID_REQUEST', 'INVALID_PARAMETER_VALUE', 400),
     )
     const result = await client.createPaymentToken(SETUP_TOKEN_ID)
     expect(result.ok).toBe(false)
@@ -242,7 +250,9 @@ describe('getPaymentToken', () => {
     )
     const result = await client.getPaymentToken(PAYMENT_TOKEN_ID)
     expect(result.ok).toBe(true)
-    expect(callTo(fetchImpl.calls, `/v3/vault/payment-tokens/${PAYMENT_TOKEN_ID}`).method).toBe('GET')
+    expect(callTo(fetchImpl.calls, `/v3/vault/payment-tokens/${PAYMENT_TOKEN_ID}`).method).toBe(
+      'GET',
+    )
   })
 
   it('EC-MDT-6: a deleted token comes back PP_NOT_FOUND so the wallet can be marked DELETED', async () => {
@@ -258,7 +268,9 @@ describe('getPaymentToken', () => {
 
 describe('deletePaymentToken (§10.2 #17, revoke wallet)', () => {
   it('DELETEs and accepts a 204', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : { status: 204 }))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : { status: 204 },
+    )
     const result = await client.deletePaymentToken(PAYMENT_TOKEN_ID)
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -270,9 +282,16 @@ describe('deletePaymentToken (§10.2 #17, revoke wallet)', () => {
   })
 
   it('sends no request id, because DELETE takes none', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : { status: 204 }))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : { status: 204 },
+    )
     await client.deletePaymentToken(PAYMENT_TOKEN_ID)
-    expect(headerOf(callTo(fetchImpl.calls, `/v3/vault/payment-tokens/${PAYMENT_TOKEN_ID}`), 'paypal-request-id')).toBeUndefined()
+    expect(
+      headerOf(
+        callTo(fetchImpl.calls, `/v3/vault/payment-tokens/${PAYMENT_TOKEN_ID}`),
+        'paypal-request-id',
+      ),
+    ).toBeUndefined()
   })
 
   it('is safe to repeat: a second delete is a 404, never a second deletion', async () => {

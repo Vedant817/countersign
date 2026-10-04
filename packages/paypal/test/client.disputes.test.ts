@@ -118,7 +118,9 @@ describe('listDisputes (§10.2 #13)', () => {
   })
 
   it('defaults items to an empty array so the 2-minute reconciler never crashes', async () => {
-    const { client } = makeClient((call) => (isToken(call) ? tokenResponse() : { status: 200, body: {} }))
+    const { client } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : { status: 200, body: {} },
+    )
     const result = await client.listDisputes({})
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -126,7 +128,9 @@ describe('listDisputes (§10.2 #13)', () => {
   })
 
   it('parses each dispute into the fields the router reads', async () => {
-    const { client } = makeClient((call) => (isToken(call) ? tokenResponse() : disputeListResponse(1)))
+    const { client } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : disputeListResponse(1),
+    )
     const result = await client.listDisputes({})
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -144,9 +148,7 @@ describe('listDisputes (§10.2 #13)', () => {
     // INSIDE `disputed_transactions[]`, so a top-level read can never succeed against a real
     // response and the join was silently always `undefined`.
     const { client } = makeClient((call) =>
-      isToken(call)
-        ? tokenResponse()
-        : disputeListResponse(1),
+      isToken(call) ? tokenResponse() : disputeListResponse(1),
     )
     const result = await client.listDisputes({})
     expect(result.ok).toBe(true)
@@ -224,11 +226,15 @@ describe('getDispute', () => {
     const result = await client.getDispute(DISPUTE_ID)
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.value.allowed_response_options?.acknowledge_return_item?.acknowledgement_types).toContain(
-      'ITEM_RECEIVED',
+    expect(
+      result.value.allowed_response_options?.acknowledge_return_item?.acknowledgement_types,
+    ).toContain('ITEM_RECEIVED')
+    expect(result.value.allowed_response_options?.accept_claim?.accept_claim_types).toContain(
+      'PARTIAL_REFUND',
     )
-    expect(result.value.allowed_response_options?.accept_claim?.accept_claim_types).toContain('PARTIAL_REFUND')
-    expect(result.value.allowed_response_options?.make_offer?.offer_types).toContain('REFUND_WITH_RETURN')
+    expect(result.value.allowed_response_options?.make_offer?.offer_types).toContain(
+      'REFUND_WITH_RETURN',
+    )
   })
 
   it('404 → PP_NOT_FOUND (EC-DSP-9 / EC-WH-6: a foreign transaction)', async () => {
@@ -250,7 +256,7 @@ describe('getDispute', () => {
     expect(DISPUTE_STATES).toContain('APPEALABLE')
   })
 
-  it('DISPUTE_STATES is exactly PayPal\'s six documented values', () => {
+  it("DISPUTE_STATES is exactly PayPal's six documented values", () => {
     // Report §6/#6: five of the previous ten could never match a real `dispute_state`, because they
     // were `status` values or invented.
     expect([...DISPUTE_STATES].sort()).toEqual(
@@ -265,7 +271,7 @@ describe('getDispute', () => {
     )
   })
 
-  it('DISPUTE_REASONS is exactly PayPal\'s ten documented values', () => {
+  it("DISPUTE_REASONS is exactly PayPal's ten documented values", () => {
     // Report §7/#7: drop the five that do not exist, add the two that were missing.
     expect([...DISPUTE_REASONS].sort()).toEqual(
       [
@@ -348,14 +354,20 @@ describe('appeal eligibility is the HATEOAS link, not dispute_state (§8.16, rep
   it('is NOT appealable without the link, even when dispute_state says APPEALABLE', () => {
     // The reason the gate changed: `SPEC-D` says "If this link does not appear, you cannot appeal
     // the dispute", so a state-only check would offer an appeal PayPal refuses.
-    expect(isAppealable({ links: [{ href: 'x', rel: 'self' }], dispute_state: 'APPEALABLE' })).toBe(false)
+    expect(isAppealable({ links: [{ href: 'x', rel: 'self' }], dispute_state: 'APPEALABLE' })).toBe(
+      false,
+    )
   })
 
   it('refuses the appeal before posting when the link is absent', async () => {
     const { client, fetchImpl } = makeClient((call) =>
       isToken(call) ? tokenResponse() : disputeResponse({ state: 'APPEALABLE', appealable: false }),
     )
-    const result = await client.appeal(DISPUTE_ID, { evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT' }] }, [])
+    const result = await client.appeal(
+      DISPUTE_ID,
+      { evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT' }] },
+      [],
+    )
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe('CS_VALIDATION')
@@ -366,7 +378,11 @@ describe('appeal eligibility is the HATEOAS link, not dispute_state (§8.16, rep
 
   it('posts the appeal once the link is present', async () => {
     const { client, fetchImpl } = makeClient((call) =>
-      isToken(call) ? tokenResponse() : call.url.includes('/appeal') ? linksResponse() : disputeResponse(),
+      isToken(call)
+        ? tokenResponse()
+        : call.url.includes('/appeal')
+          ? linksResponse()
+          : disputeResponse(),
     )
     const result = await client.appeal(
       DISPUTE_ID,
@@ -375,13 +391,17 @@ describe('appeal eligibility is the HATEOAS link, not dispute_state (§8.16, rep
       { requestId: `cs:${DISPUTE_ID}:appeal:1` },
     )
     expect(result.ok).toBe(true)
-    expect(fetchImpl.calls.filter((c) => c.url.includes('/appeal') && c.method === 'POST')).toHaveLength(1)
+    expect(
+      fetchImpl.calls.filter((c) => c.url.includes('/appeal') && c.method === 'POST'),
+    ).toHaveLength(1)
   })
 })
 
 describe('acceptClaim (§10.2 #15)', () => {
   it('POSTs accept_claim_type', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     // A real value from SPEC-D's `accept_claim_type`: REFUND / REFUND_WITH_RETURN / PARTIAL_REFUND /
     // REFUND_WITH_RETURN_SHIPMENT_LABEL. The old test used `REFUND_NO_RETURN`, which is a make-offer
     // value that does not exist anywhere (report §3/#10).
@@ -413,7 +433,9 @@ describe('acceptClaim (§10.2 #15)', () => {
 
 describe('makeOffer (§10.2 #15, EC-BUY-1)', () => {
   it('POSTs the offer amount as a decimal string, with the now-required note', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.makeOffer(DISPUTE_ID, {
       offer_amount: ppMoney('35.66'),
       // EC-BUY-1: a return costs the merchant less than an $82 MRC fee.
@@ -436,7 +458,9 @@ describe('makeOffer (§10.2 #15, EC-BUY-1)', () => {
 
   it('accepts a REPLACEMENT_WITHOUT_REFUND offer with no amount at all', async () => {
     // Report §4/#10: `offer_amount` is NOT required by PayPal — omit it for a replacement.
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.makeOffer(DISPUTE_ID, {
       offer_type: 'REPLACEMENT_WITHOUT_REFUND',
       note: 'We will ship a replacement pair at no charge.',
@@ -484,18 +508,27 @@ describe('makeOffer (§10.2 #15, EC-BUY-1)', () => {
     expect(OFFER_TYPES).toContain('REPLACEMENT_WITHOUT_REFUND')
     expect(OFFER_TYPES as readonly string[]).not.toContain('REFUND_NO_RETURN')
     expect([...OFFER_TYPES].sort()).toEqual(
-      ['REFUND', 'REFUND_WITH_REPLACEMENT', 'REFUND_WITH_RETURN', 'REPLACEMENT_WITHOUT_REFUND'].sort(),
+      [
+        'REFUND',
+        'REFUND_WITH_REPLACEMENT',
+        'REFUND_WITH_RETURN',
+        'REPLACEMENT_WITHOUT_REFUND',
+      ].sort(),
     )
   })
 })
 
 describe('sendMessage, acknowledgeReturnItem, escalate (§10.2 #16)', () => {
   it('sendMessage posts the message', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.sendMessage(DISPUTE_ID, 'We have shipped; tracking is inside.')
     expect(result.ok).toBe(true)
     const call = callTo(fetchImpl.calls, '/send-message')
-    expect(jsonBody<Record<string, unknown>>(call)).toEqual({ message: 'We have shipped; tracking is inside.' })
+    expect(jsonBody<Record<string, unknown>>(call)).toEqual({
+      message: 'We have shipped; tracking is inside.',
+    })
     expect(headerOf(call, 'content-type')).toBe('application/json')
   })
 
@@ -511,13 +544,17 @@ describe('sendMessage, acknowledgeReturnItem, escalate (§10.2 #16)', () => {
   it('acknowledgeReturnItem posts {note, acknowledgement_type}, not a shipping address', async () => {
     // Report §6/#11: `return_shipping_address` is a make-offer field; this body is
     // `{note, acknowledgement_type}`.
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.acknowledgeReturnItem(DISPUTE_ID, {
       note: 'Return received, refunding today.',
       acknowledgement_type: 'ITEM_RECEIVED',
     })
     expect(result.ok).toBe(true)
-    const body = jsonBody<Record<string, unknown>>(callTo(fetchImpl.calls, '/acknowledge-return-item'))
+    const body = jsonBody<Record<string, unknown>>(
+      callTo(fetchImpl.calls, '/acknowledge-return-item'),
+    )
     expect(body).toEqual({
       note: 'Return received, refunding today.',
       acknowledgement_type: 'ITEM_RECEIVED',
@@ -527,10 +564,9 @@ describe('sendMessage, acknowledgeReturnItem, escalate (§10.2 #16)', () => {
 
   it('acknowledgeReturnItem refuses a body with no acknowledgement_type', async () => {
     const { client, fetchImpl } = makeClient(tokenResponse())
-    const result = await client.acknowledgeReturnItem(
-      DISPUTE_ID,
-      { note: 'got it' } as unknown as { acknowledgement_type: string },
-    )
+    const result = await client.acknowledgeReturnItem(DISPUTE_ID, { note: 'got it' } as unknown as {
+      acknowledgement_type: string
+    })
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe('CS_VALIDATION')
@@ -538,8 +574,13 @@ describe('sendMessage, acknowledgeReturnItem, escalate (§10.2 #16)', () => {
   })
 
   it('escalate posts the note', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
-    const result = await client.escalate(DISPUTE_ID, 'Escalating: tracking confirms delivery on 1 Oct.')
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
+    const result = await client.escalate(
+      DISPUTE_ID,
+      'Escalating: tracking confirms delivery on 1 Oct.',
+    )
     expect(result.ok).toBe(true)
     expect(jsonBody<Record<string, unknown>>(callTo(fetchImpl.calls, '/escalate'))).toEqual({
       note: 'Escalating: tracking confirms delivery on 1 Oct.',
@@ -557,7 +598,9 @@ describe('sendMessage, acknowledgeReturnItem, escalate (§10.2 #16)', () => {
 
 describe('provideSupportingInfo (§10.2 #16)', () => {
   it('posts the notes as the multipart input part', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : linksResponse(),
+    )
     const result = await client.provideSupportingInfo(DISPUTE_ID, 'Carrier scan attached.', [])
     expect(result.ok).toBe(true)
     const call = callTo(fetchImpl.calls, '/provide-supporting-info')
@@ -584,9 +627,13 @@ describe('wrong-state handling', () => {
         ? tokenResponse()
         : paypalErrorResponse('DISPUTE_STATE_NOT_ALLOWED', 'DISPUTE_STATE_NOT_ALLOWED', 422),
     )
-    const result = await client.provideEvidence(DISPUTE_ID, {
-      evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT', notes: 'Tracking attached.' }],
-    }, [])
+    const result = await client.provideEvidence(
+      DISPUTE_ID,
+      {
+        evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT', notes: 'Tracking attached.' }],
+      },
+      [],
+    )
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe('PP_UNPROCESSABLE')
@@ -668,7 +715,9 @@ describe('verifyWebhookSignature (§10.2 #12, [V14], EC-WH-4)', () => {
       isToken(call) ? tokenResponse() : verifyWebhookResponse('SUCCESS'),
     )
     await client.verifyWebhookSignature(headers, WEBHOOK_ID, event)
-    const body = jsonBody<Record<string, unknown>>(callTo(fetchImpl.calls, 'verify-webhook-signature'))
+    const body = jsonBody<Record<string, unknown>>(
+      callTo(fetchImpl.calls, 'verify-webhook-signature'),
+    )
     expect(body['auth_algo']).toBe('SHA256withRSA')
     expect(body['cert_url']).toBe(headers['paypal-cert-url'])
     expect(body['transmission_id']).toBe(headers['paypal-transmission-id'])
@@ -684,7 +733,9 @@ describe('verifyWebhookSignature (§10.2 #12, [V14], EC-WH-4)', () => {
     )
     const result = await client.verifyWebhookSignature(headers, WEBHOOK_ID, JSON.stringify(event))
     expect(result.ok).toBe(true)
-    const body = jsonBody<Record<string, unknown>>(callTo(fetchImpl.calls, 'verify-webhook-signature'))
+    const body = jsonBody<Record<string, unknown>>(
+      callTo(fetchImpl.calls, 'verify-webhook-signature'),
+    )
     expect(body['webhook_event']).toEqual(event)
   })
 

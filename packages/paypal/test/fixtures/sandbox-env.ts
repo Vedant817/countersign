@@ -13,7 +13,9 @@ import { ppMoney } from './transport-double'
 /** Where these tests talk to. Defaults to the sandbox host; a live host is refused at boot (EC-ENV-1). */
 export const SANDBOX_BASE_URL = process.env['PAYPAL_API_BASE'] ?? 'https://api-m.sandbox.paypal.com'
 
-export const HAS_CREDENTIALS = Boolean(process.env['PAYPAL_CLIENT_ID'] && process.env['PAYPAL_CLIENT_SECRET'])
+export const HAS_CREDENTIALS = Boolean(
+  process.env['PAYPAL_CLIENT_ID'] && process.env['PAYPAL_CLIENT_SECRET'],
+)
 
 /** A vault (payment-token) id, so an order can be merchant-initiated with no buyer present (C2). */
 export const VAULT_ID = process.env['PAYPAL_TEST_VAULT_ID'] ?? ''
@@ -64,7 +66,9 @@ export async function pollUntil<T>(
     if (last !== undefined) return last
     if (i < attempts - 1) await delay(intervalMs)
   }
-  throw new Error(`pollUntil gave up after ${attempts} attempts${opts.label ? ` (${opts.label})` : ''}`)
+  throw new Error(
+    `pollUntil gave up after ${attempts} attempts${opts.label ? ` (${opts.label})` : ''}`,
+  )
 }
 
 export { ppMoney }

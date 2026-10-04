@@ -26,7 +26,14 @@ import { newId } from '@countersign/core'
 import type { Order } from '../src/types'
 
 import { captureRequestId, orderCreateRequestId, refundRequestId } from '../src/idempotency'
-import { HAS_CREDENTIALS, SANDBOX_BASE_URL, SKIP_REASON, VAULT_ID, liveClient, ppMoney } from './fixtures/sandbox-env'
+import {
+  HAS_CREDENTIALS,
+  SANDBOX_BASE_URL,
+  SKIP_REASON,
+  VAULT_ID,
+  liveClient,
+  ppMoney,
+} from './fixtures/sandbox-env'
 
 const NEEDS_VAULT =
   'PAYPAL_TEST_VAULT_ID is absent: run the §8.7 onboarding once against sandbox and export the payment-token id.'
@@ -113,7 +120,9 @@ describe.skipIf(!canRun)(`AT-M6.5 live sandbox (${SANDBOX_BASE_URL})`, () => {
       },
       { requestId: orderCreateRequestId(newId('att')) },
     )
-    expect(created.ok, created.ok ? '' : `${created.error.code}: ${created.error.message}`).toBe(true)
+    expect(created.ok, created.ok ? '' : `${created.error.code}: ${created.error.message}`).toBe(
+      true,
+    )
     if (!created.ok) return
 
     // --- 2. an inline authorization, or one from /authorize (spec U2) ---
@@ -143,7 +152,10 @@ describe.skipIf(!canRun)(`AT-M6.5 live sandbox (${SANDBOX_BASE_URL})`, () => {
           },
           { requestId: orderCreateRequestId(newId('att')) },
         )
-        expect(captured.ok, captured.ok ? '' : `${captured.error.code}: ${captured.error.message}`).toBe(true)
+        expect(
+          captured.ok,
+          captured.ok ? '' : `${captured.error.code}: ${captured.error.message}`,
+        ).toBe(true)
         if (!captured.ok) return
         const captureId = captureIdOf(captured.value)
         expect(captureId, 'a CAPTURE order produced no capture').toBeTruthy()
@@ -162,7 +174,9 @@ describe.skipIf(!canRun)(`AT-M6.5 live sandbox (${SANDBOX_BASE_URL})`, () => {
       { amount: ppMoney('20.00'), final_capture: false, invoice_id: orderId },
       { requestId: captureRequestId(authorizationId, shipmentId) },
     )
-    expect(capture.ok, capture.ok ? '' : `${capture.error.code}: ${capture.error.message}`).toBe(true)
+    expect(capture.ok, capture.ok ? '' : `${capture.error.code}: ${capture.error.message}`).toBe(
+      true,
+    )
     if (!capture.ok) return
     expect(capture.value.amount?.value).toBe('20.00')
     expect(capture.value.final_capture).toBe(false)

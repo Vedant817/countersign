@@ -53,7 +53,13 @@ import {
   type Currency,
   type Result,
 } from '@countersign/core'
-import { NoObjectGeneratedError, NoOutputGeneratedError, Output, generateText, type LanguageModel } from 'ai'
+import {
+  NoObjectGeneratedError,
+  NoOutputGeneratedError,
+  Output,
+  generateText,
+  type LanguageModel,
+} from 'ai'
 
 import {
   amountCapAmbiguity,
@@ -61,12 +67,7 @@ import {
   currencyAmbiguity,
   mergeAmbiguities,
 } from './ambiguity'
-import {
-  isoDateSchema,
-  matchModeSchema,
-  type Frequency,
-  type VIConstraint,
-} from './constraints'
+import { isoDateSchema, matchModeSchema, type Frequency, type VIConstraint } from './constraints'
 import { currenciesNamedIn, literalCapIn, mentionsRecurrence, resolveCurrency } from './literal'
 import {
   localiseProposal,
@@ -133,7 +134,8 @@ function repairNotes(args: {
     if (Array.isArray(asIssues.issues)) {
       for (const issue of asIssues.issues as Array<{ path?: unknown; message?: unknown }>) {
         const path = Array.isArray(issue.path) ? issue.path.join('.') : ''
-        const message = typeof issue.message === 'string' ? issue.message : 'did not match the schema'
+        const message =
+          typeof issue.message === 'string' ? issue.message : 'did not match the schema'
         notes.push(path.length > 0 ? `${path}: ${message}` : message)
       }
       break
@@ -144,11 +146,13 @@ function repairNotes(args: {
   const merchantIds = new Set(args.projection.merchants.map((m) => m.id))
   const skuIds = new Set(args.projection.skus.map((s) => s.id))
   for (const id of arrayField(args.cause, 'merchantIds')) {
-    if (!merchantIds.has(id)) notes.push(`merchantIds: "${id}" is not in the catalog. Use a listed id or omit it.`)
+    if (!merchantIds.has(id))
+      notes.push(`merchantIds: "${id}" is not in the catalog. Use a listed id or omit it.`)
   }
   for (const line of arrayOfObjects(args.cause, 'lineItems')) {
     for (const id of stringArray(line.skuIds)) {
-      if (!skuIds.has(id)) notes.push(`lineItems.skuIds: "${id}" is not in the catalog. Use a listed id or omit it.`)
+      if (!skuIds.has(id))
+        notes.push(`lineItems.skuIds: "${id}" is not in the catalog. Use a listed id or omit it.`)
     }
   }
 
@@ -199,7 +203,9 @@ function arrayOfObjects(cause: unknown, key: string): Record<string, unknown>[] 
     if (value !== null && typeof value === 'object') {
       const found = (value as Record<string, unknown>)[key]
       if (Array.isArray(found)) {
-        return found.filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
+        return found.filter(
+          (v): v is Record<string, unknown> => typeof v === 'object' && v !== null,
+        )
       }
     }
     cursor = (cursor as { cause?: unknown }).cause
@@ -229,7 +235,10 @@ function validateInput(i: CompileInput): Result<CompileInput> {
   }
   if (text.length > 4_000) {
     return err(
-      csError('CS_VALIDATION', 'The request is longer than 4000 characters', { field: 'text', length: text.length }),
+      csError('CS_VALIDATION', 'The request is longer than 4000 characters', {
+        field: 'text',
+        length: text.length,
+      }),
     )
   }
   const named = currenciesNamedIn(text)
@@ -303,7 +312,8 @@ function resolveRecurrenceWindows(
   for (let index = 0; index < out.length; index += 1) {
     const c = out[index]
     if (c === undefined) continue
-    if (c.type !== 'mandate.payment.recurrence' && c.type !== 'mandate.payment.agent_recurrence') continue
+    if (c.type !== 'mandate.payment.recurrence' && c.type !== 'mandate.payment.agent_recurrence')
+      continue
 
     let endDate = c.end_date
     if (endDate === undefined) {
@@ -392,7 +402,9 @@ async function attemptAsk(
 }
 
 function isZodError(cause: unknown): boolean {
-  return typeof cause === 'object' && cause !== null && (cause as { name?: unknown }).name === 'ZodError'
+  return (
+    typeof cause === 'object' && cause !== null && (cause as { name?: unknown }).name === 'ZodError'
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +421,10 @@ function isZodError(cause: unknown): boolean {
  * @param deps.clock supplies `nowSec()` so expiry and the "start date cannot be in the past" check are
  *   testable rather than dependent on the wall clock.
  */
-export async function compile(i: CompileInput, deps: CompileDeps): Promise<Result<CompiledMandate>> {
+export async function compile(
+  i: CompileInput,
+  deps: CompileDeps,
+): Promise<Result<CompiledMandate>> {
   const clock = deps.clock ?? fixedClock(0)
 
   const input = validateInput(i)
@@ -421,9 +436,14 @@ export async function compile(i: CompileInput, deps: CompileDeps): Promise<Resul
   const projection = catalog.value
   if (projection.merchants.length === 0) {
     return err(
-      csError('CS_NOT_FOUND', 'No merchants are connected, so there is nothing to authorise a limit against', {
-        field: 'defaults.merchantIds',
-      }, { userMessage: 'Connect a store first, then set your limits.' }),
+      csError(
+        'CS_NOT_FOUND',
+        'No merchants are connected, so there is nothing to authorise a limit against',
+        {
+          field: 'defaults.merchantIds',
+        },
+        { userMessage: 'Connect a store first, then set your limits.' },
+      ),
     )
   }
 
@@ -446,7 +466,11 @@ export async function compile(i: CompileInput, deps: CompileDeps): Promise<Resul
   const mandateCurrency: Currency = resolution.currency
 
   const literalCap = literalCapIn(input.value.text, mandateCurrency)
-  const system = buildSystemPrompt({ catalog: projection, currency: mandateCurrency, locale: input.value.locale })
+  const system = buildSystemPrompt({
+    catalog: projection,
+    currency: mandateCurrency,
+    locale: input.value.locale,
+  })
   const userPrompt = buildUserPrompt({
     input: input.value,
     currency: mandateCurrency,
@@ -462,7 +486,10 @@ export async function compile(i: CompileInput, deps: CompileDeps): Promise<Resul
   if (outcome.schemaFailure !== null) {
     const repairPrompt = buildRepairPrompt({
       previousIssues: outcome.schemaFailure.issues,
-      userPrompt: outcome.schemaFailure.text === null ? userPrompt : `${userPrompt}\n\nYour previous answer was:\n${outcome.schemaFailure.text}`,
+      userPrompt:
+        outcome.schemaFailure.text === null
+          ? userPrompt
+          : `${userPrompt}\n\nYour previous answer was:\n${outcome.schemaFailure.text}`,
     })
     const second = await attemptAsk(deps.llm, system, repairPrompt, projection)
     if (!second.ok) return second
@@ -516,8 +543,7 @@ export async function compile(i: CompileInput, deps: CompileDeps): Promise<Resul
   if (!ttl.ok) return ttl
 
   // --- §8.8: an intent with no cap is an ambiguity, never a guess ----------------------
-  const hasCap =
-    localised.value.amountMax !== null || localised.value.budgetMax !== null
+  const hasCap = localised.value.amountMax !== null || localised.value.budgetMax !== null
   const ambiguities: Ambiguity[] = []
   if (!hasCap) {
     const skuIds = (proposal.lineItems ?? []).flatMap((line) => line.skuIds)
@@ -531,9 +557,16 @@ export async function compile(i: CompileInput, deps: CompileDeps): Promise<Resul
   const merged = mergeAmbiguities(ambiguities, proposal.ambiguities ?? [])
 
   const preferences: CompiledPreferences = proposal.preferences ?? {}
-  if (mentionsRecurrence(input.value.text) === false && (proposal.recurrence !== undefined || proposal.agentRecurrence !== undefined)) {
+  if (
+    mentionsRecurrence(input.value.text) === false &&
+    (proposal.recurrence !== undefined || proposal.agentRecurrence !== undefined)
+  ) {
     // Unreachable: `localiseProposal` already refuses a recurrence the text does not justify.
-    return err(csError('CS_INTERNAL', 'compile accepted a recurrence the intent does not justify', { ec: 'COMPILER-INVARIANT' }))
+    return err(
+      csError('CS_INTERNAL', 'compile accepted a recurrence the intent does not justify', {
+        ec: 'COMPILER-INVARIANT',
+      }),
+    )
   }
 
   return ok({
@@ -557,7 +590,18 @@ const CURRENCY_AMBIGUITY_FIELD = 'currency'
  * schema cannot be introduced silently.
  */
 export const PROPOSAL_FREQUENCIES: readonly Frequency[] = [
-  'INDA', 'DAIL', 'WEEK', 'TWOK', 'TWMN', 'MNTH', 'TOMN', 'QUTR', 'FOMN', 'SEMI', 'YEAR', 'TYEA',
+  'INDA',
+  'DAIL',
+  'WEEK',
+  'TWOK',
+  'TWMN',
+  'MNTH',
+  'TOMN',
+  'QUTR',
+  'FOMN',
+  'SEMI',
+  'YEAR',
+  'TYEA',
 ]
 
 /** Re-exported so a caller can build a hand-authored recurrence with the same validation. */
@@ -566,4 +610,3 @@ export const PROPOSAL_DATE_SCHEMA = isoDateSchema
 export const PROPOSAL_MATCH_MODE_SCHEMA = matchModeSchema
 /** Re-exported so the manual form validates amounts with the same rule the model is held to. */
 export const PROPOSAL_AMOUNT_SCHEMA = decimalAmountSchema
-

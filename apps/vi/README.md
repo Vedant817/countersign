@@ -44,11 +44,11 @@ Errors are raised as `HTTPException` with a `CsErrorBody` body, matching `packag
 
 ## Keys
 
-| Role | Held by | At rest |
-|---|---|---|
-| ISSUER | vi-service | in memory, from `VI_ISSUER_KID`; public half in JWKS |
-| MERCHANT (checkout) | vi-service | in memory, from `VI_MERCHANT_KID` |
-| AGENT (one per agent) | vi-service | **AES-256-GCM encrypted**, key from `VI_KEK` |
+| Role                  | Held by    | At rest                                              |
+| --------------------- | ---------- | ---------------------------------------------------- |
+| ISSUER                | vi-service | in memory, from `VI_ISSUER_KID`; public half in JWKS |
+| MERCHANT (checkout)   | vi-service | in memory, from `VI_MERCHANT_KID`                    |
+| AGENT (one per agent) | vi-service | **AES-256-GCM encrypted**, key from `VI_KEK`         |
 
 `POST /v1/keys/agent` mints a P-256 key per agent instance and returns the public JWK plus the
 encrypted private key; `apps/web` stores only the ciphertext in `agents.enc_private_key` (spec D5).
@@ -84,26 +84,26 @@ Amounts are **integer minor units plus a currency code, everywhere** (spec §0, 
 EC-FX-6). `amount_minor: 13000` is $130.00. A float (`13000.0`) or a formatted string (`"13000"`)
 is a `CS_VALIDATION` error, never a coercion — the coercion would be a hundredfold bug.
 
-| Route | Request | Response |
-|---|---|---|
-| `POST /v1/keys/agent` | `{agent_id}` | `{kid, public_jwk, enc_private_key_b64}` |
-| `POST /v1/keys/rotate` | `{role: ISSUER\|MERCHANT}` | `{new_kid, role, retired_kid}` |
-| `GET /v1/jwks` | — | `{keys:[…]}`, retired included, each with `status` |
-| `POST /v1/l1/issue` | `{user_id, wallet:{payer_id,payer_email,payment_token_id}, device_public_jwk, device_kid, ttl_days≤365, pan_last_four, scheme}` | `{l1, iat, exp, issuer_kid, card_id, device_jkt}` |
-| `POST /v1/l2/prepare` | `{l1, device_kid, agent_public_jwk, agent_kid, checkout_constraints[], payment_constraints[], merchants[], acceptable_items[], payment_instrument:{type,id,description}, nonce, aud, ttl_seconds≤2592000, prompt_summary, iss, device_id, ip_address}` | `{prepare_id, signing_input, header, payload, expires_at, prepare_ttl_seconds}` |
-| `POST /v1/l2/finalize` | `{prepare_id, signature_b64url}` (raw 64-byte r‖s) | `{l2, iat, exp, agent_kid}` |
-| `POST /v1/checkout-jwt` | `{merchant:{id,url→website,name}, lines:[{sku,title,qty,unit_minor}], shipping_minor, tax_minor, currency, ttl_seconds, checkout_id}` | `{checkout_jwt, checkout_hash, exp, total_minor, currency, kid}` |
-| `POST /v1/l3/create` | `{agent_kid, enc_private_key_b64, l2, checkout_jwt, payment:{amount_minor,currency,payee_id}, aud, nonce, iss, ttl_seconds≤3600, agent_id}` | `{l3a, l3b, jti, iat, exp, checkout_hash, payment_presentation, checkout_presentation}` |
-| `POST /v1/verify` | `{l1, l2, l3a?, l3b?, checkout_jwt?, expected_aud?, expected_nonce?, at_time?, strict}` | `{chain_valid, errors[], constraints:{satisfied,violations,checked,skipped}, disclosed:{l1,l2,l3a,l3b}, keys:{issuer_kid,device_jkt,agent_kid,device_kid,merchant_kid}, checks_performed[], checks_skipped[], verified_at, clock_skew_seconds, at_time_not_honoured, at_time_reason, at_time_check}` |
-| `POST /v1/public/verify` | `{bundle:{l1,l2,l3a?,l3b?,checkout_jwt?,…}, expected_aud?, expected_nonce?, at_time?}` | the `/v1/verify` response **plus `bundle_hash`** |
-| `GET /v1/status` | — | `{ok, app_env, issuer_kid, merchant_kid, clock_skew_seconds}` |
-| `GET /v1/checkout-jwt/verify` | `?checkout_jwt=` | `{valid, reason, checked_at}` (diagnostic, private) |
+| Route                         | Request                                                                                                                                                                                                                                                | Response                                                                                                                                                                                                                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/keys/agent`         | `{agent_id}`                                                                                                                                                                                                                                           | `{kid, public_jwk, enc_private_key_b64}`                                                                                                                                                                                                                                                             |
+| `POST /v1/keys/rotate`        | `{role: ISSUER\|MERCHANT}`                                                                                                                                                                                                                             | `{new_kid, role, retired_kid}`                                                                                                                                                                                                                                                                       |
+| `GET /v1/jwks`                | —                                                                                                                                                                                                                                                      | `{keys:[…]}`, retired included, each with `status`                                                                                                                                                                                                                                                   |
+| `POST /v1/l1/issue`           | `{user_id, wallet:{payer_id,payer_email,payment_token_id}, device_public_jwk, device_kid, ttl_days≤365, pan_last_four, scheme}`                                                                                                                        | `{l1, iat, exp, issuer_kid, card_id, device_jkt}`                                                                                                                                                                                                                                                    |
+| `POST /v1/l2/prepare`         | `{l1, device_kid, agent_public_jwk, agent_kid, checkout_constraints[], payment_constraints[], merchants[], acceptable_items[], payment_instrument:{type,id,description}, nonce, aud, ttl_seconds≤2592000, prompt_summary, iss, device_id, ip_address}` | `{prepare_id, signing_input, header, payload, expires_at, prepare_ttl_seconds}`                                                                                                                                                                                                                      |
+| `POST /v1/l2/finalize`        | `{prepare_id, signature_b64url}` (raw 64-byte r‖s)                                                                                                                                                                                                     | `{l2, iat, exp, agent_kid}`                                                                                                                                                                                                                                                                          |
+| `POST /v1/checkout-jwt`       | `{merchant:{id,url→website,name}, lines:[{sku,title,qty,unit_minor}], shipping_minor, tax_minor, currency, ttl_seconds, checkout_id}`                                                                                                                  | `{checkout_jwt, checkout_hash, exp, total_minor, currency, kid}`                                                                                                                                                                                                                                     |
+| `POST /v1/l3/create`          | `{agent_kid, enc_private_key_b64, l2, checkout_jwt, payment:{amount_minor,currency,payee_id}, aud, nonce, iss, ttl_seconds≤3600, agent_id}`                                                                                                            | `{l3a, l3b, jti, iat, exp, checkout_hash, payment_presentation, checkout_presentation}`                                                                                                                                                                                                              |
+| `POST /v1/verify`             | `{l1, l2, l3a?, l3b?, checkout_jwt?, expected_aud?, expected_nonce?, at_time?, strict}`                                                                                                                                                                | `{chain_valid, errors[], constraints:{satisfied,violations,checked,skipped}, disclosed:{l1,l2,l3a,l3b}, keys:{issuer_kid,device_jkt,agent_kid,device_kid,merchant_kid}, checks_performed[], checks_skipped[], verified_at, clock_skew_seconds, at_time_not_honoured, at_time_reason, at_time_check}` |
+| `POST /v1/public/verify`      | `{bundle:{l1,l2,l3a?,l3b?,checkout_jwt?,…}, expected_aud?, expected_nonce?, at_time?}`                                                                                                                                                                 | the `/v1/verify` response **plus `bundle_hash`**                                                                                                                                                                                                                                                     |
+| `GET /v1/status`              | —                                                                                                                                                                                                                                                      | `{ok, app_env, issuer_kid, merchant_kid, clock_skew_seconds}`                                                                                                                                                                                                                                        |
+| `GET /v1/checkout-jwt/verify` | `?checkout_jwt=`                                                                                                                                                                                                                                       | `{valid, reason, checked_at}` (diagnostic, private)                                                                                                                                                                                                                                                  |
 
 `/openapi.json` is the schema source of truth for WP-04's drift test (spec §8.4 AT-M4.2).
 
 ### Four things worth knowing before you call this service
 
-**1. `l2/finalize` returns the L2 *with its disclosures*.** The browser signs `header.payload`; the
+**1. `l2/finalize` returns the L2 _with its disclosures_.** The browser signs `header.payload`; the
 disclosures (which is where the two open mandates live) are appended at finalize. A token without
 them carries no mandate, and `verify_chain` says "L2 delegate_payload resolved zero mandate
 disclosures".
@@ -140,17 +140,18 @@ as-of-capture-time verdict, and it does not pretend to:
 
 ```jsonc
 {
-  "chain_valid": true,               // the verdict at `now`
+  "chain_valid": true, // the verdict at `now`
   "verified_at": 1790000000,
   "at_time_not_honoured": true,
   "at_time_reason": "verify_chain() at the pinned commit 356c296 has no clock override: …",
   "at_time_check": {
     "requested": 1790000000,
-    "honoured": false,              // always false while the library has no `now` parameter
-    "within_validity_at": false,    // ADVISORY: our own iat/exp window check, not a chain verdict
+    "honoured": false, // always false while the library has no `now` parameter
+    "within_validity_at": false, // ADVISORY: our own iat/exp window check, not a chain verdict
     "within_validity_now": true,
-    "l1_exp": 1790600000, "l2_exp": 1790003600
-  }
+    "l1_exp": 1790600000,
+    "l2_exp": 1790003600,
+  },
 }
 ```
 
@@ -169,13 +170,13 @@ in a way that might not match the TypeScript side.
 
 ## Money, in one place
 
-| Where | How |
-|---|---|
-| `amount_minor`, `unit_minor`, `shipping_minor`, `tax_minor` | `int`, pydantic `strict=True` |
-| `currency` | one of USD EUR GBP INR JPY AUD CAD; `'usd'` is **rejected**, not lower-cased |
-| checkout JWT payload | `unit_minor` / `amount_minor` + `currency_code`. No `unitPrice`, no floats |
-| `card_id`, `payment_instrument.id` | lowercase hex SHA-256 |
-| `checkout_hash`, `jti`, `bundle_hash` | base64url SHA-256, unpadded |
+| Where                                                       | How                                                                          |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `amount_minor`, `unit_minor`, `shipping_minor`, `tax_minor` | `int`, pydantic `strict=True`                                                |
+| `currency`                                                  | one of USD EUR GBP INR JPY AUD CAD; `'usd'` is **rejected**, not lower-cased |
+| checkout JWT payload                                        | `unit_minor` / `amount_minor` + `currency_code`. No `unitPrice`, no floats   |
+| `card_id`, `payment_instrument.id`                          | lowercase hex SHA-256                                                        |
+| `checkout_hash`, `jti`, `bundle_hash`                       | base64url SHA-256, unpadded                                                  |
 
 `tests/test_checkout_jwt.py::test_EC_FX_6_every_amount_in_the_price_lock_is_an_integer` walks the
 whole decoded payload asserting no leaf is a `float`.
@@ -185,11 +186,11 @@ whole decoded payload asserting no leaf is a `float`.
 `prepare_id → record`, in memory, TTL 300 s (§8.3). It is a **capability**, not state: it authorises
 exactly one signature over one specific byte string for a bounded time. Consequences:
 
-* expiry is enforced by *removal*, not a timestamp comparison at read time, so a lapsed record does
+- expiry is enforced by _removal_, not a timestamp comparison at read time, so a lapsed record does
   not linger in a heap dump;
-* losing the store on restart is safe — the browser asks `prepare` again, which is idempotent
+- losing the store on restart is safe — the browser asks `prepare` again, which is idempotent
   (§8.4: "`l2/prepare` … is safe to repeat");
-* finalize is repeatable inside the window, and re-verifies the signature every time.
+- finalize is repeatable inside the window, and re-verifies the signature every time.
 
 ## Errors
 
@@ -204,7 +205,7 @@ FastAPI's own 422 is converted, so a client never has to branch on which layer p
 `api_key` or `*_key` never crosses the trust boundary.
 
 `POST /v1/verify` **never** 4xxes on an invalid chain: it returns `200` with `chain_valid: false`
-and reason strings. Only a malformed *request* is a 4xx.
+and reason strings. Only a malformed _request_ is a 4xx.
 
 Rate limiting uses `CS_CONFLICT` with HTTP 429 and `Retry-After`, because `CS_ERROR_CODES` has no
 rate-limit code and `PP_RATE_LIMITED` would tell a buyer PayPal is throttling us.

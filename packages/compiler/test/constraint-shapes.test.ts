@@ -95,7 +95,8 @@ function entries(): Array<{ type: string; shape: Record<string, unknown> }> {
  */
 function declaredKeys(schema: unknown): string[] {
   const shape = (schema as { def?: { shape?: Record<string, unknown> } }).def?.shape
-  if (shape === undefined) throw new Error('schema has no def.shape; it is not a plain object schema')
+  if (shape === undefined)
+    throw new Error('schema has no def.shape; it is not a plain object schema')
   return Object.keys(shape).sort()
 }
 
@@ -181,7 +182,10 @@ describe('constraint shapes vs apps/vi/tests/constraint_shapes.json (spec §8.8,
       it('requires nothing to_dict() omitted (an over-required field would fail every real constraint)', () => {
         const present = Object.keys(shape)
         for (const key of requiredKeys(optionFor(type))) {
-          expect(present, `${type}.${key} is required by our schema and present in to_dict()`).toContain(key)
+          expect(
+            present,
+            `${type}.${key} is required by our schema and present in to_dict()`,
+          ).toContain(key)
         }
       })
 
@@ -189,19 +193,29 @@ describe('constraint shapes vs apps/vi/tests/constraint_shapes.json (spec §8.8,
         const allowed = shape['allowed']
         if (Array.isArray(allowed)) {
           for (const entry of allowed) {
-            expect(Object.keys(entry as object).sort()).toEqual(declaredKeys(merchantRefSchema).sort())
-            expect(Object.keys(entry as object).sort()).toEqual(declaredKeys(viClientMerchantRef).sort())
+            expect(Object.keys(entry as object).sort()).toEqual(
+              declaredKeys(merchantRefSchema).sort(),
+            )
+            expect(Object.keys(entry as object).sort()).toEqual(
+              declaredKeys(viClientMerchantRef).sort(),
+            )
           }
         }
         const items = shape['items']
         if (Array.isArray(items)) {
           for (const item of items) {
-            expect(Object.keys(item as object).sort()).toEqual(declaredKeys(lineItemRequirementSchema).sort())
-            expect(Object.keys(item as object).sort()).toEqual(declaredKeys(viClientLineItemRequirement).sort())
+            expect(Object.keys(item as object).sort()).toEqual(
+              declaredKeys(lineItemRequirementSchema).sort(),
+            )
+            expect(Object.keys(item as object).sort()).toEqual(
+              declaredKeys(viClientLineItemRequirement).sort(),
+            )
             const acceptable = (item as { acceptable_items?: unknown }).acceptable_items
             if (Array.isArray(acceptable)) {
               for (const entry of acceptable) {
-                expect(Object.keys(entry as object).sort()).toEqual(declaredKeys(acceptableItemSchema).sort())
+                expect(Object.keys(entry as object).sort()).toEqual(
+                  declaredKeys(acceptableItemSchema).sort(),
+                )
               }
             }
           }
@@ -223,7 +237,8 @@ describe('constraint shapes vs apps/vi/tests/constraint_shapes.json (spec §8.8,
       it('is accepted by packages/vi-client, which is what actually sends it', () => {
         const json = JSON.parse(JSON.stringify(shape)) as unknown
         const viaClient = viClientConstraintSchema.safeParse(json)
-        if (!viaClient.success) throw new Error(`vi-client rejected it: ${JSON.stringify(viaClient.error.issues)}`)
+        if (!viaClient.success)
+          throw new Error(`vi-client rejected it: ${JSON.stringify(viaClient.error.issues)}`)
         expect(viaClient.success).toBe(true)
       })
     },
@@ -251,7 +266,9 @@ describe('constraint shapes vs apps/vi/tests/constraint_shapes.json (spec §8.8,
       const parsed = viConstraintSchema.safeParse(shape)
       expect(parsed.success).toBe(false)
       if (!parsed.success) {
-        expect(parsed.error.issues.map((i) => i.message).join(' ')).toContain('must never be supplied')
+        expect(parsed.error.issues.map((i) => i.message).join(' ')).toContain(
+          'must never be supplied',
+        )
       }
     })
 
@@ -269,13 +286,21 @@ describe('constraint shapes vs apps/vi/tests/constraint_shapes.json (spec §8.8,
     // refuses every instance, and demanding agreement there would be demanding agreement about a
     // deliberate difference rather than about the library.
     const pairs: ReadonlyArray<readonly [string, unknown, unknown]> = [
-      ['mandate.checkout.allowed_merchants', allowedMerchantsConstraintSchema, viClientAllowedMerchants],
+      [
+        'mandate.checkout.allowed_merchants',
+        allowedMerchantsConstraintSchema,
+        viClientAllowedMerchants,
+      ],
       ['mandate.checkout.line_items', lineItemsConstraintSchema, viClientLineItems],
       ['mandate.payment.allowed_payees', allowedPayeesConstraintSchema, viClientAllowedPayees],
       ['mandate.payment.amount_range', amountRangeConstraintSchema, viClientAmountRange],
       ['mandate.payment.budget', budgetConstraintSchema, viClientBudget],
       ['mandate.payment.recurrence', recurrenceConstraintSchema, viClientRecurrence],
-      ['mandate.payment.agent_recurrence', agentRecurrenceConstraintSchema, viClientAgentRecurrence],
+      [
+        'mandate.payment.agent_recurrence',
+        agentRecurrenceConstraintSchema,
+        viClientAgentRecurrence,
+      ],
     ]
     for (const [type, ours, theirs] of pairs) {
       expect(declaredKeys(ours), type).toEqual(declaredKeys(theirs))
@@ -287,14 +312,24 @@ describe('constraint shapes vs apps/vi/tests/constraint_shapes.json (spec §8.8,
     expect([...matchModeSchema.options]).toEqual(['minimum', 'exact'])
     const base = {
       type: 'mandate.checkout.line_items',
-      items: [{ id: 'line-item-1', acceptable_items: [{ id: 'SKU-TRAIL-42', title: 'Trail Runner' }], quantity: 1 }],
+      items: [
+        {
+          id: 'line-item-1',
+          acceptable_items: [{ id: 'SKU-TRAIL-42', title: 'Trail Runner' }],
+          quantity: 1,
+        },
+      ],
     }
     for (const mode of ['minimum', 'exact']) {
-      expect(lineItemsConstraintSchema.safeParse({ ...base, match_mode: mode }).success, mode).toBe(true)
+      expect(lineItemsConstraintSchema.safeParse({ ...base, match_mode: mode }).success, mode).toBe(
+        true,
+      )
       expect(viClientLineItems.safeParse({ ...base, match_mode: mode }).success, mode).toBe(true)
     }
     for (const mode of ['sideways', 'MINIMUM', 'Minimum']) {
-      expect(lineItemsConstraintSchema.safeParse({ ...base, match_mode: mode }).success, mode).toBe(false)
+      expect(lineItemsConstraintSchema.safeParse({ ...base, match_mode: mode }).success, mode).toBe(
+        false,
+      )
       expect(viClientLineItems.safeParse({ ...base, match_mode: mode }).success, mode).toBe(false)
     }
   })

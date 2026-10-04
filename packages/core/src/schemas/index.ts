@@ -44,7 +44,10 @@ export const minorSchema = z
     }
     const t = v.trim()
     if (!/^-?\d+$/.test(t)) {
-      ctx.addIssue({ code: 'custom', message: `Not an integer minor-unit string: ${JSON.stringify(v)}` })
+      ctx.addIssue({
+        code: 'custom',
+        message: `Not an integer minor-unit string: ${JSON.stringify(v)}`,
+      })
       return z.NEVER
     }
     return BigInt(t)
@@ -52,10 +55,12 @@ export const minorSchema = z
   .refine((v) => v >= 0n, { message: 'Money must be non-negative' })
 
 /** A money shape as it appears in JSON: `{ currency: "USD", minor: "13000" }`. */
-export const moneySchema = z.object({ currency: currencySchema, minor: minorSchema }).transform((v) => ({
-  minor: v.minor,
-  currency: v.currency,
-}))
+export const moneySchema = z
+  .object({ currency: currencySchema, minor: minorSchema })
+  .transform((v) => ({
+    minor: v.minor,
+    currency: v.currency,
+  }))
 
 export type MoneyJson = { currency: CurrencySchema; minor: string | number | bigint }
 
@@ -69,14 +74,15 @@ export const rfc3339Schema = z
   .transform((s) => new Date(s).toISOString())
 
 /** base64url without padding — JWT segments, PayPal-Auth-Assertion, our signed records. */
-export const base64urlSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_-]*$/, 'Expected unpadded base64url')
+export const base64urlSchema = z.string().regex(/^[A-Za-z0-9_-]*$/, 'Expected unpadded base64url')
 
 /** A compact JWS/JWT we receive from somewhere and must parse. Three segments, non-empty. */
 export const compactJwsSchema = z
   .string()
-  .regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/, 'Expected a compact JWS (header.payload.signature)')
+  .regex(
+    /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/,
+    'Expected a compact JWS (header.payload.signature)',
+  )
 
 /** `cs1:<43 chars>` — the evidence hash stamped into `purchase_units[].custom_id` (spec §7.3, D18). */
 export const customIdSchema = z
@@ -141,9 +147,13 @@ export function bigintFromJson(v: string | number | bigint): bigint {
   if (typeof v === 'bigint') return v
   if (typeof v === 'number') {
     if (!Number.isSafeInteger(v)) {
-      throw csError('CS_VALIDATION', 'Money value exceeds the safe integer range; pass it as a string', {
-        value: String(v),
-      })
+      throw csError(
+        'CS_VALIDATION',
+        'Money value exceeds the safe integer range; pass it as a string',
+        {
+          value: String(v),
+        },
+      )
     }
     return BigInt(v)
   }

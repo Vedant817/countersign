@@ -45,11 +45,14 @@ interface ClientHarness {
  * The sleep is always injected: a test that really waited out a backoff would be slow and, worse,
  * would still not be asserting the *duration* — only that eventually something happened.
  */
-function makeClient(responder: Stub, overrides: {
-  maxRetries?: number
-  env?: { PAYPAL_ENV?: string | undefined; PAYPAL_API_BASE?: string | undefined }
-  clock?: ReturnType<typeof testClock>
-} = {}): ClientHarness {
+function makeClient(
+  responder: Stub,
+  overrides: {
+    maxRetries?: number
+    env?: { PAYPAL_ENV?: string | undefined; PAYPAL_API_BASE?: string | undefined }
+    clock?: ReturnType<typeof testClock>
+  } = {},
+): ClientHarness {
   const clock = overrides.clock ?? testClock()
   const log = capturingLogger()
   const recorder = recordingSleep(clock)
@@ -69,7 +72,10 @@ function makeClient(responder: Stub, overrides: {
 }
 
 /** A client built directly, for the cases the harness cannot express (deferred responders). */
-function makeRawClient(fetchImpl: ReturnType<typeof fakeFetch>, overrides: { clock?: ReturnType<typeof testClock> } = {}) {
+function makeRawClient(
+  fetchImpl: ReturnType<typeof fakeFetch>,
+  overrides: { clock?: ReturnType<typeof testClock> } = {},
+) {
   return new PayPalClient({
     baseUrl: BASE_URL,
     clientId: CLIENT_ID,
@@ -81,8 +87,10 @@ function makeRawClient(fetchImpl: ReturnType<typeof fakeFetch>, overrides: { clo
   })
 }
 
-const tokenCalls = (calls: readonly RecordedCall[]) => calls.filter((c) => c.url.endsWith('/v1/oauth2/token'))
-const orderCalls = (calls: readonly RecordedCall[]) => calls.filter((c) => c.url.includes('/v2/checkout/orders'))
+const tokenCalls = (calls: readonly RecordedCall[]) =>
+  calls.filter((c) => c.url.endsWith('/v1/oauth2/token'))
+const orderCalls = (calls: readonly RecordedCall[]) =>
+  calls.filter((c) => c.url.includes('/v2/checkout/orders'))
 
 describe('PayPalClient construction', () => {
   it('requires the base url, credentials and a clock', () => {
@@ -167,14 +175,15 @@ describe('PayPalClient construction', () => {
 
   it('throws before it can take money, rather than on the first call', () => {
     // A client that boots and only then discovers it is pointed at live would already be a problem.
-    expect(() =>
-      new PayPalClient({
-        baseUrl: 'https://api-m.paypal.com',
-        clientId: CLIENT_ID,
-        clientSecret: CLIENT_SECRET,
-        clock: testClock(),
-        env: {},
-      }),
+    expect(
+      () =>
+        new PayPalClient({
+          baseUrl: 'https://api-m.paypal.com',
+          clientId: CLIENT_ID,
+          clientSecret: CLIENT_SECRET,
+          clock: testClock(),
+          env: {},
+        }),
     ).toThrow()
   })
 })
@@ -192,13 +201,17 @@ describe('getAccessToken (§10.2 #1)', () => {
     const auth = headerOf(call, 'authorization') ?? ''
     expect(auth).toMatch(/^Basic /)
     // Basic auth is base64(clientId:clientSecret); decoding must give the credentials back.
-    expect(Buffer.from(auth.slice(6), 'base64').toString('utf8')).toBe(`${CLIENT_ID}:${CLIENT_SECRET}`)
+    expect(Buffer.from(auth.slice(6), 'base64').toString('utf8')).toBe(
+      `${CLIENT_ID}:${CLIENT_SECRET}`,
+    )
   })
 
   it('sends no PayPal-Request-Id on the token call', async () => {
     const { client, fetchImpl } = makeClient([tokenResponse()])
     await client.getAccessToken()
-    expect(headerOf(tokenCalls(fetchImpl.calls)[0] as RecordedCall, 'paypal-request-id')).toBeUndefined()
+    expect(
+      headerOf(tokenCalls(fetchImpl.calls)[0] as RecordedCall, 'paypal-request-id'),
+    ).toBeUndefined()
   })
 
   it('caches the token and reuses it until expires_in minus 60 s', async () => {
@@ -262,7 +275,10 @@ describe('getAccessToken (§10.2 #1)', () => {
 
   it('clears the in-flight slot after a failure so the next call can try again', async () => {
     // A stuck in-flight promise would turn one blip into a permanent outage for every caller.
-    const { client, fetchImpl } = makeClient([oauthErrorResponse('invalid_client', 'nope'), tokenResponse()])
+    const { client, fetchImpl } = makeClient([
+      oauthErrorResponse('invalid_client', 'nope'),
+      tokenResponse(),
+    ])
 
     await expect(client.getAccessToken()).rejects.toThrow()
     expect(tokenCalls(fetchImpl.calls)).toHaveLength(1)
@@ -271,7 +287,9 @@ describe('getAccessToken (§10.2 #1)', () => {
   })
 
   it('throws a CsError on failure, because the spec types this one as Promise<string>', async () => {
-    const { client } = makeClient([oauthErrorResponse('invalid_client', 'Client Authentication failed')])
+    const { client } = makeClient([
+      oauthErrorResponse('invalid_client', 'Client Authentication failed'),
+    ])
     await expect(client.getAccessToken()).rejects.toMatchObject({ code: 'PP_AUTH' })
   })
 
@@ -460,7 +478,9 @@ describe('endpoint policy table', () => {
     expect(ENDPOINT_POLICIES['POST /v2/payments/captures/{id}/refund']?.sendRequestId).toBe(true)
     // Disputes still send the key §8.15 mandates; what is unverified is whether PayPal honours it,
     // which is why their retry policy is `re-read-required`.
-    expect(ENDPOINT_POLICIES['POST /v1/customer/disputes/{id}/provide-evidence']?.sendRequestId).toBe(true)
+    expect(
+      ENDPOINT_POLICIES['POST /v1/customer/disputes/{id}/provide-evidence']?.sendRequestId,
+    ).toBe(true)
     expect(ENDPOINT_POLICIES['GET /v2/checkout/orders/{id}']?.sendRequestId).toBe(false)
     expect(ENDPOINT_POLICIES['POST /v3/vault/payment-tokens']?.sendRequestId).toBe(false)
   })

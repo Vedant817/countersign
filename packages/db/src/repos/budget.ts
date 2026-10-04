@@ -40,7 +40,7 @@
  * asserted separately from the schema. **No PayPal is involved anywhere** — that is our own database
  * (AGENTS.md rule 5 applies to PayPal, not to this).
  */
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 
 import {
   money as makeMoney,
@@ -134,12 +134,19 @@ export interface BudgetStore {
    * A reservation claims wallet capacity, a release frees it, and a commit merely converts a claim
    * into a spend — so including COMMIT would count a settled purchase twice. Reservations are included
    * because money not yet captured under one mandate can be captured under it moments later.
+   *
+   * `excludeAttemptId` omits one attempt's entries. It exists because **Gate check 9 runs after check
+   * 8 has already inserted this attempt's RESERVE** (spec §8.10 fixes that order), and without the
+   * exclusion the current cart is counted once by the ledger and once by `amount`, so the effective
+   * wallet cap silently becomes `cap − cart`. A $150 cap with $30 carts would allow 4 reservations
+   * instead of 5. Found by WP-10's Gate tests; see docs/DECISIONS.md D-021.
    */
   walletSpendInPeriod(
     walletId: WalletId,
     currency: Currency,
     period: WalletCapPeriod,
     at: Date,
+    excludeAttemptId?: AttemptId,
   ): Promise<bigint>
   /** `SELECT … FROM budget_accounts WHERE mandate_id = $1` — no lock, for reads and `balance()`. */
   readBudgetAccount(mandateId: MandateId): Promise<BudgetAccountRow | null>
@@ -230,7 +237,7 @@ export function drizzleStore(exec: Exec = db()): BudgetStore {
       for (const r of rows) totals[r.kind] = r.total
       return totals
     },
-    async walletSpendInPeriod(walletId, currency, period, at) {
+    async walletSpendInPeriod(walletId, currency, period, at, excludeAttemptId) {
       const since = new Date(
         at.getTime() - (period === 'DAY' ? 24 * 60 * 60_000 : 30 * 24 * 60 * 60_000),
       )
@@ -246,6 +253,9 @@ export function drizzleStore(exec: Exec = db()): BudgetStore {
             eq(mandates.wallet_id, walletId),
             eq(budgetEntries.currency, currency),
             sql`${budgetEntries.at} >= ${since}`,
+            // Gate check 9 runs after check 8 has reserved this attempt's cart, so excluding it is what
+            // stops the current cart being counted twice. See the BudgetStore docstring (D-021).
+            excludeAttemptId ? ne(budgetEntries.attempt_id, excludeAttemptId) : undefined,
           ),
         )
       const row = rows[0]
@@ -820,6 +830,12 @@ export function walletCapCheckIn(
   period: WalletCapPeriod,
   amount: Money,
   at: Date = now(),
+  /**
+   * The attempt whose RESERVE check 8 has already written. Excluded from the sum so the current cart is
+   * counted once, by `amount`, rather than twice. Omit it only when calling this outside a Gate
+   * sequence — passing it is always correct.
+   */
+  currentAttemptId?: AttemptId,
 ): Promise<Result<WalletCapVerdict, CsError>> {
   return repo(
     async () => {
@@ -828,9 +844,16 @@ export function walletCapCheckIn(
       if (row.currency !== amount.currency) {
         return err(currencyMismatch(`Wallet cap for ${walletId}`, row.currency, amount.currency))
       }
-      const spent = await sumWalletSpend(store, walletId, row.currency, period, at)
+      const claimed = await sumWalletSpend(
+        store,
+        walletId,
+        row.currency,
+        period,
+        at,
+        currentAttemptId,
+      )
       const cap = toMoney(row.cap_minor, row.currency)
-      if (spent + amount.minor > row.cap_minor) {
+      if (claimed + amount.minor > row.cap_minor) {
         return { ok: false, requested: amount, cap }
       }
       return { ok: true, cap }
@@ -845,11 +868,12 @@ export function walletCapCheck(
   amount: Money,
   exec?: Exec,
   at?: Date,
+  currentAttemptId?: AttemptId,
 ): Promise<Result<WalletCapRow, CsError>> {
   return repo(
     async () => {
       const store = drizzleStore(exec ?? db())
-      const verdict = await walletCapCheckIn(store, walletId, period, amount, at)
+      const verdict = await walletCapCheckIn(store, walletId, period, amount, at, currentAttemptId)
       if (!verdict.ok) return verdict
       if (!verdict.value.ok) {
         // The Gate wants a `Result`, not a boolean: `GATE_WALLET_CAP` is a registry code with
@@ -878,6 +902,10 @@ export function walletCapCheck(
  *
  * `DAY` means the last 24 h; `MONTH` means the last 30 days. Both are rolling windows: a demo has no
  * calendar, and a calendar boundary in a payments demo is a bug someone has to debug at midnight.
+ *
+ * `excludeAttemptId` is the fix for a double-count the Gate caused rather than found: check 9 follows
+ * check 8's RESERVE, so without excluding this attempt the current cart appears both in `claimed` and
+ * in `amount` and the effective cap becomes `cap − cart` (D-021).
  */
 export function sumWalletSpend(
   store: BudgetStore,
@@ -885,8 +913,9 @@ export function sumWalletSpend(
   currency: Currency,
   period: WalletCapPeriod,
   at: Date = now(),
+  excludeAttemptId?: AttemptId,
 ): Promise<bigint> {
-  return store.walletSpendInPeriod(walletId, currency, period, at)
+  return store.walletSpendInPeriod(walletId, currency, period, at, excludeAttemptId)
 }
 
 /* ------------------------------------------------------------------------------------------ */

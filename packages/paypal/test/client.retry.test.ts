@@ -36,8 +36,10 @@ const ORDER_BODY = createOrderTestDouble()
 const CALL_OPTS: CallOpts & { requestId: string } = { requestId: REQUEST_ID }
 
 const isToken = (c: RecordedCall) => c.url.endsWith('/v1/oauth2/token')
-const orderCalls = (calls: readonly RecordedCall[]) => calls.filter((c) => c.url.includes('/v2/checkout/orders'))
-const evidenceCalls = (calls: readonly RecordedCall[]) => calls.filter((c) => c.url.includes('provide-evidence'))
+const orderCalls = (calls: readonly RecordedCall[]) =>
+  calls.filter((c) => c.url.includes('/v2/checkout/orders'))
+const evidenceCalls = (calls: readonly RecordedCall[]) =>
+  calls.filter((c) => c.url.includes('provide-evidence'))
 
 interface Harness {
   readonly client: PayPalClient
@@ -71,7 +73,9 @@ describe('AT-M6.2: 503, 503, 200 succeeds and reuses the same request id', () =>
   it('makes three attempts, all carrying the identical PayPal-Request-Id', async () => {
     const { client, fetchImpl } = makeClient((call) => {
       if (isToken(call)) return tokenResponse()
-      return orderCalls(fetchImpl.calls).length <= 2 ? serviceUnavailableResponse() : orderResponse()
+      return orderCalls(fetchImpl.calls).length <= 2
+        ? serviceUnavailableResponse()
+        : orderResponse()
     })
 
     const result = await client.createOrder(ORDER_BODY, CALL_OPTS)
@@ -106,7 +110,9 @@ describe('AT-M6.2: 503, 503, 200 succeeds and reuses the same request id', () =>
   it('the retried body is byte-identical, so PayPal sees the same order', async () => {
     const { client, fetchImpl } = makeClient((call) => {
       if (isToken(call)) return tokenResponse()
-      return orderCalls(fetchImpl.calls).length <= 2 ? serviceUnavailableResponse() : orderResponse()
+      return orderCalls(fetchImpl.calls).length <= 2
+        ? serviceUnavailableResponse()
+        : orderResponse()
     })
     await client.createOrder(ORDER_BODY, CALL_OPTS)
     expect(new Set(orderCalls(fetchImpl.calls).map((c) => c.body)).size).toBe(1)
@@ -115,7 +121,9 @@ describe('AT-M6.2: 503, 503, 200 succeeds and reuses the same request id', () =>
   it('retries a network error, which is the EC-IDEM-2 case', async () => {
     const { client, fetchImpl } = makeClient((call) => {
       if (isToken(call)) return tokenResponse()
-      return orderCalls(fetchImpl.calls).length === 1 ? { throws: new TypeError('fetch failed') } : orderResponse()
+      return orderCalls(fetchImpl.calls).length === 1
+        ? { throws: new TypeError('fetch failed') }
+        : orderResponse()
     })
     const result = await client.createOrder(ORDER_BODY, CALL_OPTS)
     expect(result.ok).toBe(true)
@@ -216,7 +224,9 @@ describe('AT-M6.3 / EC-PP-2: a 429 with Retry-After: 2 waits at least 2 s', () =
   it('a 429 does not count toward the circuit-breaker outage budget', async () => {
     // PayPal is up and asking us to slow down. Treating that as "unavailable" would open the breaker
     // on a rate limit and then fail fast the very requests that would have succeeded after a pause.
-    const { client } = makeClient((call) => (isToken(call) ? tokenResponse() : rateLimitedResponse(0)))
+    const { client } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : rateLimitedResponse(0),
+    )
     await client.createOrder(ORDER_BODY, CALL_OPTS)
     expect(client.breakerState()).toBe('closed')
   })
@@ -292,7 +302,9 @@ describe('EC-PP-1: repeated unavailability opens the breaker, then calls fail fa
 })
 
 describe('EC-IDEM-3: an ambiguous failure on an unverified endpoint is not blind-retried', () => {
-  const evidence = { evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT', notes: 'Tracked on 1 Oct.' }] }
+  const evidence = {
+    evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT', notes: 'Tracked on 1 Oct.' }],
+  }
 
   it('returns a retryable-but-ambiguous error and makes exactly one attempt', async () => {
     // Disputes v1 idempotency support is UNVERIFIED (spec U5), so a 5xx there might have created a
@@ -323,7 +335,9 @@ describe('EC-IDEM-3: an ambiguous failure on an unverified endpoint is not blind
   it('retries a documented-idempotent endpoint on a 5xx', async () => {
     const { client, fetchImpl } = makeClient((call) => {
       if (isToken(call)) return tokenResponse()
-      return orderCalls(fetchImpl.calls).length === 1 ? serviceUnavailableResponse() : orderResponse()
+      return orderCalls(fetchImpl.calls).length === 1
+        ? serviceUnavailableResponse()
+        : orderResponse()
     })
     expect((await client.createOrder(ORDER_BODY, CALL_OPTS)).ok).toBe(true)
     expect(orderCalls(fetchImpl.calls)).toHaveLength(2)
@@ -364,16 +378,24 @@ describe('request-id handling', () => {
 
   it('drops the request id on endpoints that do not take one, and says so in the log', async () => {
     const { client, fetchImpl, log } = makeClient((call) =>
-      isToken(call) ? tokenResponse() : { status: 201, body: { id: '5TY05013RG002845M', status: 'ACTIVE' } },
+      isToken(call)
+        ? tokenResponse()
+        : { status: 201, body: { id: '5TY05013RG002845M', status: 'ACTIVE' } },
     )
     await client.createPaymentToken('8CM364183LM392832', { requestId: REQUEST_ID })
-    const call = fetchImpl.calls.find((c) => c.url.includes('/v3/vault/payment-tokens')) as RecordedCall
+    const call = fetchImpl.calls.find((c) =>
+      c.url.includes('/v3/vault/payment-tokens'),
+    ) as RecordedCall
     expect(headerOf(call, 'paypal-request-id')).toBeUndefined()
-    expect(log.logs.some((l) => String(l.msg).includes('does not get a PayPal-Request-Id'))).toBe(true)
+    expect(log.logs.some((l) => String(l.msg).includes('does not get a PayPal-Request-Id'))).toBe(
+      true,
+    )
   })
 
   it('sends Prefer verbatim when asked', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : captureResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : captureResponse(),
+    )
     await client.captureAuthorization(
       '8AB12345AB6789123',
       { final_capture: true },
@@ -384,7 +406,9 @@ describe('request-id handling', () => {
   })
 
   it('carries the request id through to a payments-v2 call', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : captureResponse()))
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : captureResponse(),
+    )
     await client.captureAuthorization('8AB12345AB6789123', { final_capture: false }, CALL_OPTS)
     const call = fetchImpl.calls.find((c) => c.url.includes('/capture')) as RecordedCall
     expect(headerOf(call, 'paypal-request-id')).toBe(REQUEST_ID)
@@ -393,7 +417,9 @@ describe('request-id handling', () => {
 
 describe('a 401 inside a retry budget', () => {
   it('refreshes once and does not loop', async () => {
-    const fetchImpl = fakeFetch((call) => (isToken(call) ? tokenResponse() : unauthorizedResponse()))
+    const fetchImpl = fakeFetch((call) =>
+      isToken(call) ? tokenResponse() : unauthorizedResponse(),
+    )
     const client = new PayPalClient({
       baseUrl: BASE_URL,
       clientId: CLIENT_ID,

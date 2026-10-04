@@ -44,7 +44,18 @@ import {
 import { readerOf, recordingModel, runEvalCase } from './replay'
 
 /** The cases §8.8 names for the PR gate, and therefore the ones `--record` writes. */
-const RECORDED_IDS: readonly string[] = ['g01', 'g02', 'g03', 'g06', 'g10', 'g16', 'g19', 'g51', 'g53', 'g56']
+const RECORDED_IDS: readonly string[] = [
+  'g01',
+  'g02',
+  'g03',
+  'g06',
+  'g10',
+  'g16',
+  'g19',
+  'g51',
+  'g53',
+  'g56',
+]
 
 /** Parse and validate the environment in one call so a missing key reports every missing key at once. */
 function requireOpenAi(): string {
@@ -97,7 +108,9 @@ async function main(): Promise<void> {
     if (RECORDED_IDS.includes(testCase.id)) {
       const last = recorder.texts[recorder.texts.length - 1]
       if (last === undefined || !outcome.ok) {
-        refusals.push(`${testCase.id}: ${outcome.ok ? 'no model output captured' : `${outcome.code}`}`)
+        refusals.push(
+          `${testCase.id}: ${outcome.ok ? 'no model output captured' : `${outcome.code}`}`,
+        )
       } else {
         recorded.push({ id: testCase.id, text: testCase.text, answer: last })
       }
@@ -119,7 +132,11 @@ async function main(): Promise<void> {
       )
       process.exit(1)
     }
-    writeFileSync(fileURLToPath(new URL('cached.jsonl', import.meta.url)), renderCache(recorded), 'utf8')
+    writeFileSync(
+      fileURLToPath(new URL('cached.jsonl', import.meta.url)),
+      renderCache(recorded),
+      'utf8',
+    )
     console.info(`eval:live — wrote ${recorded.length} recorded answers to eval/cached.jsonl`)
   }
 
@@ -131,7 +148,9 @@ async function main(): Promise<void> {
     )
     process.exit(1)
   }
-  console.info(`eval:live — ${(rate * 100).toFixed(1)}% exact match, at or above the §8.8 AT-M8.1 target.`)
+  console.info(
+    `eval:live — ${(rate * 100).toFixed(1)}% exact match, at or above the §8.8 AT-M8.1 target.`,
+  )
 }
 
 /**

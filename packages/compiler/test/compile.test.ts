@@ -72,8 +72,13 @@ async function compileOk(
   catalog = STANDARD_CATALOG,
 ): Promise<CompiledMandate> {
   const scripted = scriptedModel(turns)
-  const result = await compile(compileInput(overrides), { llm: scripted.model, catalog: catalogOf(catalog), clock: CLOCK })
-  if (!result.ok) throw new Error(`expected success, got ${result.error.code}: ${result.error.message}`)
+  const result = await compile(compileInput(overrides), {
+    llm: scripted.model,
+    catalog: catalogOf(catalog),
+    clock: CLOCK,
+  })
+  if (!result.ok)
+    throw new Error(`expected success, got ${result.error.code}: ${result.error.message}`)
   return result.value
 }
 
@@ -84,7 +89,10 @@ describe('AT-M8.2 "Under 130 dollars" → amount_range.max = 13000 AND budget.ma
 
   it('produces both, when the model proposes only a per-payment cap', async () => {
     // The realistic case: the model states the number the buyer typed and leaves the placement to us.
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '130.00' }) }], { text: TEXT })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '130.00' }) }],
+      { text: TEXT },
+    )
     const range = constraintOfType(mandate.constraints, 'mandate.payment.amount_range')
     const budget = constraintOfType(mandate.constraints, 'mandate.payment.budget')
     expect(range?.max).toBe(13000n)
@@ -103,7 +111,10 @@ describe('AT-M8.2 "Under 130 dollars" → amount_range.max = 13000 AND budget.ma
   })
 
   it('the numbers are bigint minor units, never floats', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '130.00' }) }], { text: TEXT })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '130.00' }) }],
+      { text: TEXT },
+    )
     for (const c of mandate.constraints) {
       const money = c as { min?: unknown; max?: unknown }
       for (const v of [money.min, money.max]) {
@@ -114,7 +125,10 @@ describe('AT-M8.2 "Under 130 dollars" → amount_range.max = 13000 AND budget.ma
   })
 
   it('the read-back says $130.00 in total and $130.00 per payment, plainly', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '130.00' }) }], { text: TEXT })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '130.00' }) }],
+      { text: TEXT },
+    )
     const text = readBack(mandate, CTX)
     expect(text).toContain('Spend at most **$130.00** in total')
     expect(text).toContain('Spend at most **$130.00** per payment')
@@ -211,13 +225,18 @@ describe('AT-M8.3 "Buy shoes" with no amount → an ambiguity, not a guess', () 
           text: JSON.stringify({
             currency: 'USD',
             merchantIds: [NORTHWIND.id],
-            ambiguities: [{ field: 'preferences.size', question: 'Which size?', options: ['S', 'M', 'L'] }],
+            ambiguities: [
+              { field: 'preferences.size', question: 'Which size?', options: ['S', 'M', 'L'] },
+            ],
           }),
         },
       ],
       { text: TEXT },
     )
-    expect(mandate.ambiguities.map((a) => a.field)).toEqual(['preferences.size', 'amount_range.max'])
+    expect(mandate.ambiguities.map((a) => a.field)).toEqual([
+      'preferences.size',
+      'amount_range.max',
+    ])
   })
 })
 
@@ -229,18 +248,26 @@ describe('AT-M8.5 injection in the intent', () => {
   })
 
   it('a model proposing exactly the literal amount is accepted, and it is the literal amount', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '1000000.00' }) }], {
-      text: INJECTION,
-    })
-    expect(constraintOfType(mandate.constraints, 'mandate.payment.amount_range')?.max).toBe(100_000_000n)
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '1000000.00' }) }],
+      {
+        text: INJECTION,
+      },
+    )
+    expect(constraintOfType(mandate.constraints, 'mandate.payment.amount_range')?.max).toBe(
+      100_000_000n,
+    )
     expect(constraintOfType(mandate.constraints, 'mandate.payment.budget')?.max).toBe(100_000_000n)
     expect(mandate.assumptions).toEqual([])
   })
 
   it('the read-back shows the cap plainly, in full, with grouping', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '1000000.00' }) }], {
-      text: INJECTION,
-    })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '1000000.00' }) }],
+      {
+        text: INJECTION,
+      },
+    )
     const text = readBack(mandate, CTX)
     expect(text).toContain('Spend at most **$1,000,000.00** in total')
     expect(text).toContain('Spend at most **$1,000,000.00** per payment')
@@ -252,18 +279,26 @@ describe('AT-M8.5 injection in the intent', () => {
     // The outcome is a **$1,000,000.00 mandate**, not an error. The buyer's text says $1M, the read-back says
     // $1,000,000.00, and the model's $10M has nowhere to go: `clampToLiteral` runs before any constraint is
     // built, so there is no path by which a number the buyer did not write reaches a signed constraint.
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '10000000.00' }) }], {
-      text: INJECTION,
-    })
-    expect(constraintOfType(mandate.constraints, 'mandate.payment.amount_range')?.max).toBe(100_000_000n)
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '10000000.00' }) }],
+      {
+        text: INJECTION,
+      },
+    )
+    expect(constraintOfType(mandate.constraints, 'mandate.payment.amount_range')?.max).toBe(
+      100_000_000n,
+    )
     expect(constraintOfType(mandate.constraints, 'mandate.payment.budget')?.max).toBe(100_000_000n)
     expect(readBack(mandate, CTX)).toContain('Spend at most **$1,000,000.00** in total')
   })
 
   it('the clamp is stated in the read-back, so the buyer can see the model was overruled', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '10000000.00' }) }], {
-      text: INJECTION,
-    })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '10000000.00' }) }],
+      {
+        text: INJECTION,
+      },
+    )
     expect(mandate.assumptions.join(' ')).toContain('lowered to the largest amount you wrote')
     expect(readBack(mandate, CTX)).toContain('lowered to the largest amount you wrote')
   })
@@ -290,7 +325,9 @@ describe('AT-M8.5 injection in the intent', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(scripted.calls).toHaveLength(2)
-    expect(constraintOfType(result.value.constraints, 'mandate.payment.amount_range')?.max).toBe(100_000_000n)
+    expect(constraintOfType(result.value.constraints, 'mandate.payment.amount_range')?.max).toBe(
+      100_000_000n,
+    )
   })
 
   it('validateConstraints still refuses an over-ceiling cap from any other caller', async () => {
@@ -312,7 +349,12 @@ describe('AT-M8.5 injection in the intent', () => {
         kind: 'text',
         text: proposalJson({
           amountMax: '1000000.00',
-          recurrence: { frequency: 'MNTH', startDate: '2026-10-01', endDate: '2036-10-01', number: 120 },
+          recurrence: {
+            frequency: 'MNTH',
+            startDate: '2026-10-01',
+            endDate: '2036-10-01',
+            number: 120,
+          },
         }),
       },
     ])
@@ -326,11 +368,14 @@ describe('AT-M8.5 injection in the intent', () => {
     expect(result.error.message).toContain('does not mention one')
   })
 
-  it('the ceiling is the user\'s bytes, so a *lowered* cap is always allowed', async () => {
+  it("the ceiling is the user's bytes, so a *lowered* cap is always allowed", async () => {
     // The defence must not be a blanket refusal, or a legitimate request would fail.
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '50.00' }) }], {
-      text: INJECTION,
-    })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '50.00' }) }],
+      {
+        text: INJECTION,
+      },
+    )
     expect(constraintOfType(mandate.constraints, 'mandate.payment.amount_range')?.max).toBe(5000n)
     expect(mandate.assumptions).toEqual([])
   })
@@ -450,7 +495,10 @@ describe('EC-LLM-2 one repair retry, then a typed error', () => {
     // The first answer fails the schema *and* carries a merchant that does not exist. The schema can only
     // say "expected string, received number"; the catalog check is what names the actual mistake.
     const scripted = scriptedModel([
-      { kind: 'text', text: JSON.stringify({ currency: 'USD', merchantIds: ['mrc_ghost'], amountMax: 130 }) },
+      {
+        kind: 'text',
+        text: JSON.stringify({ currency: 'USD', merchantIds: ['mrc_ghost'], amountMax: 130 }),
+      },
       { kind: 'text', text: proposalJson() },
     ])
     await compile(compileInput({ text: 'Under 130 dollars' }), {
@@ -481,36 +529,57 @@ describe('EC-FX-1 currency is never converted', () => {
         text: JSON.stringify({ currency: 'INR', merchantIds: [CONTOSO.id], amountMax: '500.00' }),
       },
     ])
-    const result = await compile(compileInput({ text: 'Buy chai under 500 rupees', defaults: { currency: 'USD', merchantIds: [] } }), {
-      llm: scripted.model,
-      catalog: catalogOf(STANDARD_CATALOG),
-      clock: CLOCK,
-    })
+    const result = await compile(
+      compileInput({
+        text: 'Buy chai under 500 rupees',
+        defaults: { currency: 'USD', merchantIds: [] },
+      }),
+      {
+        llm: scripted.model,
+        catalog: catalogOf(STANDARD_CATALOG),
+        clock: CLOCK,
+      },
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     // The Gate will block the USD checkout later (EC-FX-1). The compiler's job is to not paper over it.
-    expect(constraintOfType(result.value.constraints, 'mandate.payment.amount_range')?.currency).toBe('INR')
-    expect(constraintOfType(result.value.constraints, 'mandate.payment.budget')?.currency).toBe('INR')
+    expect(
+      constraintOfType(result.value.constraints, 'mandate.payment.amount_range')?.currency,
+    ).toBe('INR')
+    expect(constraintOfType(result.value.constraints, 'mandate.payment.budget')?.currency).toBe(
+      'INR',
+    )
     expect(readBack(result.value, CTX)).toContain('Spend at most **₹500.00** in total')
   })
 
   it('a text naming another currency than the catalog default still wins', async () => {
     const scripted = scriptedModel([
-      { kind: 'text', text: JSON.stringify({ currency: 'INR', merchantIds: [CONTOSO.id], amountMax: '500.00' }) },
+      {
+        kind: 'text',
+        text: JSON.stringify({ currency: 'INR', merchantIds: [CONTOSO.id], amountMax: '500.00' }),
+      },
     ])
-    const result = await compile(compileInput({ text: 'under 500 rupees', defaults: { currency: 'USD', merchantIds: [] } }), {
-      llm: scripted.model,
-      catalog: catalogOf(STANDARD_CATALOG),
-      clock: CLOCK,
-    })
+    const result = await compile(
+      compileInput({ text: 'under 500 rupees', defaults: { currency: 'USD', merchantIds: [] } }),
+      {
+        llm: scripted.model,
+        catalog: catalogOf(STANDARD_CATALOG),
+        clock: CLOCK,
+      },
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(constraintOfType(result.value.constraints, 'mandate.payment.amount_range')?.currency).toBe('INR')
+    expect(
+      constraintOfType(result.value.constraints, 'mandate.payment.amount_range')?.currency,
+    ).toBe('INR')
   })
 
   it('a model that names a currency we did not resolve is refused, not converted', async () => {
     const scripted = scriptedModel([
-      { kind: 'text', text: JSON.stringify({ currency: 'EUR', merchantIds: [NORTHWIND.id], amountMax: '130.00' }) },
+      {
+        kind: 'text',
+        text: JSON.stringify({ currency: 'EUR', merchantIds: [NORTHWIND.id], amountMax: '130.00' }),
+      },
     ])
     const result = await compile(compileInput({ text: 'Under 130 dollars' }), {
       llm: scripted.model,
@@ -539,11 +608,27 @@ describe('EC-FX-1 currency is never converted', () => {
 
   it('an unstated currency in a single-currency catalog becomes a stated assumption', async () => {
     const mandate = await compileOk(
-      [{ kind: 'text', text: JSON.stringify({ currency: 'INR', merchantIds: [CONTOSO.id], amountMax: '1000.00' }) }],
+      [
+        {
+          kind: 'text',
+          text: JSON.stringify({
+            currency: 'INR',
+            merchantIds: [CONTOSO.id],
+            amountMax: '1000.00',
+          }),
+        },
+      ],
       { text: 'under 1000', defaults: { currency: 'USD', merchantIds: [] } },
       {
         merchants: [CONTOSO],
-        skus: [{ ...STANDARD_CATALOG.skus[0]!, merchantId: CONTOSO.id, currency: 'INR', priceMinor: 34000n }],
+        skus: [
+          {
+            ...STANDARD_CATALOG.skus[0]!,
+            merchantId: CONTOSO.id,
+            currency: 'INR',
+            priceMinor: 34000n,
+          },
+        ],
       },
     )
     expect(mandate.assumptions[0]).toContain('Assumed INR')
@@ -551,7 +636,10 @@ describe('EC-FX-1 currency is never converted', () => {
   })
 
   it('an unstated currency with a multi-currency catalog falls back to the account default, and says so', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '50.00' }) }], { text: 'under 50' })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '50.00' }) }],
+      { text: 'under 50' },
+    )
     expect(mandate.assumptions[0]).toContain('Assumed USD')
     expect(mandate.assumptions[0]).toContain('did not name a currency')
   })
@@ -635,9 +723,12 @@ describe('EC-FX-5 a float from the model is refused, never rounded', () => {
   })
 
   it('exactly two decimals is fine, and becomes the right minor units', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '129.99' }) }], {
-      text: 'Under 130 dollars',
-    })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '129.99' }) }],
+      {
+        text: 'Under 130 dollars',
+      },
+    )
     expect(constraintOfType(mandate.constraints, 'mandate.payment.amount_range')?.max).toBe(12999n)
   })
 })
@@ -674,11 +765,17 @@ describe('local validation of the compiled constraints', () => {
 
   it('min above max is refused on both money constraints', () => {
     expect(
-      validateConstraints([{ type: 'mandate.payment.amount_range', currency: 'USD', min: 500n, max: 100n }], ctx).ok,
+      validateConstraints(
+        [{ type: 'mandate.payment.amount_range', currency: 'USD', min: 500n, max: 100n }],
+        ctx,
+      ).ok,
     ).toBe(false)
-    expect(validateConstraints([{ type: 'mandate.payment.budget', currency: 'USD', max: 100n, min: 500n }], ctx).ok).toBe(
-      false,
-    )
+    expect(
+      validateConstraints(
+        [{ type: 'mandate.payment.budget', currency: 'USD', max: 100n, min: 500n }],
+        ctx,
+      ).ok,
+    ).toBe(false)
   })
 
   it('a total budget below the per-payment cap is refused as self-contradictory', () => {
@@ -723,7 +820,14 @@ describe('local validation of the compiled constraints', () => {
 
   it('a recurrence window that ends before it starts is refused', () => {
     const result = validateConstraints(
-      [{ type: 'mandate.payment.recurrence', frequency: 'MNTH', start_date: '2027-01-01', end_date: '2026-01-01' }],
+      [
+        {
+          type: 'mandate.payment.recurrence',
+          frequency: 'MNTH',
+          start_date: '2027-01-01',
+          end_date: '2026-01-01',
+        },
+      ],
       ctx,
     )
     expect(result.ok).toBe(false)
@@ -740,11 +844,14 @@ describe('local validation of the compiled constraints', () => {
       },
       { kind: 'text', text: proposalJson({ amountMax: '50.00' }) },
     ])
-    const result = await compile(compileInput({ text: '50 dollars every month until February 2027' }), {
-      llm: scripted.model,
-      catalog: catalogOf(STANDARD_CATALOG),
-      clock: CLOCK,
-    })
+    const result = await compile(
+      compileInput({ text: '50 dollars every month until February 2027' }),
+      {
+        llm: scripted.model,
+        catalog: catalogOf(STANDARD_CATALOG),
+        clock: CLOCK,
+      },
+    )
     // The impossible date is rejected by the schema, the repair turn drops the recurrence, and the
     // mandate compiles. Two calls, not one and not three.
     expect(result.ok).toBe(true)
@@ -756,7 +863,10 @@ describe('local validation of the compiled constraints', () => {
 describe('catalog grounding', () => {
   it('an unknown merchant id is refused, not dropped', async () => {
     const scripted = scriptedModel([
-      { kind: 'text', text: JSON.stringify({ currency: 'USD', merchantIds: ['mrc_ghost'], amountMax: '50.00' }) },
+      {
+        kind: 'text',
+        text: JSON.stringify({ currency: 'USD', merchantIds: ['mrc_ghost'], amountMax: '50.00' }),
+      },
     ])
     const result = await compile(compileInput({ text: 'under 50 at Ghost Supplies' }), {
       llm: scripted.model,
@@ -791,7 +901,10 @@ describe('catalog grounding', () => {
   })
 
   it('merchant names come from the catalog, never from the model', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '50.00' }) }], { text: 'under 50' })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '50.00' }) }],
+      { text: 'under 50' },
+    )
     const allowed = constraintOfType(mandate.constraints, 'mandate.checkout.allowed_merchants')
     expect(allowed?.allowed[0]?.name).toBe(NORTHWIND.name)
     expect(allowed?.allowed[0]?.website).toBe(NORTHWIND.website)
@@ -839,12 +952,17 @@ describe('catalog grounding', () => {
   })
 
   it('the account default supplies the merchant list when the model names none', async () => {
-    const scripted = scriptedModel([{ kind: 'text', text: JSON.stringify({ currency: 'USD', amountMax: '50.00' }) }])
-    const result = await compile(compileInput({ text: 'under 50', defaults: { currency: 'USD', merchantIds: [CONTOSO.id] } }), {
-      llm: scripted.model,
-      catalog: catalogOf(STANDARD_CATALOG),
-      clock: CLOCK,
-    })
+    const scripted = scriptedModel([
+      { kind: 'text', text: JSON.stringify({ currency: 'USD', amountMax: '50.00' }) },
+    ])
+    const result = await compile(
+      compileInput({ text: 'under 50', defaults: { currency: 'USD', merchantIds: [CONTOSO.id] } }),
+      {
+        llm: scripted.model,
+        catalog: catalogOf(STANDARD_CATALOG),
+        clock: CLOCK,
+      },
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
     const allowed = constraintOfType(result.value.constraints, 'mandate.checkout.allowed_merchants')
@@ -852,7 +970,10 @@ describe('catalog grounding', () => {
   })
 
   it('allowed_payees mirrors allowed_merchants, so "only at X" bounds both the cart and the payee', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson({ amountMax: '50.00' }) }], { text: 'under 50' })
+    const mandate = await compileOk(
+      [{ kind: 'text', text: proposalJson({ amountMax: '50.00' }) }],
+      { text: 'under 50' },
+    )
     const merchants = constraintOfType(mandate.constraints, 'mandate.checkout.allowed_merchants')
     const payees = constraintOfType(mandate.constraints, 'mandate.payment.allowed_payees')
     expect(payees?.allowed.map((m) => m.id)).toEqual(merchants?.allowed.map((m) => m.id))
@@ -874,7 +995,9 @@ describe('catalog grounding', () => {
 
 describe('TTL and recurrence windows', () => {
   it('defaults to seven days (§8.8)', async () => {
-    const mandate = await compileOk([{ kind: 'text', text: proposalJson() }], { text: 'Under 130 dollars' })
+    const mandate = await compileOk([{ kind: 'text', text: proposalJson() }], {
+      text: 'Under 130 dollars',
+    })
     expect(mandate.ttlSeconds).toBe(DEFAULT_TTL_SECONDS)
     expect(mandate.expiresAtEpochSec).toBe(NOW + DEFAULT_TTL_SECONDS)
   })
@@ -889,7 +1012,7 @@ describe('TTL and recurrence windows', () => {
     expect(readBack(mandate, CTX)).toContain('30 days')
   })
 
-  it('raises a lifetime too short to use up to vi\'s one-minute floor, and says so', async () => {
+  it("raises a lifetime too short to use up to vi's one-minute floor, and says so", async () => {
     const mandate = await compileOk([{ kind: 'text', text: proposalJson({ ttlSeconds: 5 }) }], {
       text: 'Under 130 dollars',
     })
@@ -974,8 +1097,15 @@ describe('preferences are not constraints', () => {
       ],
       { text: 'Under 130 dollars, a size M slate Trail Runner' },
     )
-    expect(JSON.stringify(mandate.constraints, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))).not.toContain('M')
-    expect(mandate.preferences).toEqual({ size: 'M', color: 'Slate', model: 'TR-2', notes: 'for the marathon' })
+    expect(
+      JSON.stringify(mandate.constraints, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)),
+    ).not.toContain('M')
+    expect(mandate.preferences).toEqual({
+      size: 'M',
+      color: 'Slate',
+      model: 'TR-2',
+      notes: 'for the marathon',
+    })
     const text = readBack(mandate, CTX)
     expect(text).toContain('as a preference, not a limit')
     expect(text).toContain('do not bound what the agent may buy')
@@ -1007,4 +1137,3 @@ describe('input validation', () => {
     expect(scripted.calls).toHaveLength(0)
   })
 })
-

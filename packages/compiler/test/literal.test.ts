@@ -50,10 +50,15 @@ describe('currenciesNamedIn', () => {
 })
 
 describe('resolveCurrency', () => {
-  const args = (text: string, catalogCurrencies: string[] = []): Parameters<typeof resolveCurrency>[0] => ({
+  const args = (
+    text: string,
+    catalogCurrencies: string[] = [],
+  ): Parameters<typeof resolveCurrency>[0] => ({
     text,
     defaultCurrency: 'USD',
-    catalogCurrencies: catalogCurrencies as Parameters<typeof resolveCurrency>[0]['catalogCurrencies'],
+    catalogCurrencies: catalogCurrencies as Parameters<
+      typeof resolveCurrency
+    >[0]['catalogCurrencies'],
   })
 
   it('what the buyer wrote beats the account default', () => {
@@ -73,7 +78,9 @@ describe('resolveCurrency', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.currency).toBe('INR')
-    expect(r.assumptions[0]).toBe('Assumed INR because every item in the store you chose is priced in INR.')
+    expect(r.assumptions[0]).toBe(
+      'Assumed INR because every item in the store you chose is priced in INR.',
+    )
   })
 
   it('falls back to the account default, and says so, when the catalog is multi-currency', () => {
@@ -196,7 +203,11 @@ describe('mentionsRecurrence', () => {
   })
 
   it('says no to a one-off purchase', () => {
-    for (const text of ['buy running shoes', 'a pair of boots under 130 dollars', 'gift someone a book']) {
+    for (const text of [
+      'buy running shoes',
+      'a pair of boots under 130 dollars',
+      'gift someone a book',
+    ]) {
       expect(mentionsRecurrence(text), text).toBe(false)
     }
   })

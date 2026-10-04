@@ -118,7 +118,15 @@ describe('currencySchema', () => {
   // a 3 a.m. incident into a failing test.
   it('is exactly the seven codes vi accepts, and exactly core CURRENCIES', () => {
     expect([...currencySchema.options].sort()).toEqual([...CURRENCIES].sort())
-    expect([...currencySchema.options].sort()).toEqual(['AUD', 'CAD', 'EUR', 'GBP', 'INR', 'JPY', 'USD'])
+    expect([...currencySchema.options].sort()).toEqual([
+      'AUD',
+      'CAD',
+      'EUR',
+      'GBP',
+      'INR',
+      'JPY',
+      'USD',
+    ])
   })
 
   it('refuses lower case, because vi does not lower-case', () => {
@@ -183,12 +191,17 @@ describe('publicJwkSchema', () => {
 
 describe('moneyAmountSchema', () => {
   it('accepts integer minor units with a currency and nothing else', () => {
-    expect(moneyAmountSchema.parse({ minor: 13_000, currency: 'USD' })).toEqual({ minor: 13_000n, currency: 'USD' })
+    expect(moneyAmountSchema.parse({ minor: 13_000, currency: 'USD' })).toEqual({
+      minor: 13_000n,
+      currency: 'USD',
+    })
   })
 
   it('refuses a float, an extra field and a missing currency', () => {
     expect(moneyAmountSchema.safeParse({ minor: 13_000.5, currency: 'USD' }).success).toBe(false)
-    expect(moneyAmountSchema.safeParse({ minor: 13_000, currency: 'USD', cents: 13_000 }).success).toBe(false)
+    expect(
+      moneyAmountSchema.safeParse({ minor: 13_000, currency: 'USD', cents: 13_000 }).success,
+    ).toBe(false)
     expect(moneyAmountSchema.safeParse({ minor: 13_000 }).success).toBe(false)
   })
 })
@@ -212,8 +225,14 @@ describe('the eight registered constraint types', () => {
   })
 
   it('accepts the seven a caller may supply', () => {
-    const merchant = { id: 'mrc_northwind', name: 'Northwind Outfitters', website: 'https://northwind.test' }
-    const acceptable: { id: string; title: string }[] = [{ id: 'SKU-TRAIL-42', title: 'Trail Runner' }]
+    const merchant = {
+      id: 'mrc_northwind',
+      name: 'Northwind Outfitters',
+      website: 'https://northwind.test',
+    }
+    const acceptable: { id: string; title: string }[] = [
+      { id: 'SKU-TRAIL-42', title: 'Trail Runner' },
+    ]
     const cases: unknown[] = [
       { type: 'mandate.checkout.allowed_merchants', allowed: [merchant] },
       {
@@ -223,7 +242,12 @@ describe('the eight registered constraint types', () => {
       { type: 'mandate.payment.allowed_payees', allowed: [merchant] },
       { type: 'mandate.payment.amount_range', currency: 'USD', min: 0, max: 20_000 },
       { type: 'mandate.payment.budget', currency: 'USD', max: 20_000 },
-      { type: 'mandate.payment.recurrence', frequency: 'MNTH', start_date: '2026-10-01', number: 6 },
+      {
+        type: 'mandate.payment.recurrence',
+        frequency: 'MNTH',
+        start_date: '2026-10-01',
+        number: 6,
+      },
       {
         type: 'mandate.payment.agent_recurrence',
         frequency: 'MNTH',
@@ -258,7 +282,10 @@ describe('the eight registered constraint types', () => {
   })
 
   it('refuses a budget with a non-positive cap, which the library would raise on anyway', () => {
-    expect(budgetConstraintSchema.safeParse({ type: 'mandate.payment.budget', currency: 'USD', max: 0 }).success).toBe(false)
+    expect(
+      budgetConstraintSchema.safeParse({ type: 'mandate.payment.budget', currency: 'USD', max: 0 })
+        .success,
+    ).toBe(false)
   })
 
   it('refuses an agent_recurrence without end_date, which the library requires', () => {
@@ -325,12 +352,16 @@ describe('skippedConstraintTypes and pendingNetworkEnforcement', () => {
     expect(legacy.constraints.skipped).toEqual([
       { type: 'mandate.payment.budget', reason: NETWORK_ENFORCED_REASON },
     ])
-    expect(pendingNetworkEnforcement(legacy.constraints.skipped)).toEqual(['mandate.payment.budget'])
+    expect(pendingNetworkEnforcement(legacy.constraints.skipped)).toEqual([
+      'mandate.payment.budget',
+    ])
   })
 
   it('accepts the current `{type, reason}` wire shape', () => {
     const current = verifyResponseSchema.parse(
-      verifyResponse({ skipped: [{ type: 'mandate.payment.budget', reason: NETWORK_ENFORCED_REASON }] }),
+      verifyResponse({
+        skipped: [{ type: 'mandate.payment.budget', reason: NETWORK_ENFORCED_REASON }],
+      }),
     )
     expect(current.constraints.skipped[0]?.type).toBe('mandate.payment.budget')
     expect(current.constraints.skipped[0]?.reason).toBe(NETWORK_ENFORCED_REASON)
@@ -374,7 +405,9 @@ describe('skippedConstraintTypes and pendingNetworkEnforcement', () => {
 
   it('reports nothing when none of the three were disclosed, which is not the same as nothing to do', () => {
     expect(pendingNetworkEnforcement([])).toEqual([])
-    expect(pendingNetworkEnforcement(['checkout constraint evaluation (needs the checkout_jwt cart)'])).toEqual([])
+    expect(
+      pendingNetworkEnforcement(['checkout constraint evaluation (needs the checkout_jwt cart)']),
+    ).toEqual([])
   })
 
   it('picks out a library-injected constraint if one is ever reported as skipped', () => {
@@ -419,25 +452,37 @@ describe('l2PrepareResponseSchema: signing_input is exactly header.payload', () 
 
   it('refuses three segments, because a signature is not part of the signing input', () => {
     const body = prepareResponse()
-    const r = l2PrepareResponseSchema.safeParse({ ...body, signing_input: `${String(body['signing_input'])}.sig` })
+    const r = l2PrepareResponseSchema.safeParse({
+      ...body,
+      signing_input: `${String(body['signing_input'])}.sig`,
+    })
     expect(r.success).toBe(false)
   })
 
   it('refuses a trailing dot, which would encode an empty payload segment', () => {
     const body = prepareResponse()
-    const r = l2PrepareResponseSchema.safeParse({ ...body, signing_input: `${String(body['signing_input'])}.` })
+    const r = l2PrepareResponseSchema.safeParse({
+      ...body,
+      signing_input: `${String(body['signing_input'])}.`,
+    })
     expect(r.success).toBe(false)
   })
 
   it('refuses an empty header segment', () => {
     const body = prepareResponse()
-    const r = l2PrepareResponseSchema.safeParse({ ...body, signing_input: `.${String(body['signing_input']).split('.')[1]}` })
+    const r = l2PrepareResponseSchema.safeParse({
+      ...body,
+      signing_input: `.${String(body['signing_input']).split('.')[1]}`,
+    })
     expect(r.success).toBe(false)
   })
 
   it('refuses a segment that is not base64url-encoded JSON', () => {
     const body = prepareResponse()
-    const r = l2PrepareResponseSchema.safeParse({ ...body, signing_input: 'not-base64url!!.also-not' })
+    const r = l2PrepareResponseSchema.safeParse({
+      ...body,
+      signing_input: 'not-base64url!!.also-not',
+    })
     expect(r.success).toBe(false)
   })
 
@@ -474,7 +519,14 @@ describe('l2PrepareResponseSchema: signing_input is exactly header.payload', () 
   })
 
   it('refuses a response missing any of the six required fields', () => {
-    for (const field of ['prepare_id', 'signing_input', 'header', 'payload', 'expires_at', 'prepare_ttl_seconds']) {
+    for (const field of [
+      'prepare_id',
+      'signing_input',
+      'header',
+      'payload',
+      'expires_at',
+      'prepare_ttl_seconds',
+    ]) {
       const body = prepareResponse() as Record<string, unknown>
       const copy = { ...body }
       delete copy[field]
@@ -510,7 +562,11 @@ describe('verifyResponseSchema', () => {
 
   it('parses chain_valid:false with its reasons, because that is a verdict and not a failure', () => {
     const parsed = verifyResponseSchema.parse(
-      verifyResponse({ chainValid: false, errors: ['L2 signature verification failed'], satisfied: false }),
+      verifyResponse({
+        chainValid: false,
+        errors: ['L2 signature verification failed'],
+        satisfied: false,
+      }),
     )
     expect(parsed.chain_valid).toBe(false)
     expect(parsed.errors).toEqual(['L2 signature verification failed'])
@@ -650,8 +706,12 @@ describe('ROUTE_CONTRACTS', () => {
 
   // Spec §8.3: every route needs the bearer token except these two, which are public and rate-limited.
   it('marks exactly GET /v1/jwks and POST /v1/public/verify as public', () => {
-    const publicRoutes = ROUTE_CONTRACTS.filter((r) => r.auth === 'public').map((r) => `${r.method} ${r.path}`)
-    expect(publicRoutes.sort()).toEqual(['GET /v1/jwks', 'GET /v1/status', 'POST /v1/public/verify'].sort())
+    const publicRoutes = ROUTE_CONTRACTS.filter((r) => r.auth === 'public').map(
+      (r) => `${r.method} ${r.path}`,
+    )
+    expect(publicRoutes.sort()).toEqual(
+      ['GET /v1/jwks', 'GET /v1/status', 'POST /v1/public/verify'].sort(),
+    )
   })
 
   it('gives every route a response schema and every POST a request schema', () => {
@@ -663,7 +723,9 @@ describe('ROUTE_CONTRACTS', () => {
 
   it('finds a contract by method and path, ignoring a query string', () => {
     expect(findRouteContract('get', '/v1/checkout-jwt/verify')?.auth).toBe('bearer')
-    expect(findRouteContract('GET', '/v1/checkout-jwt/verify?checkout_jwt=abc')?.path).toBe('/v1/checkout-jwt/verify')
+    expect(findRouteContract('GET', '/v1/checkout-jwt/verify?checkout_jwt=abc')?.path).toBe(
+      '/v1/checkout-jwt/verify',
+    )
     expect(findRouteContract('POST', '/v1/nope')).toBeUndefined()
   })
 

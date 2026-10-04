@@ -21,7 +21,9 @@ export const systemClock: Clock = {
 }
 
 /** A clock frozen at `sec`. Tests advance it by reassigning `sec` or using {@link advanceClock}. */
-export function fixedClock(sec: number): Clock & { set(sec: number): void; advance(deltaSec: number): void } {
+export function fixedClock(
+  sec: number,
+): Clock & { set(sec: number): void; advance(deltaSec: number): void } {
   let current = Math.floor(sec)
   return {
     nowMs: () => current * 1000,
@@ -108,8 +110,18 @@ export function formatIst(epochSec: number, opts: { seconds?: boolean } = {}): s
  * templates in `packages/compiler` promise the user (spec §8.8 "Read-back").
  */
 const MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ] as const
 
 export function formatIstHuman(epochSec: number): string {

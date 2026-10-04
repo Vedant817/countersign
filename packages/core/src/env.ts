@@ -38,20 +38,20 @@ export const SECRET_ENV_KEYS = [
 export type SecretEnvKey = (typeof SECRET_ENV_KEYS)[number]
 
 /** A 32-byte key, base64 (standard or url-safe). */
-const base64Key = z
-  .string()
-  .refine((s) => {
-    try {
-      const b = Buffer.from(s, 'base64')
-      return b.length === 32
-    } catch {
-      return false
-    }
-  }, 'must be a base64-encoded 32-byte key')
+const base64Key = z.string().refine((s) => {
+  try {
+    const b = Buffer.from(s, 'base64')
+    return b.length === 32
+  } catch {
+    return false
+  }
+}, 'must be a base64-encoded 32-byte key')
 
 const boolish = z
   .union([z.boolean(), z.string()])
-  .transform((v) => (typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase())))
+  .transform((v) =>
+    typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase()),
+  )
 
 /**
  * The full env schema. `APP_ENV` is not optional: a misconfigured deployment should fail loudly at
@@ -60,9 +60,13 @@ const boolish = z
 export const envSchema = z
   .object({
     APP_ENV: z.enum(['local', 'render', 'ci', 'test']),
-    PUBLIC_BASE_URL: z.string().url().refine((u) => u.startsWith('https://') || u.startsWith('http://localhost'), {
-      message: 'PUBLIC_BASE_URL must be https (or localhost) — it appears in evidence packets and QR codes',
-    }),
+    PUBLIC_BASE_URL: z
+      .string()
+      .url()
+      .refine((u) => u.startsWith('https://') || u.startsWith('http://localhost'), {
+        message:
+          'PUBLIC_BASE_URL must be https (or localhost) — it appears in evidence packets and QR codes',
+      }),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
     DATABASE_URL: z.string().min(1),
@@ -83,9 +87,14 @@ export const envSchema = z
     PAYPAL_API_BASE: z
       .string()
       .url()
-      .refine((u) => /(^|\.)sandbox\.paypal\.com$/.test(new URL(u).hostname) || new URL(u).hostname === 'localhost', {
-        message: 'EC-ENV-1: PAYPAL_API_BASE must point at a *.sandbox.paypal.com host',
-      }),
+      .refine(
+        (u) =>
+          /(^|\.)sandbox\.paypal\.com$/.test(new URL(u).hostname) ||
+          new URL(u).hostname === 'localhost',
+        {
+          message: 'EC-ENV-1: PAYPAL_API_BASE must point at a *.sandbox.paypal.com host',
+        },
+      ),
     PAYPAL_CLIENT_ID: z.string().min(1),
     PAYPAL_CLIENT_SECRET: z.string().min(1),
     PAYPAL_WEBHOOK_ID: z.string().default(''),
@@ -130,7 +139,9 @@ export const partialEnvSchema = envSchema.partial()
 
 function formatIssues(e: z.ZodError): CsError {
   const issues = e.issues.map((i) => ({ path: i.path.join('.'), message: i.message, code: i.code }))
-  const missing = issues.filter((i) => i.code === 'invalid_type' || i.message.includes('Required')).map((i) => i.path)
+  const missing = issues
+    .filter((i) => i.code === 'invalid_type' || i.message.includes('Required'))
+    .map((i) => i.path)
   return csError(
     'CS_VALIDATION',
     `Invalid environment: ${issues.map((i) => `${i.path}: ${i.message}`).join('; ')}`,

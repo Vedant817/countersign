@@ -5,27 +5,27 @@ only artefact.
 
 ## Sources, and how they were read
 
-| Abbreviation | Source |
-|---|---|
-| `SPEC-D` | `openapi/customer_disputes_v1.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/customer_disputes_v1.json (identical served copy at https://developer.paypal.com/api/customer-disputes/v1/schema.json, `info.version` **1.12**) |
-| `SPEC-P` | `openapi/payments_payment_v2.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/payments_payment_v2.json (v **2.12**) |
-| `SPEC-O` | `openapi/checkout_orders_v2.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/checkout_orders_v2.json (v **2.32**) |
-| `SPEC-V` | `openapi/vault_payment_tokens_v3.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/vault_payment_tokens_v3.json (v **3.4**) |
-| `SPEC-W` | `openapi/notifications_webhooks_v1.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/notifications_webhooks_v1.json (v **1.11**) |
-| `GUIDE` | https://developer.paypal.com/platforms/disputes/handle-disputes/use-disputes-api — "Use Disputes API", the only PayPal page that carries worked cURL for every seller dispute action |
-| `TGL` | https://developer.paypal.com/disputes/test-go-live — sandbox simulators |
-| `SETUP` | https://developer.paypal.com/disputes/set-up — `PayPal-Auth-Assertion` |
-| `FILES` | https://developer.paypal.com/disputes/supported-file-sizes-types |
-| `IDEMP` | https://developer.paypal.com/api/rest/reference/idempotency |
-| `REQ` | https://developer.paypal.com/api/rest/requests |
-| `EVENTS` | https://developer.paypal.com/api/rest/webhooks/event-names |
-| `ERRORS` | https://developer.paypal.com/api/errors/overview |
-| `VAULTDOC` | https://developer.paypal.com/api/save-with-purchase/save-payment-methods |
-| `MCPDOC` | https://developer.paypal.com/ai-tools/mcp-server |
-| `SDKJS` | https://developer.paypal.com/sdk/js/set-up |
+| Abbreviation | Source                                                                                                                                                                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SPEC-D`     | `openapi/customer_disputes_v1.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/customer_disputes_v1.json (identical served copy at https://developer.paypal.com/api/customer-disputes/v1/schema.json, `info.version` **1.12**) |
+| `SPEC-P`     | `openapi/payments_payment_v2.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/payments_payment_v2.json (v **2.12**)                                                                                                            |
+| `SPEC-O`     | `openapi/checkout_orders_v2.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/checkout_orders_v2.json (v **2.32**)                                                                                                              |
+| `SPEC-V`     | `openapi/vault_payment_tokens_v3.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/vault_payment_tokens_v3.json (v **3.4**)                                                                                                     |
+| `SPEC-W`     | `openapi/notifications_webhooks_v1.json` — https://raw.githubusercontent.com/paypal/paypal-rest-api-specifications/main/openapi/notifications_webhooks_v1.json (v **1.11**)                                                                                                |
+| `GUIDE`      | https://developer.paypal.com/platforms/disputes/handle-disputes/use-disputes-api — "Use Disputes API", the only PayPal page that carries worked cURL for every seller dispute action                                                                                       |
+| `TGL`        | https://developer.paypal.com/disputes/test-go-live — sandbox simulators                                                                                                                                                                                                    |
+| `SETUP`      | https://developer.paypal.com/disputes/set-up — `PayPal-Auth-Assertion`                                                                                                                                                                                                     |
+| `FILES`      | https://developer.paypal.com/disputes/supported-file-sizes-types                                                                                                                                                                                                           |
+| `IDEMP`      | https://developer.paypal.com/api/rest/reference/idempotency                                                                                                                                                                                                                |
+| `REQ`        | https://developer.paypal.com/api/rest/requests                                                                                                                                                                                                                             |
+| `EVENTS`     | https://developer.paypal.com/api/rest/webhooks/event-names                                                                                                                                                                                                                 |
+| `ERRORS`     | https://developer.paypal.com/api/errors/overview                                                                                                                                                                                                                           |
+| `VAULTDOC`   | https://developer.paypal.com/api/save-with-purchase/save-payment-methods                                                                                                                                                                                                   |
+| `MCPDOC`     | https://developer.paypal.com/ai-tools/mcp-server                                                                                                                                                                                                                           |
+| `SDKJS`      | https://developer.paypal.com/sdk/js/set-up                                                                                                                                                                                                                                 |
 
 A note on method: `developer.paypal.com` pages are server-rendered Next.js and the per-operation
-`/api/...` pages are generated *from the same OpenAPI*, so they add no field information beyond the spec.
+`/api/...` pages are generated _from the same OpenAPI_, so they add no field information beyond the spec.
 However the site exposes a plain-text rendering at `<url>.md`, which is how `GUIDE`, `TGL`, `SETUP`,
 `FILES`, `IDEMP`, `EVENTS` were read. `GUIDE` and `TGL` are the two pages that materially extend the spec,
 and both were decisive.
@@ -43,7 +43,7 @@ is labelled.
 exactly the class of bug that is invisible until a judge watches it fail.
 
 Source: `TGL`, section "Simulate buyer actions → Create dispute". **This endpoint is not in `SPEC-D` at all** —
-`SPEC-D` declares only `GET` on `/v1/customer/disputes`. It is documented *only* on the test-go-live page
+`SPEC-D` declares only `GET` on `/v1/customer/disputes`. It is documented _only_ on the test-go-live page
 (and is flagged there as sandbox-only). The API description in `SPEC-D.info.description` says
 "create, cancel, compute metrics, change reason, and validate eligibility methods are available as a
 limited-release solution… reach out to your PayPal account manager".
@@ -98,7 +98,7 @@ and `components.requestBodies.evidences`.
   `EVIDENCE_INPUT_FIELD = 'input'` is right, and is confirmed by two independent `TGL` endpoints
   (`POST /v1/customer/disputes` and `POST /v1/customer/disputes/{ID}/change-reason`) plus `GUIDE`.
 - **The `input` payload is `{ "evidences": [ … ] }` — an array wrapped in `evidences`.** The code's
-  `provideEvidenceInputSchema` models a *bare* `{evidence_type, date, notes[]}` object. That will be rejected.
+  `provideEvidenceInputSchema` models a _bare_ `{evidence_type, date, notes[]}` object. That will be rejected.
 - Per-evidence fields: `evidence_type`, `evidence_info` (`{tracking_info: [{carrier_name, tracking_number}]}`,
   `refund_ids`), `notes`, `documents`.
 - **`notes` is a `string`, not an array.** `SPEC-D` `components.schemas.evidence.properties.notes` is
@@ -129,7 +129,7 @@ and `components.requestBodies.evidences`.
 - `GUIDE` shows `Content-Type: application/json` with body `{ "note": "Full refund to the customer." }`.
 - `SPEC-D` declares only `multipart/form-data` with one part, `accept-claim-document` (a file).
   **So both encodings are documented; the JSON one is what `GUIDE` demonstrates.**
-- **`accept_claim_type` is not in either request body schema.** The operation *description* says "Allowed
+- **`accept_claim_type` is not in either request body schema.** The operation _description_ says "Allowed
   accept_claim_type values for the request is available in dispute details allowed response options object",
   and `GUIDE` says "To determine which refund types are available … check
   `allowed_response_options.accept_claim.accept_claim_types`". **My inference:** `accept_claim_type` is an
@@ -163,7 +163,7 @@ and `components.requestBodies.evidences`.
 Source: `GUIDE` "Send message to other party"; `SPEC-D` request body.
 
 - **`GUIDE` documents `{"message": "Shipment is in progress."}` as `application/json`** — so the body field
-  *is* `message` and JSON *is* accepted. `packages/paypal/src/client.ts:771` matches.
+  _is_ `message` and JSON _is_ accepted. `packages/paypal/src/client.ts:771` matches.
 - `GUIDE` also documents the multipart variant: `-F 'input={"message": "…"};type=application/json'`
   plus `-F 'file1=@doc.pdf;type=application/pdf'`.
 - `SPEC-D` declares **only** `multipart/form-data` with a `message_document` file part and no text field at
@@ -179,7 +179,7 @@ Source: `GUIDE` "Send message to other party"; `SPEC-D` request body.
 - **JSON**, body `{ "note": "I have received the item back.", "acknowledgement_type": "ITEM_RECEIVED" }`.
 - **`return_shipping_address` is not a field of this endpoint.** The code's `ackReturnReqSchema`
   (`types.ts:700`) has `note` + `return_shipping_address`; it should be `note` + `acknowledgement_type`.
-  (`return_shipping_address` *is* real, but on `make-offer`, not here.)
+  (`return_shipping_address` _is_ real, but on `make-offer`, not here.)
 - `acknowledgement_type` enum: `ITEM_RECEIVED`, `ITEM_NOT_RECEIVED`, `DAMAGED`,
   `EMPTY_PACKAGE_OR_DIFFERENT`, `MISSING_ITEMS`.
 - Which values are permitted for a given dispute comes from
@@ -228,7 +228,7 @@ Source: `GUIDE` "Provide supporting information".
 - `GUIDE` cURL: `-F 'input={"evidences":[{"evidence_type":"PROOF_OF_FULFILLMENT","evidence_info":{"tracking_info":[{"carrier_name":"FEDEX","tracking_number":"122533485"}]},"notes":"Test"}]};type=application/json' -F 'file1=@NewDoc.pdf;type=application/pdf'`
 - **Both halves of the question are true.** `dispute_state` does have an `APPEALABLE` value
   (`SPEC-D` `components.schemas.dispute_state.enum`), and `appeal` is a real `POST`. But PayPal states
-  that *eligibility is signalled by the presence of the `appeal` HATEOAS link* in the show-dispute-details
+  that _eligibility is signalled by the presence of the `appeal` HATEOAS link_ in the show-dispute-details
   response — "If this link does not appear, you cannot appeal the dispute" (`SPEC-D` description),
   "check whether the HATEOAS link for appeal is present" (`GUIDE`), and `TGL` "Check if the appeal action is
   available in the HATEOAS links".
@@ -245,15 +245,15 @@ Source: `GUIDE` "Provide supporting information".
 
 **Real parameters, exactly seven:**
 
-| Param | Status | Constraint |
-|---|---|---|
-| `start_time` | **`deprecated: true`** | RFC 3339, within last 180 days, default now. Mutually exclusive with `disputed_transaction_id`. |
-| `disputed_transaction_id` | current | 1–255, `^[0-9A-Z_]+$` |
-| `page_size` | current | integer, **min 1, max 50**, default 10 |
-| `next_page_token` | **`deprecated: true`** | 1–255, `^[A-Za-z0-9+/=]+$`, "The token … is returned in the HATEOAS links in the response" |
-| `dispute_state` | current | enum below; **comma-separated multiples allowed**; 1–2000 |
-| `update_time_before` | current | RFC 3339, within 180 days, default now |
-| `update_time_after` | current | RFC 3339, within 180 days, default = now − 180d |
+| Param                     | Status                 | Constraint                                                                                      |
+| ------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `start_time`              | **`deprecated: true`** | RFC 3339, within last 180 days, default now. Mutually exclusive with `disputed_transaction_id`. |
+| `disputed_transaction_id` | current                | 1–255, `^[0-9A-Z_]+$`                                                                           |
+| `page_size`               | current                | integer, **min 1, max 50**, default 10                                                          |
+| `next_page_token`         | **`deprecated: true`** | 1–255, `^[A-Za-z0-9+/=]+$`, "The token … is returned in the HATEOAS links in the response"      |
+| `dispute_state`           | current                | enum below; **comma-separated multiples allowed**; 1–2000                                       |
+| `update_time_before`      | current                | RFC 3339, within 180 days, default now                                                          |
+| `update_time_after`       | current                | RFC 3339, within 180 days, default = now − 180d                                                 |
 
 - **There is no `page` parameter.** It does not exist in the spec.
 - **There is no `total_pages` and no `total_items`.** The response schema is `dispute_search` =
@@ -273,16 +273,16 @@ Source: `GUIDE` "Provide supporting information".
 `components.schemas.dispute` and `components.schemas.dispute_info`; corroborated by `GUIDE`'s full sample
 responses.
 
-| Field the code assumes | Verdict |
-|---|---|
-| `dispute_reason` | **Wrong. The field is `reason`.** `SPEC-D.dispute.properties.reason → $ref dispute_reason`. `GUIDE` sample: `"reason": "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"`. |
-| `dispute_life_cycle_stage` | **Correct.** Enum `INQUIRY`, `CHARGEBACK`, `PRE_ARBITRATION`, `ARBITRATION`. |
-| `dispute_state` | **Field exists, enum is different** — see below. |
-| `status` | **Correct.** Enum `OPEN`, `WAITING_FOR_BUYER_RESPONSE`, `WAITING_FOR_SELLER_RESPONSE`, `UNDER_REVIEW`, `RESOLVED`, `OTHER`. |
-| `seller_response_due_date` | **Correct.** RFC 3339, present only in some responses (present in `GUIDE`'s sample). |
-| `buyer_response_due_date` | **Correct.** |
-| `disputed_amount` | **Wrong. The field is `dispute_amount`** (`money`). There is no `disputed_amount`. |
-| `seller_transaction_id` / `buyer_transaction_id` | **Both exist, but nested** inside `disputed_transactions[]` (`$ref transaction_info_list`), not at the top level of the Dispute object. |
+| Field the code assumes                           | Verdict                                                                                                                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `dispute_reason`                                 | **Wrong. The field is `reason`.** `SPEC-D.dispute.properties.reason → $ref dispute_reason`. `GUIDE` sample: `"reason": "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"`. |
+| `dispute_life_cycle_stage`                       | **Correct.** Enum `INQUIRY`, `CHARGEBACK`, `PRE_ARBITRATION`, `ARBITRATION`.                                                                                       |
+| `dispute_state`                                  | **Field exists, enum is different** — see below.                                                                                                                   |
+| `status`                                         | **Correct.** Enum `OPEN`, `WAITING_FOR_BUYER_RESPONSE`, `WAITING_FOR_SELLER_RESPONSE`, `UNDER_REVIEW`, `RESOLVED`, `OTHER`.                                        |
+| `seller_response_due_date`                       | **Correct.** RFC 3339, present only in some responses (present in `GUIDE`'s sample).                                                                               |
+| `buyer_response_due_date`                        | **Correct.**                                                                                                                                                       |
+| `disputed_amount`                                | **Wrong. The field is `dispute_amount`** (`money`). There is no `disputed_amount`.                                                                                 |
+| `seller_transaction_id` / `buyer_transaction_id` | **Both exist, but nested** inside `disputed_transactions[]` (`$ref transaction_info_list`), not at the top level of the Dispute object.                            |
 
 **`dispute_state` — the exact enum (`SPEC-D` `components.schemas.dispute_state`):**
 `OPEN_INQUIRIES`, `REQUIRED_ACTION`, `REQUIRED_OTHER_PARTY_ACTION`, `UNDER_PAYPAL_REVIEW`, **`APPEALABLE`**, `RESOLVED`.
@@ -301,8 +301,9 @@ Against the code's 13: **`MERCHANDISE_OR_SERVICE_NOT_RECEIVED_2`, `REFUND_NOT_AS
 `PAYOUT_DECLINED`, `ACCOUNT_COMPROMISED` and `UNPAID_AMOUNT` do not exist**; **`PAYMENT_BY_OTHER_MEANS`
 and `PROBLEM_WITH_REMITTANCE` are missing.**
 
-**Other response-shape facts the code's `disputeSchema` misses** (`looseObject` means they will not *fail*
-parsing, but they will never be *read*):
+**Other response-shape facts the code's `disputeSchema` misses** (`looseObject` means they will not _fail_
+parsing, but they will never be _read_):
+
 - Evidence is **`evidences`** (plural, an array, `$ref evidence_list`), not `evidence`; each entry has
   `evidence_type`, `notes` (**string**), `evidence_info`, `documents`, `source`, `date`,
   `dispute_life_cycle_stage`, `item_id`, `item_type`, `action_info`. `GUIDE`'s sample confirms.
@@ -318,9 +319,9 @@ parsing, but they will never be *read*):
 
 **VERIFIED for the numbers; NOT DOCUMENTED for the unit.** Source: `FILES` (verbatim).
 
-> * **Supported file types**: `.jpg`, `.jpeg`, `.gif`, `.png`, and `.pdf`
-> * **Individual file size**: Less than 10 MB per file
-> * **Total file size**: Up to 50 MB per API call
+> - **Supported file types**: `.jpg`, `.jpeg`, `.gif`, `.png`, and `.pdf`
+> - **Individual file size**: Less than 10 MB per file
+> - **Total file size**: Up to 50 MB per API call
 
 - The five types are exactly what `ALLOWED_EVIDENCE_CONTENT_TYPES` encodes
   (`image/jpeg`, `image/png`, `image/gif`, `application/pdf`). **VERIFIED.**
@@ -417,7 +418,7 @@ for this flow.** This is week-1 check C2 and the answer is unambiguous.
 
 Source: `SPEC-O` `paths./v2/checkout/orders.post.responses["201"].content["application/json"].examples`,
 example id **`orders_create_authorize_single_step_paypal_with_vault_id_and_stored_credentials_usage_pattern`**,
-whose summary is *"Create and authorize an order for a PayPal wallet vaulted account holder … (Single Shot)"*.
+whose summary is _"Create and authorize an order for a PayPal wallet vaulted account holder … (Single Shot)"_.
 
 The documented 201 response contains:
 
@@ -439,7 +440,7 @@ The documented 201 response contains:
 ```
 
 - This is in the **schema**, not just the example: `SPEC-O` `components.schemas.purchase_unit.properties.payments
-  → payment_collection`, whose properties are `authorizations`, `captures`, `refunds`. `types.ts:230`
+→ payment_collection`, whose properties are `authorizations`, `captures`, `refunds`. `types.ts:230`
   (`orderPaymentsSchema`) models exactly this. **The code's shape is right.**
 - `POST /v2/checkout/orders/{id}/authorize` **also exists and is documented**, and its own examples include
   `orders_authorize_paypal_wallet_vault_id` with `payment_source.paypal.vault_id` in the body. **My
@@ -506,8 +507,8 @@ Source: `SPEC-O` `paths./v2/checkout/orders/{id}/track.post.requestBody` →
   `items` optional) is **correct**; making `tracking_number` required locally is stricter than PayPal and safe.
   It is missing `carrier_name_other`, which matters if `carrier: 'OTHER'` is ever used.
 - **Idempotency finding:** this operation does **not** declare a `PayPal-Request-Id` header parameter, and
-  `SPEC-O`'s example description says explicitly — *"Idempotency for trackers is based on the `capture_id`
-  and `tracking_number` combination sent in the request body."* The code
+  `SPEC-O`'s example description says explicitly — _"Idempotency for trackers is based on the `capture_id`
+  and `tracking_number` combination sent in the request body."_ The code
   (`client.ts:184`) sets `sendRequestId: true` for this endpoint. Harmless but it means EC-SPLIT-2's
   "track twice against the same capture" dedupes on the body pair, not on our header.
 
@@ -562,9 +563,11 @@ Source: `SPEC-V` `payment_token_request`, `definitions-payment_source`, `token_i
 `payment_token_response`, `payment_source`, `paypal_wallet_response`, `payer_base`.
 
 **Request** — exactly what the code sends, **VERIFIED**:
+
 ```json
 { "payment_source": { "token": { "id": "<setup token id>", "type": "SETUP_TOKEN" } } }
 ```
+
 `token_id_request` has `id` (1–255, `^[0-9A-Za-z_-]+$`) and `type` (enum: **`SETUP_TOKEN`** only), both
 required. `payment_token_request.payment_source` allows `card`, `network_transaction_reference` and `token`
 — **there is no `paypal` key on the request**, which is correct: you exchange a setup token, you don't
@@ -588,7 +591,7 @@ will never be populated.
   **My inference:** they carry the same value and `account_id` is the one actually emitted. The project
   should read `payer_id ?? account_id` and record that as an assumption rather than a fact.
 - Independent corroboration: in the Orders v2 create response (§17) `payer.payer_id` and
-  `payment_source.paypal.account_id` are the same string (`XQHSN372NGSP2`). That is a *different* endpoint,
+  `payment_source.paypal.account_id` are the same string (`XQHSN372NGSP2`). That is a _different_ endpoint,
   but it supports the "same value, two names" reading.
 - `email_address` is present under `payment_source.paypal.email_address` (`payer_base`), not top level.
 
@@ -633,15 +636,15 @@ https://developer.paypal.com/api/webhooks/v1/schema.json).
 
 `required: ["auth_algo", "cert_url", "transmission_id", "transmission_sig", "transmission_time", "webhook_id", "webhook_event"]`
 
-| Field | Constraint | Where it comes from |
-|---|---|---|
-| `auth_algo` | ≤100, `^[a-zA-Z0-9]+$` | `PAYPAL-AUTH-ALGO` header |
-| `cert_url` | ≤500, `format: uri` | `PAYPAL-CERT-URL` header |
-| `transmission_id` | ≤50 | `PAYPAL-TRANSMISSION-ID` |
-| `transmission_sig` | ≤500 | `PAYPAL-TRANSMISSION-SIG` |
-| `transmission_time` | ≤100, `format: date-time` | `PAYPAL-TRANSMISSION-TRANSMISSION-TIME` (sic — spec text says `PAYPAL-TRANSMISSION-TIME`) |
-| `webhook_id` | ≤50, `^[a-zA-Z0-9]+$` | Developer Portal |
-| `webhook_event` | `$ref event` — the whole raw event object | the notification body |
+| Field               | Constraint                                | Where it comes from                                                                       |
+| ------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `auth_algo`         | ≤100, `^[a-zA-Z0-9]+$`                    | `PAYPAL-AUTH-ALGO` header                                                                 |
+| `cert_url`          | ≤500, `format: uri`                       | `PAYPAL-CERT-URL` header                                                                  |
+| `transmission_id`   | ≤50                                       | `PAYPAL-TRANSMISSION-ID`                                                                  |
+| `transmission_sig`  | ≤500                                      | `PAYPAL-TRANSMISSION-SIG`                                                                 |
+| `transmission_time` | ≤100, `format: date-time`                 | `PAYPAL-TRANSMISSION-TRANSMISSION-TIME` (sic — spec text says `PAYPAL-TRANSMISSION-TIME`) |
+| `webhook_id`        | ≤50, `^[a-zA-Z0-9]+$`                     | Developer Portal                                                                          |
+| `webhook_event`     | `$ref event` — the whole raw event object | the notification body                                                                     |
 
 Response: `verification_status`, `enum: ["SUCCESS","FAILURE"]`, required. The code's
 `verifyWebhookSignatureResSchema` and its fail-closed "anything that isn't `SUCCESS` is `FAILURE`" are
@@ -655,30 +658,30 @@ Note that `SPEC-W` does **not** enumerate event names at all (`event_type.name` 
 
 **All 18 events in `WEBHOOK_EVENT_NAMES` exist except one:**
 
-| Event | Verdict |
-|---|---|
-| `PAYMENT.CAPTURE.COMPLETED` | VERIFIED |
-| `PAYMENT.CAPTURE.PENDING` | VERIFIED |
-| `PAYMENT.CAPTURE.DECLINED` | VERIFIED (both `DECLINED` **and** `DENIED` exist — they are different events) |
-| `PAYMENT.CAPTURE.REFUNDED` | VERIFIED |
-| `PAYMENT.CAPTURE.REVERSED` | VERIFIED |
-| `PAYMENT.REFUND.PENDING` | VERIFIED |
-| `PAYMENT.REFUND.FAILED` | VERIFIED |
-| **`PAYMENT.REFUND.COMPLETED`** | **NOT DOCUMENTED — no such event.** The full capture/refund set is `PAYMENT.CAPTURE.{COMPLETED,PENDING,DECLINED,DENIED,REFUNDED,REVERSED}` and `PAYMENT.REFUND.{PENDING,FAILED}`. There is no `PAYMENT.REFUND.COMPLETED`; refund completion is signalled by `PAYMENT.CAPTURE.REFUNDED`. (`types.ts:800`.) |
-| `PAYMENT.AUTHORIZATION.CREATED` | VERIFIED |
-| `PAYMENT.AUTHORIZATION.VOIDED` | VERIFIED |
-| `CHECKOUT.ORDER.APPROVED` | VERIFIED |
-| `CHECKOUT.PAYMENT-APPROVAL.REVERSED` | VERIFIED |
-| `CUSTOMER.DISPUTE.CREATED` | VERIFIED |
-| `CUSTOMER.DISPUTE.UPDATED` | VERIFIED |
-| `CUSTOMER.DISPUTE.RESOLVED` | VERIFIED |
-| `VAULT.PAYMENT-TOKEN.CREATED` | VERIFIED |
-| `VAULT.PAYMENT-TOKEN.DELETED` | VERIFIED |
-| `VAULT.PAYMENT-TOKEN.DELETION-INITIATED` | VERIFIED |
+| Event                                    | Verdict                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PAYMENT.CAPTURE.COMPLETED`              | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `PAYMENT.CAPTURE.PENDING`                | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `PAYMENT.CAPTURE.DECLINED`               | VERIFIED (both `DECLINED` **and** `DENIED` exist — they are different events)                                                                                                                                                                                                                             |
+| `PAYMENT.CAPTURE.REFUNDED`               | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `PAYMENT.CAPTURE.REVERSED`               | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `PAYMENT.REFUND.PENDING`                 | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `PAYMENT.REFUND.FAILED`                  | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| **`PAYMENT.REFUND.COMPLETED`**           | **NOT DOCUMENTED — no such event.** The full capture/refund set is `PAYMENT.CAPTURE.{COMPLETED,PENDING,DECLINED,DENIED,REFUNDED,REVERSED}` and `PAYMENT.REFUND.{PENDING,FAILED}`. There is no `PAYMENT.REFUND.COMPLETED`; refund completion is signalled by `PAYMENT.CAPTURE.REFUNDED`. (`types.ts:800`.) |
+| `PAYMENT.AUTHORIZATION.CREATED`          | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `PAYMENT.AUTHORIZATION.VOIDED`           | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `CHECKOUT.ORDER.APPROVED`                | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `CHECKOUT.PAYMENT-APPROVAL.REVERSED`     | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `CUSTOMER.DISPUTE.CREATED`               | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `CUSTOMER.DISPUTE.UPDATED`               | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `CUSTOMER.DISPUTE.RESOLVED`              | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `VAULT.PAYMENT-TOKEN.CREATED`            | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `VAULT.PAYMENT-TOKEN.DELETED`            | VERIFIED                                                                                                                                                                                                                                                                                                  |
+| `VAULT.PAYMENT-TOKEN.DELETION-INITIATED` | VERIFIED                                                                                                                                                                                                                                                                                                  |
 
 **Documented events in the project's space that it is missing:**
 
-- **`PAYMENT.CAPTURE.DENIED`** — documented and *recommended by PayPal* for the checkout flow:
+- **`PAYMENT.CAPTURE.DENIED`** — documented and _recommended by PayPal_ for the checkout flow:
   https://developer.paypal.com/payment-methods/webhooks lists
   `CHECKOUT.ORDER.APPROVED`, `CHECKOUT.PAYMENT-APPROVAL.REVERSED`, `PAYMENT.CAPTURE.PENDING`,
   `PAYMENT.CAPTURE.COMPLETED`, **`PAYMENT.CAPTURE.DENIED`** as the five to subscribe to, with
@@ -734,16 +737,21 @@ Create chargeback".
     "external": false
   },
   "dispute": {
-    "id": null, "stage": "CHARGEBACK",
-    "response_date": "2023-07-16T12:05:22.544Z", "status": "2",
+    "id": null,
+    "stage": "CHARGEBACK",
+    "response_date": "2023-07-16T12:05:22.544Z",
+    "status": "2",
     "amount": { "currency_code": "USD", "value": "10" },
     "receive_date": "2025-06-16T12:05:22.544Z",
     "event_code": "CHARGEBACK_INITIATED",
     "money_movement_date": "2025-06-16T12:05:22.544Z",
     "event_type": "DEBIT",
     "chargeback_type": "REPORTED_TO_PROCESSOR",
-    "processor_info": { "reference_number": "31639435342702423793399",
-                        "reason_code": "1330", "notes": "TEST_MEMO" }
+    "processor_info": {
+      "reference_number": "31639435342702423793399",
+      "reason_code": "1330",
+      "notes": "TEST_MEMO"
+    }
   }
 }
 ```
@@ -762,7 +770,7 @@ So week-1 check C1's fallback chain is correct on the facts.
 
 - `application/json`, body `{ "action": "BUYER_EVIDENCE" }` / `{ "action": "SELLER_EVIDENCE" }`.
 - `action` is **required**, enum exactly `BUYER_EVIDENCE` | `SELLER_EVIDENCE`
-  (`TGL`: "Possible values BUYER_EVIDENCE SELLER_EVIDER"). Pattern `^[0-9A-Z_]+$`, 1–255.
+  (`TGL`: "Possible values BUYER*EVIDENCE SELLER_EVIDER"). Pattern `^[0-9A-Z*]+$`, 1–255.
 - `BUYER_EVIDENCE` ⇒ status becomes `WAITING_FOR_BUYER_RESPONSE`; `SELLER_EVIDENCE` ⇒
   `WAITING_FOR_SELLER_RESPONSE`.
 - Sandbox-only. **Precondition:** `status` must be `UNDER_REVIEW` **and** the `require-evidence` HATEOAS
@@ -809,17 +817,16 @@ So week-1 check C1's fallback chain is correct on the facts.
 
 ```js
 function base64url(source) {
-  var encodedSource = btoa(source);
-  encodedSource = encodedSource.replace(/=+$/, '');
-  encodedSource = encodedSource.replace(/\+/g, '-');
-  encodedSource = encodedSource.replace(/\//g, '-');
-  return encodedSource;
+  var encodedSource = btoa(source)
+  encodedSource = encodedSource.replace(/=+$/, '')
+  encodedSource = encodedSource.replace(/\+/g, '-')
+  encodedSource = encodedSource.replace(/\//g, '-')
+  return encodedSource
 }
 function generateJWT() {
-  var header = {"alg": "none", "typ": "JWT"};
-  var data = {"iss":"CLIENT_ID", "email" : "BUYER_EMAIL" };
-  document.write(base64url(JSON.stringify(header)) + "." +
-  base64url(JSON.stringify(data)) + ".");
+  var header = { alg: 'none', typ: 'JWT' }
+  var data = { iss: 'CLIENT_ID', email: 'BUYER_EMAIL' }
+  document.write(base64url(JSON.stringify(header)) + '.' + base64url(JSON.stringify(data)) + '.')
 }
 ```
 
@@ -828,7 +835,7 @@ function generateJWT() {
   correct and now cited.
 - **Payload shape `{iss: CLIENT_ID, email: BUYER_EMAIL}` — VERIFIED, matches the code.**
 - One difference worth noting for exactness: PayPal's header includes **`"typ": "JWT"`** alongside
-  `"alg": "none"`; the code sends only `{alg: 'none'}`. A JWS `alg: none` header is *supposed* to be
+  `"alg": "none"`; the code sends only `{alg: 'none'}`. A JWS `alg: none` header is _supposed_ to be
   `{"alg":"none"}`, so this is very unlikely to matter, but it is a real difference from the documented form.
 - Corroborated by `SPEC-P`'s own header example for `PayPal-Auth-Assertion`:
   `"eyJhbGciOiJub25lIn0.eyJlbWFpbCI6Im15QGVtYWlsLmNvbSJ9"` — base64url of `{"alg":"none"}` +
@@ -858,7 +865,7 @@ function generateJWT() {
   `minLength: 1`, **`maxLength: 10000`**, `pattern: ^.*$`, `required: false`. (`SPEC-V`'s copy adds
   "The server stores keys for 3 hours.")
 - **These cannot both be the enforced limit.** Which is real is **NOT DOCUMENTED**. The safe engineering
-  position is the smaller one: 38 characters is the only number PayPal states as a *limit* rather than a
+  position is the smaller one: 38 characters is the only number PayPal states as a _limit_ rather than a
   schema maximum.
 - **The project's worst case is 55 characters** — `idempotency.ts:209 observedRequestIdLengths` computes
   `cs:{17-char PayPal auth id}:cap:{shp_ + 26 ULID}` = 55, which **exceeds 38**. If the 38-char figure is
@@ -878,9 +885,9 @@ function generateJWT() {
     - **Not documented at all:** the whole Disputes v1 family, and `POST /v2/customer-support/process-chargeback`.
       `SPEC-D` has no `paypal_request_id` parameter anywhere, and none of the dispute paths are in
       `SPEC-W` either. The code's `re-read-required` policy for disputes/vault **is the correct call** —
-      except that vault *does* declare the header, which the code's comment (`client.ts:195`) gets wrong.
+      except that vault _does_ declare the header, which the code's comment (`client.ts:195`) gets wrong.
   - `IDEMP`: "**PayPal provides the status of a request at the current time and not the status of the
-    original request.**" — i.e. a replayed id returns the *latest* status, so a retry can legitimately
+    original request.**" — i.e. a replayed id returns the _latest_ status, so a retry can legitimately
     return a different status than the original 5xx.
   - `IDEMP`: "When you send two **simultaneous** API requests with same `PayPal-Request-Id` header, PayPal
     processes the first request and **might fail the second request**." — relevant to the token
@@ -943,23 +950,23 @@ documentation:**
   tools is available in both local and remote MCP server.**" The catalog itself is **not rendered** on that
   page (verified in both the HTML and the `.md`), and `tools/list` requires authentication, so I could not
   enumerate the live list.
-- **Best available evidence** (a *different* artefact, offered as such): the toolkit README at
+- **Best available evidence** (a _different_ artefact, offered as such): the toolkit README at
   https://raw.githubusercontent.com/paypal/agent-toolkit/main/typescript/README.md — "The PayPal Agent
   toolkit provides the following tools" — lists these tool names:
-  - *Invoices*: `create_invoice`, `list_invoices`, `get_invoice`, `send_invoice`, `send_invoice_reminder`,
+  - _Invoices_: `create_invoice`, `list_invoices`, `get_invoice`, `send_invoice`, `send_invoice_reminder`,
     `cancel_sent_invoice`, `generate_invoice_qr_code`, `delete_invoice`, `generate_invoice_number`,
     `search_invoicing`, `update_invoicing`, `cancel_invoice_auto_reminder`, `record_payment_for_invoice`,
     `record_refund_for_invoice`, `create_conditional_rules_for_invoice`
-  - *Recurring*: `create_recurring_series`, `activate_recurring_series`, `get_recurring_series`,
+  - _Recurring_: `create_recurring_series`, `activate_recurring_series`, `get_recurring_series`,
     `cancel_recurring_series`, `delete_recurring_series`
-  - *Payments*: `create_order`, `get_order`, `pay_order`, `create_refund`, `get_refund`
-  - *Disputes*: `list_disputes`, `get_dispute`, `accept_dispute_claim`
-  - *Shipment*: `create_shipment_tracking`, `get_shipment_tracking`, `update_shipment_tracking`
-  - *Catalog*: `create_product`, `list_products`, `show_product_details`
-  - *Subscriptions*: `create_subscription_plan`, `update_plan`, `list_subscription_plans`,
+  - _Payments_: `create_order`, `get_order`, `pay_order`, `create_refund`, `get_refund`
+  - _Disputes_: `list_disputes`, `get_dispute`, `accept_dispute_claim`
+  - _Shipment_: `create_shipment_tracking`, `get_shipment_tracking`, `update_shipment_tracking`
+  - _Catalog_: `create_product`, `list_products`, `show_product_details`
+  - _Subscriptions_: `create_subscription_plan`, `update_plan`, `list_subscription_plans`,
     `show_subscription_plan_details`, `create_subscription`, `show_subscription_details`,
     `update_subscription`, `cancel_subscription`
-  - *Reporting*: `list_transactions`, `get_merchant_insights`
+  - _Reporting_: `list_transactions`, `get_merchant_insights`
 - **I am not claiming these are the MCP server's exposed names.** `@paypal/mcp` is described as "a command
   line tool for setting up PayPal MCP server" and is versioned separately from `@paypal/agent-toolkit`; the
   MCP surface may namespace them (e.g. `paypal_create_order`) or expose a subset. Where PayPal would have
@@ -1010,7 +1017,7 @@ silent I recommend keeping current behaviour and recording it as an assumption.
 15. `src/types.ts` `setupTokenReqSchema` / `SetupTokenReq` — `usage_type` (`MERCHANT|PLATFORM`), `usage_pattern` (12 values), `customer_type` and `experience_context` all belong under **`payment_source.paypal`**, not at the top level; `user_action` is not a Vault `experience_context` field; declare `usage_type`/`usage_pattern` on `vaultPaymentSourcePaypalSchema` so they stop passing through unvalidated.
 16. `src/types.ts` `paymentTokenSchema` / `PaymentToken` — drop the top-level `payer`; the payment-token response has no such field. Read the payer id from `payment_source.paypal.payer_id`, falling back to `payment_source.paypal.account_id`.
 17. `src/types.ts` `disputeState`/appeal gating in `src/client.ts` `appeal` — gate on the presence of the `appeal` HATEOAS link, not `dispute_state === 'APPEALABLE'`; PayPal states the link is what determines eligibility.
-18. `src/multipart.ts` — set `MAX_EVIDENCE_TOTAL_BYTES` to `50_000_000` (decimal). The current `50·2^20` is *more permissive* than PayPal's documented "up to 50 MB", so a 51 MB upload passes locally and is rejected remotely. Consider `MAX_EVIDENCE_FILE_BYTES = 10_000_000` for symmetry.
+18. `src/multipart.ts` — set `MAX_EVIDENCE_TOTAL_BYTES` to `50_000_000` (decimal). The current `50·2^20` is _more permissive_ than PayPal's documented "up to 50 MB", so a 51 MB upload passes locally and is rejected remotely. Consider `MAX_EVIDENCE_FILE_BYTES = 10_000_000` for symmetry.
 
 ### Must change — comment / provenance accuracy (no behaviour change)
 
@@ -1029,7 +1036,7 @@ silent I recommend keeping current behaviour and recording it as an assumption.
 28. `src/types.ts` `changeReasonReqSchema`/`requireEvidenceReqSchema` field names, and the whole
     `POST /v2/customer-support/process-chargeback` contract, rest solely on `TGL` with no OpenAPI backing —
     note that in the file, and treat `TGL` as the citation.
-29. `accept_claim_type` as a *request* field is described in prose but absent from the OpenAPI request body.
+29. `accept_claim_type` as a _request_ field is described in prose but absent from the OpenAPI request body.
     Keep sending it (the operation description and `GUIDE` both imply it is accepted), and mark it as the one
     item that only a sandbox probe can settle.
 30. `10 MB` vs `MB` (10^6 vs 2^20) is not stated anywhere; the decimal reading in item 18 is a conservative

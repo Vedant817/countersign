@@ -39,7 +39,13 @@ import {
   unwrap,
   type CsError,
 } from '../src/errors'
-import { DEFAULT_CLOCK_SKEW_SECONDS, fixedClock, formatIst, formatIstHuman, withinValidity } from '../src/clock'
+import {
+  DEFAULT_CLOCK_SKEW_SECONDS,
+  fixedClock,
+  formatIst,
+  formatIstHuman,
+  withinValidity,
+} from '../src/clock'
 import {
   ID_PREFIXES,
   asId,
@@ -127,7 +133,19 @@ describe('AT-M1.2 excess decimals are refused, never rounded', () => {
   })
 
   it('rejects exponent, plus, interior whitespace, empty, negative and junk forms', () => {
-    for (const bad of ['1e3', '+1.00', '1 000.00', '-1.00', '', 'abc', '0x10', '1.2.3', '.5', 'NaN', '1,000.00']) {
+    for (const bad of [
+      '1e3',
+      '+1.00',
+      '1 000.00',
+      '-1.00',
+      '',
+      'abc',
+      '0x10',
+      '1.2.3',
+      '.5',
+      'NaN',
+      '1,000.00',
+    ]) {
       expectCode(() => fromPayPalValue(bad, 'USD'), 'CS_VALIDATION')
     }
   })
@@ -205,7 +223,9 @@ describe('AT-M1.3 largest-remainder allocation', () => {
     expect(parts.reduce((a, b) => a + b.minor, 0n)).toBe(1000n)
     // Even weights must still leave the remainder on the last part, not on the largest share.
     expect(
-      allocateWithRemainderLast({ minor: 1001n, currency: 'USD' }, [2n, 2n, 1n]).map((p) => p.minor),
+      allocateWithRemainderLast({ minor: 1001n, currency: 'USD' }, [2n, 2n, 1n]).map(
+        (p) => p.minor,
+      ),
     ).toEqual([400n, 400n, 201n])
   })
 
@@ -214,10 +234,13 @@ describe('AT-M1.3 largest-remainder allocation', () => {
       { minor: 100n, currency: 'USD' },
     ])
     // A zero-weight line legitimately receives nothing, and the last part still closes the total.
-    expect(allocateWithRemainderLast({ minor: 100n, currency: 'USD' }, [0n, 5n]).map((p) => p.minor)).toEqual([
-      0n, 100n,
-    ])
-    expectCode(() => allocateWithRemainderLast({ minor: 1n, currency: 'USD' }, [0n, 0n]), 'CS_VALIDATION')
+    expect(
+      allocateWithRemainderLast({ minor: 100n, currency: 'USD' }, [0n, 5n]).map((p) => p.minor),
+    ).toEqual([0n, 100n])
+    expectCode(
+      () => allocateWithRemainderLast({ minor: 1n, currency: 'USD' }, [0n, 0n]),
+      'CS_VALIDATION',
+    )
   })
 
   it('refuses zero and negative weights', () => {
@@ -233,7 +256,10 @@ describe('AT-M1.3 largest-remainder allocation', () => {
 
 describe('AT-M1.4 currencies are never silently mixed or converted', () => {
   it('AT-M1.4 add of USD and INR -> CS_CURRENCY_MISMATCH', () => {
-    expectCode(() => add({ minor: 100n, currency: 'USD' }, { minor: 100n, currency: 'INR' }), 'CS_CURRENCY_MISMATCH')
+    expectCode(
+      () => add({ minor: 100n, currency: 'USD' }, { minor: 100n, currency: 'INR' }),
+      'CS_CURRENCY_MISMATCH',
+    )
   })
 
   it('EC-FX-1 every arithmetic helper refuses a mixed pair', () => {
@@ -384,7 +410,13 @@ describe('error registry', () => {
     const body = toBody(
       csError('GATE_REPLAY', 'jti seen', { jti: 'abc' }, { cause: new Error('secret internals') }),
     )
-    expect(Object.keys(body.error).sort()).toEqual(['code', 'details', 'message', 'retryable', 'userMessage'])
+    expect(Object.keys(body.error).sort()).toEqual([
+      'code',
+      'details',
+      'message',
+      'retryable',
+      'userMessage',
+    ])
     expect(body.error.details).toEqual({ jti: 'abc' })
     expect(JSON.stringify(body)).not.toContain('secret internals')
   })
@@ -599,14 +631,18 @@ describe('display formatting', () => {
   })
 
   it('withinRange checks both ends', () => {
-    expect(withinRange({ minor: 5000n, currency: 'USD' }, { currency: 'USD', min: 1000, max: 13000 })).toEqual({
+    expect(
+      withinRange({ minor: 5000n, currency: 'USD' }, { currency: 'USD', min: 1000, max: 13000 }),
+    ).toEqual({
       ok: true,
     })
     expect(withinRange({ minor: 999n, currency: 'USD' }, { currency: 'USD', min: 1000 })).toEqual({
       ok: false,
       reason: 'BELOW_MIN',
     })
-    expect(withinRange({ minor: 14000n, currency: 'USD' }, { currency: 'USD', max: 13000 })).toEqual({
+    expect(
+      withinRange({ minor: 14000n, currency: 'USD' }, { currency: 'USD', max: 13000 }),
+    ).toEqual({
       ok: false,
       reason: 'ABOVE_MAX',
     })

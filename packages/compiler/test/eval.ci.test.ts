@@ -23,7 +23,14 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { loadCachedAnswers, loadEvalCatalog, loadGoldenSet, runGoldenSet, scoreCase, summarise } from '../eval/runner'
+import {
+  loadCachedAnswers,
+  loadEvalCatalog,
+  loadGoldenSet,
+  runGoldenSet,
+  scoreCase,
+  summarise,
+} from '../eval/runner'
 import { replayModel, runEvalCase } from '../eval/replay'
 
 const golden = loadGoldenSet()
@@ -86,7 +93,7 @@ describe('eval:ci — the cached golden subset', () => {
     }
   })
 
-  it('the AT-M8.5 case compiles to the buyer\'s own $130 even though the recorded answer is hostile', async () => {
+  it("the AT-M8.5 case compiles to the buyer's own $130 even though the recorded answer is hostile", async () => {
     // g53's recorded answer is a deliberately over-ceiling $999,999.99 in a text that says $130. The
     // pipeline clamps it down and says so, so this case scores as correct on amount, budget and currency —
     // which is the assertion AT-M8.5 actually asks for.

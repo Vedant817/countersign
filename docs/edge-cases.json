@@ -361,7 +361,8 @@
       "declaredTest": "U",
       "userFacing": "\"Revoked, nothing was charged\"",
       "specLine": 1108,
-      "status": "todo"
+      "status": "done",
+      "notes": "The Gate re-reads mandate status inside the check-8 transaction, so a revoke that lands between check 1 and check 8 blocks and leaves no reservation. Test: packages/gate/test/replay.test.ts \"EC-MDT-2: a revoke at check 8's boundary …\". The orchestrator half (aborting order creation in the same tx) is WP-11."
     },
     {
       "id": "EC-MDT-3",
@@ -492,7 +493,8 @@
       "declaredTest": "U",
       "userFacing": "\"Prices refreshed. Agent will re-quote\"",
       "specLine": 1122,
-      "status": "todo"
+      "status": "done",
+      "notes": "One clock.nowSec() is captured at Gate start and every expiry comparison in the decision uses it, so a lock cannot expire between two checks and produce a verdict true at no single instant. Test: packages/gate/test/checks.test.ts \"ALLOWs on the last second of the price lock, BLOCKs on the first second past it\"."
     },
     {
       "id": "EC-TIME-5",
@@ -625,7 +627,8 @@
       "declaredTest": "U",
       "userFacing": "\"Price changed from $120 to $128. Still within your $130 limit, so the agent continued\" or \"Now $135, above your limit. Blocked\"",
       "specLine": 1141,
-      "status": "todo"
+      "status": "done",
+      "notes": "A lock past price_lock_exp blocks with GATE_PRICE_LOCK_EXPIRED rather than re-pricing, and create_checkout never re-signs an expired JWT — a new price produces a new checkout. Tests: packages/gate/test/checks.test.ts and packages/gate/test/merchant.test.ts."
     },
     {
       "id": "EC-PRICE-2",
@@ -856,7 +859,8 @@
       "declaredTest": "P (random L3s)",
       "userFacing": "Push/email (stub) \"Your agent was suspended after 3 blocked attempts\"",
       "specLine": 1167,
-      "status": "todo"
+      "status": "wip",
+      "notes": "Gate side done: three consecutive BLOCKs escalate to REVIEW and the mandate is SUSPENDED (packages/gate/test/checks.test.ts). The bounded-worst-case property test over random L3s, and the \"revoke the agent\" UI, are WP-13/WP-17a."
     },
     {
       "id": "EC-AGT-3",
@@ -870,7 +874,8 @@
       "declaredTest": "U",
       "userFacing": "\"Agent key rotated; please re-approve mandates (1 tap each)\"",
       "specLine": 1168,
-      "status": "todo"
+      "status": "wip",
+      "notes": "Partly done: retired merchant keys stay verifiable (packages/gate/test/record.test.ts), which is the EC-KEY-3 half. Marking jwks_keys.status=COMPROMISED and revoking every mandate bound to the key is WP-19/WP-17a."
     },
     {
       "id": "EC-AGT-4",
@@ -1015,7 +1020,8 @@
       "declaredTest": "U",
       "userFacing": "Gate log: \"Agent key not bound to this mandate\"",
       "specLine": 1178,
-      "status": "todo"
+      "status": "done",
+      "notes": "Check 2 compares the L3a signing kid against the key bound in the L2, so agent A cannot spend under agent B's mandate. Test: packages/gate/test/checks.test.ts \"BLOCKs when the L3a kid is not the one the L2 bound\"."
     },
     {
       "id": "EC-MA-3",

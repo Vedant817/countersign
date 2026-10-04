@@ -19,7 +19,7 @@ registry in `@countersign/core`.
 > this package was re-checked against PayPal's published OpenAPI and `developer.paypal.com`. The
 > report is [`docs/verification/paypal-api-2026-10-04.md`](../../docs/verification/paypal-api-2026-10-04.md);
 > it found four fabricated bodies (the sandbox simulators) and a dozen wrong field names, **all now
-> fixed**. What remains unverified is *behaviour* — whether a request id deduplicates, whether a header
+> fixed**. What remains unverified is _behaviour_ — whether a request id deduplicates, whether a header
 > is honoured, whether the sandbox accepts our unsigned assertion — and that needs H-01.
 
 ---
@@ -69,7 +69,7 @@ if (!order.ok) {
   converts it to a `Result`.
 - **Side-effecting calls require a `requestId`.** `createOrder`, `authorizeOrder`, `captureOrder`,
   `addTracking`, `captureAuthorization`, `reauthorize`, `voidAuthorization` and `refundCapture` take
-  `o: CallOpts & { requestId: string }`. Omitting it is `CS_VALIDATION` *before any HTTP call*.
+  `o: CallOpts & { requestId: string }`. Omitting it is `CS_VALIDATION` _before any HTTP call_.
 - **Money is never a float.** Requests take `PPMoney` = `{ currency_code: Currency, value: string }`;
   responses parse through `ppResponseAmountToMoney()` into core's `Money` (integer `bigint` minor
   units). `pnpm lint` runs `scripts/check-money-discipline.mjs` over this package.
@@ -79,17 +79,17 @@ if (!order.ok) {
 
 ## What is in here
 
-| File | Contents |
-|---|---|
-| `src/client.ts` | `PayPalClient` — every method in spec §8.6, plus `ENDPOINT_POLICIES` (the code side of `IDEMPOTENCY.md`). |
-| `src/types.ts` | zod schemas + TS types for every request and response. Loose objects, enum-as-string with the known values exported as constants. |
-| `src/idempotency.ts` | The four `PayPal-Request-Id` formats and their validator. |
-| `src/backoff.ts` | Exponential backoff with **full jitter**, `Retry-After` parsing, and the injectable `Sleep`. |
-| `src/circuit.ts` | Per-host circuit breaker (5 consecutive `PP_UNAVAILABLE` → open 30 s). |
-| `src/errors.ts` | PayPal `name` / `details[].issue` → `CsErrorCode`. |
-| `src/multipart.ts` | `multipart/form-data` for evidence, with the EC-DSP-12 limits enforced locally (decimal, as PayPal words them). |
-| `src/sandbox.ts` | The sandbox-only simulator calls and the unsigned `PayPal-Auth-Assertion`. |
-| `IDEMPOTENCY.md` | Per-endpoint table. **The input to EC-IDEM-3.** Mostly UNVERIFIED — see the warning at the top of that file. |
+| File                 | Contents                                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `src/client.ts`      | `PayPalClient` — every method in spec §8.6, plus `ENDPOINT_POLICIES` (the code side of `IDEMPOTENCY.md`).                         |
+| `src/types.ts`       | zod schemas + TS types for every request and response. Loose objects, enum-as-string with the known values exported as constants. |
+| `src/idempotency.ts` | The four `PayPal-Request-Id` formats and their validator.                                                                         |
+| `src/backoff.ts`     | Exponential backoff with **full jitter**, `Retry-After` parsing, and the injectable `Sleep`.                                      |
+| `src/circuit.ts`     | Per-host circuit breaker (5 consecutive `PP_UNAVAILABLE` → open 30 s).                                                            |
+| `src/errors.ts`      | PayPal `name` / `details[].issue` → `CsErrorCode`.                                                                                |
+| `src/multipart.ts`   | `multipart/form-data` for evidence, with the EC-DSP-12 limits enforced locally (decimal, as PayPal words them).                   |
+| `src/sandbox.ts`     | The sandbox-only simulator calls and the unsigned `PayPal-Auth-Assertion`.                                                        |
+| `IDEMPOTENCY.md`     | Per-endpoint table. **The input to EC-IDEM-3.** Mostly UNVERIFIED — see the warning at the top of that file.                      |
 
 ---
 
@@ -105,7 +105,7 @@ released on every throw path.
 const cached = this.tokenCache
 if (cached && this.clock.nowMs() < cached.expiresAtMs) return cached.token
 const existing = this.tokenInFlight
-if (existing) return existing                      // ← everyone else awaits this one
+if (existing) return existing // ← everyone else awaits this one
 const inFlight = this.requestClientCredentialToken().finally(() => {
   if (this.tokenInFlight === inFlight) this.tokenInFlight = null
 })
@@ -132,7 +132,7 @@ cap 20 s, 4 attempts), honouring `Retry-After` as a **floor**: a 429 with `Retry
 least 2 s even if the jitter drew 3 ms.
 
 For endpoints whose idempotency support is **unverified** (all of Disputes v1, Vault v3 and the
-simulators), the client refuses to auto-retry an *ambiguous* failure and returns:
+simulators), the client refuses to auto-retry an _ambiguous_ failure and returns:
 
 ```ts
 { code: 'PP_UNAVAILABLE', retryable: true, details: { ambiguous: true, status: 503 } }
@@ -174,7 +174,10 @@ client.sandbox.processChargeback({
 })
 client.sandbox.requireEvidence(disputeId, 'SELLER_EVIDENCE')
 client.sandbox.adjudicate(disputeId, 'SELLER_FAVOR')
-client.sandbox.changeReason(disputeId, { reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED', note: '…' })
+client.sandbox.changeReason(disputeId, {
+  reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
+  note: '…',
+})
 client.sandbox.acceptOffer(disputeId, 'Accepted, thanks.')
 client.sandbox.denyOffer(disputeId)
 ```
@@ -268,7 +271,7 @@ sandbox (H-01), a human, or a PayPal answer.
    The part name, field names and JSON payload are identical; only the outer media type differs, and
    `fetch` + `FormData` cannot produce `multipart/related` without hand-writing the boundary, which this
    package refuses to do anywhere. The sandbox settles it.
-3. **`accept_claim_type` as a *request* field** is described in prose and absent from the OpenAPI
+3. **`accept_claim_type` as a _request_ field** is described in prose and absent from the OpenAPI
    request body — the one place in disputes where the machine-readable spec is visibly incomplete
    (report §3/#29). We keep sending it; only a probe can confirm.
 4. **Which of `dispute_id` / `id` the chargeback simulator returns.** The endpoint has no OpenAPI at
@@ -283,12 +286,12 @@ sandbox (H-01), a human, or a PayPal answer.
    declares `maxLength: 10000`, the prose recommends a UUID "because it meets the **38 single-byte
    character limit**". Our worst case is **55**, and four of our five formats already exceed 38;
    `captureRequestId` (`cs:{authId}:cap:{shipmentId}`) is the one whose long slots are PayPal's own ids
-   and so cannot be shortened. `REQUEST_ID_MAX_CHARS = 255` is *our* budget, not PayPal's figure. Full
+   and so cannot be shortened. `REQUEST_ID_MAX_CHARS = 255` is _our_ budget, not PayPal's figure. Full
    statement in [`IDEMPOTENCY.md`](IDEMPOTENCY.md) → "Header length".
 7. **Which endpoints actually deduplicate.** Documented support is now known per endpoint (see
-   `IDEMPOTENCY.md`); whether a replay *behaves* that way is still `UNVERIFIED` everywhere.
+   `IDEMPOTENCY.md`); whether a replay _behaves_ that way is still `UNVERIFIED` everywhere.
 8. **Whether `10 MB` means 10⁶ or 2²⁰.** We enforce the decimal reading for both limits — the
-   conservative choice, since the old 50 MiB cap was *looser* than PayPal's "up to 50 MB per API call"
+   conservative choice, since the old 50 MiB cap was _looser_ than PayPal's "up to 50 MB per API call"
    and would have let a 51 MB upload fail remotely. PayPal does not say (report §30).
 9. **The unsigned `PayPal-Auth-Assertion`.** Its construction is now verbatim from PayPal's set-up page
    (`{"alg":"none","typ":"JWT"}.{iss,email}.`, empty signature) but has never been executed.
@@ -300,7 +303,7 @@ sandbox (H-01), a human, or a PayPal answer.
     from the doc at build time" is satisfied, and they live under `payment_source.paypal`.
 11. Whether a 429's `Retry-After` is delta-seconds or an HTTP-date in practice. Both are parsed.
 12. **PayPal's MCP tool names** cannot be checked without credentials (report §33). Best available
-    evidence is the `@paypal/agent-toolkit` README tool list, which is a *different artefact* and not
+    evidence is the `@paypal/agent-toolkit` README tool list, which is a _different artefact_ and not
     the MCP contract. Note the gap: even taking that list at face value it offers `list_disputes`,
     `get_dispute` and `accept_dispute_claim` only — **no evidence-offering tool at all**, so check
     C3(b) cannot currently prove that filing evidence is reachable over MCP.
@@ -333,7 +336,7 @@ The audit's findings are not all contained here:
   listing omits.
 - **`sandbox.processChargeback` takes an options object, not `(sellerTxnId, reason)`.** The spec's
   two-argument form cannot express the documented body, which needs `merchant_id`, the transaction
-  amount and `instrument.instrument_type` — facts about *our* PayPal account and *our* capture that the
+  amount and `instrument.instrument_type` — facts about _our_ PayPal account and _our_ capture that the
   client cannot know. Sending `{transaction_id, reason}` (what the two-argument form implied) would have
   failed at PayPal, so the signature follows the API rather than the listing.
 - **`sandbox.changeReason` takes `(id, body)` rather than `(id, reason)`.** Same reason: the documented
@@ -344,7 +347,7 @@ The audit's findings are not all contained here:
 - **`Dispute.offers` is left as an array** even though PayPal's field is `offer` (singular object). M15/M16
   and `IDEMPOTENCY.md` read `offers`; renaming a field other work packages depend on is not this
   package's call, and the mismatch is recorded in `types.ts` so the next reader is not misled.
-- **The seven bodies with `o: CallOpts` keep it**, including `provideEvidence`, so a caller *can* omit
+- **The seven bodies with `o: CallOpts` keep it**, including `provideEvidence`, so a caller _can_ omit
   `requestId`. §8.15 requires one for the filing call, and WP-15 is expected to pass
   `disputeActionRequestId(id, 'file', packetVersion)`. A dispute action with no id is still sent; the
   client does not require it, because the spec's signature does not.

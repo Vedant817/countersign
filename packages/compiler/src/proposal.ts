@@ -213,23 +213,25 @@ function proposalDefect(message: string, details: Record<string, unknown>): CsEr
 }
 
 /** Parse a model-written decimal string with `core.fromPayPalValue`, keeping its error code. */
-function parseAmount(
-  raw: string,
-  currency: Currency,
-  field: string,
-): Result<bigint> {
+function parseAmount(raw: string, currency: Currency, field: string): Result<bigint> {
   try {
     return ok(fromPayPalValue(raw, currency).minor)
   } catch (cause) {
     // `fromPayPalValue` raises CS_ROUNDING for "129.995" and CS_VALIDATION for the rest. Both are
     // refusals and both must keep their code: EC-FX-5 is specifically about the rounding case being
     // reported as such rather than absorbed.
-    const code = (cause as { code?: string }).code === 'CS_ROUNDING' ? 'CS_ROUNDING' : 'CS_VALIDATION'
+    const code =
+      (cause as { code?: string }).code === 'CS_ROUNDING' ? 'CS_ROUNDING' : 'CS_VALIDATION'
     return err(
-      csError(code, (cause as Error).message, { field, value: raw, currency }, {
-        userMessage:
-          'One of the amounts you gave has more decimal places than its currency allows, so we refused to round it.',
-      }),
+      csError(
+        code,
+        (cause as Error).message,
+        { field, value: raw, currency },
+        {
+          userMessage:
+            'One of the amounts you gave has more decimal places than its currency allows, so we refused to round it.',
+        },
+      ),
     )
   }
 }
@@ -324,14 +326,26 @@ export function localiseProposal(p: LlmProposal, ctx: LocaliseContext): Result<L
   }
 
   // --- money ---------------------------------------------------------------
-  const amountMin = p.amountMin === undefined ? ok(null) : parseAmount(p.amountMin, ctx.mandateCurrency, 'amountMin')
+  const amountMin =
+    p.amountMin === undefined
+      ? ok(null)
+      : parseAmount(p.amountMin, ctx.mandateCurrency, 'amountMin')
   if (!amountMin.ok) return amountMin
-  const amountMax = p.amountMax === undefined ? ok(null) : parseAmount(p.amountMax, ctx.mandateCurrency, 'amountMax')
+  const amountMax =
+    p.amountMax === undefined
+      ? ok(null)
+      : parseAmount(p.amountMax, ctx.mandateCurrency, 'amountMax')
   if (!amountMax.ok) return amountMax
 
-  const budgetMaxRaw = p.budgetMax === undefined ? ok(null) : parseAmount(p.budgetMax, ctx.mandateCurrency, 'budgetMax')
+  const budgetMaxRaw =
+    p.budgetMax === undefined
+      ? ok(null)
+      : parseAmount(p.budgetMax, ctx.mandateCurrency, 'budgetMax')
   if (!budgetMaxRaw.ok) return budgetMaxRaw
-  const budgetMinRaw = p.budgetMin === undefined ? ok(null) : parseAmount(p.budgetMin, ctx.mandateCurrency, 'budgetMin')
+  const budgetMinRaw =
+    p.budgetMin === undefined
+      ? ok(null)
+      : parseAmount(p.budgetMin, ctx.mandateCurrency, 'budgetMin')
   if (!budgetMinRaw.ok) return budgetMinRaw
 
   const min = amountMin.value
@@ -388,7 +402,9 @@ export function localiseProposal(p: LlmProposal, ctx: LocaliseContext): Result<L
 
   // --- line items ----------------------------------------------------------
   if (p.lineItems !== undefined && p.lineItems.length > 0) {
-    const requirements = [] as NonNullable<Extract<VIConstraint, { type: 'mandate.checkout.line_items' }>['items']>
+    const requirements = [] as NonNullable<
+      Extract<VIConstraint, { type: 'mandate.checkout.line_items' }>['items']
+    >
     for (const [index, line] of p.lineItems.entries()) {
       const items: { id: string; title: string }[] = []
       for (const skuId of unique(line.skuIds)) {

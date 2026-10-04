@@ -1,10 +1,10 @@
 # PayPal idempotency, per endpoint
 
-Spec §8.6: *"Some endpoints do **not** support idempotency [B14]. For those, after any ambiguous
+Spec §8.6: _"Some endpoints do **not** support idempotency [B14]. For those, after any ambiguous
 failure (timeout, 5xx), the client MUST **re-read** the state (GET) before retrying, never blind-retry.
-The per-endpoint table is in `packages/paypal/IDEMPOTENCY.md`, and WP-06 fills it from sandbox probes."*
+The per-endpoint table is in `packages/paypal/IDEMPOTENCY.md`, and WP-06 fills it from sandbox probes."_
 
-Spec §22.3 **U5**: *"Which PayPal endpoints honour `PayPal-Request-Id`, and the header length limit"* —
+Spec §22.3 **U5**: _"Which PayPal endpoints honour `PayPal-Request-Id`, and the header length limit"_ —
 owner WP-06, due Thu 8 Oct. `docs/HUMAN_TODO.md` **H-01** (PayPal credentials) is open, so the probe
 has not run.
 
@@ -15,13 +15,13 @@ has not run.
 > **Every cell is currently UNVERIFIED.** Nothing in this file has been measured against the PayPal
 > sandbox. There are three states and only the first two are claims:
 >
-> | State | Meaning |
-> |---|---|
-> | `DOC-CITED` | PayPal's documentation states it. A citation, **not** a measurement. |
-> | `UNVERIFIED (needs sandbox probe)` | We do not know. The sandbox probe will answer it. |
-> | `MEASURED (date)` | We ran the probe and wrote down what happened. **No cell is in this state yet.** |
+> | State                              | Meaning                                                                          |
+> | ---------------------------------- | -------------------------------------------------------------------------------- |
+> | `DOC-CITED`                        | PayPal's documentation states it. A citation, **not** a measurement.             |
+> | `UNVERIFIED (needs sandbox probe)` | We do not know. The sandbox probe will answer it.                                |
+> | `MEASURED (date)`                  | We ran the probe and wrote down what happened. **No cell is in this state yet.** |
 >
-> The one thing that **is** measured is the *maximum length our ids can reach*, because that is a
+> The one thing that **is** measured is the _maximum length our ids can reach_, because that is a
 > property of our own formats rather than of PayPal: see "Header length" at the bottom.
 >
 > This file is the input to spec **EC-IDEM-3**. A wrong "yes" here is a **double-charge bug**: the
@@ -35,15 +35,15 @@ has not run.
 Fixed by spec §8.6 and implemented in [`src/idempotency.ts`](src/idempotency.ts). Each is a pure
 function of our own ids, so a retry of a job that timed out re-sends a byte-identical id.
 
-| Format | Used by | Why these slots |
-|---|---|---|
-| `cs:{attemptId}:create` | `createOrder` | One order create per checkout attempt (EC-IDEM-1, EC-IDEM-2). |
-| `cs:{authId}:cap:{shipmentId}` | `captureAuthorization` | One capture per shipment against one PayPal authorization (EC-SPLIT-1). |
-| `cs:{captureId}:ref:{refundId}` | `refundCapture` | One refund per refund row (EC-IDEM-5). |
-| `cs:{disputeId}:{action}:{packetVersion}` | every dispute action | Re-filing packet v2 must not dedupe against v1; re-sending v2 after a timeout must (spec §8.15, §8.16 AT). |
+| Format                                    | Used by                | Why these slots                                                                                            |
+| ----------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `cs:{attemptId}:create`                   | `createOrder`          | One order create per checkout attempt (EC-IDEM-1, EC-IDEM-2).                                              |
+| `cs:{authId}:cap:{shipmentId}`            | `captureAuthorization` | One capture per shipment against one PayPal authorization (EC-SPLIT-1).                                    |
+| `cs:{captureId}:ref:{refundId}`           | `refundCapture`        | One refund per refund row (EC-IDEM-5).                                                                     |
+| `cs:{disputeId}:{action}:{packetVersion}` | every dispute action   | Re-filing packet v2 must not dedupe against v1; re-sending v2 after a timeout must (spec §8.15, §8.16 AT). |
 
 Dispute action tokens: `file`, `claim`, `offer`, `msg`, `return`, `support`, `appeal`, `escalate`.
-`file` is the one the spec names explicitly (§8.15: *"Idempotency key `cs:{disputeId}:file:{version}`"*).
+`file` is the one the spec names explicitly (§8.15: _"Idempotency key `cs:{disputeId}:file:{version}`"_).
 
 ---
 
@@ -60,43 +60,43 @@ Dispute action tokens: `file`, `claim`, `offer`, `msg`, `return`, `support`, `ap
 
 **Re-read before retrying** names the `GET` a caller should use when the row says `RE-READ FIRST`.
 
-| Method | Path | Sends `PayPal-Request-Id`? | Idempotency support | Safe to blind-retry? | Retry policy in code | Re-read before retrying |
-|---|---|---|---|---|---|---|
-| POST | `/v1/oauth2/token` | no | n/a — no side effect | **yes** | `AUTO (same request id)` | n/a |
-| POST | `/v2/checkout/orders` | yes | `DOC-CITED` [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
-| GET | `/v2/checkout/orders/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
-| POST | `/v2/checkout/orders/{id}/authorize` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}` |
-| POST | `/v2/checkout/orders/{id}/capture` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}` |
-| POST | `/v2/checkout/orders/{id}/track` | no | `SPEC-O`: no `paypal_request_id` parameter; idempotency is the `capture_id` + `tracking_number` body pair | **yes, via the body pair** | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}` |
-| POST | `/v2/payments/authorizations/{id}/capture` | yes | `DOC-CITED` [B12], [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
-| POST | `/v2/payments/authorizations/{id}/reauthorize` | yes | `DOC-CITED` [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
-| POST | `/v2/payments/authorizations/{id}/void` | yes | `DOC-CITED` [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
-| GET | `/v2/payments/authorizations/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
-| GET | `/v2/payments/captures/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
-| POST | `/v2/payments/captures/{id}/refund` | yes | `DOC-CITED` [B12], [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
-| GET | `/v2/payments/refunds/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
-| POST | `/v3/vault/setup-tokens` | no | `DOC-CITED` — `SPEC-V` declares the header, "server stores keys for 3 hours" | **unknown beyond 3 h** | `RE-READ FIRST` | `GET /v3/vault/setup-tokens/{id}` — see caveat below |
-| POST | `/v3/vault/payment-tokens` | no | `DOC-CITED` — `SPEC-V` declares the header, "server stores keys for 3 hours" | **unknown beyond 3 h** | `RE-READ FIRST` | `GET /v3/vault/payment-tokens/{id}` — **only reachable with the setup-token id** |
-| GET | `/v3/vault/payment-tokens/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
-| DELETE | `/v3/vault/payment-tokens/{id}` | no | n/a — idempotent by HTTP semantics (a repeat is a 404) | **yes** | `AUTO (same request id)` | n/a |
-| GET | `/v1/customer/disputes` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
-| GET | `/v1/customer/disputes/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
-| POST | `/v1/customer/disputes/{id}/provide-evidence` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown — and a double filing is the worst outcome in the system** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `evidence.notes` |
-| POST | `/v1/customer/disputes/{id}/accept-claim` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown — a double concede loses the dispute** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `status` |
-| POST | `/v1/customer/disputes/{id}/make-offer` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown — two offers is a commercial problem** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `offers` |
-| POST | `/v1/customer/disputes/{id}/send-message` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown — the buyer sees the duplicate** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `messages` |
-| POST | `/v1/customer/disputes/{id}/appeal` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `dispute_state` |
-| POST | `/v1/customer/disputes/{id}/acknowledge-return-item` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `status` |
-| POST | `/v1/customer/disputes/{id}/provide-supporting-info` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `evidence.notes` |
-| POST | `/v1/customer/disputes/{id}/escalate` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `dispute_life_cycle_stage` |
-| POST | `/v1/notifications/verify-webhook-signature` | no | n/a — no side effect (it only verifies) | **yes** | `AUTO (same request id)` | n/a |
-| POST | `/v1/customer/disputes` *(sandbox buyer simulator)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes?start_time=…` (§10.3 step 3) |
-| POST | `/v2/customer-support/process-chargeback` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes?start_time=…` |
-| POST | `/v1/customer/disputes/{id}/require-evidence` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` |
-| POST | `/v1/customer/disputes/{id}/adjudicate` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `adjudication_outcome` |
-| POST | `/v1/customer/disputes/{id}/change-reason` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `dispute_reason` |
-| POST | `/v1/customer/disputes/{id}/accept-offer` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` — and note the documented **`202 Accepted`**: the buyer may have accepted while we saw a timeout |
-| POST | `/v1/customer/disputes/{id}/deny-offer` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` |
+| Method | Path                                                      | Sends `PayPal-Request-Id`? | Idempotency support                                                                                       | Safe to blind-retry?                                                 | Retry policy in code     | Re-read before retrying                                                                                                           |
+| ------ | --------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/v1/oauth2/token`                                        | no                         | n/a — no side effect                                                                                      | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| POST   | `/v2/checkout/orders`                                     | yes                        | `DOC-CITED` [B14]                                                                                         | **yes, if the id is honoured**                                       | `AUTO (same request id)` | n/a                                                                                                                               |
+| GET    | `/v2/checkout/orders/{id}`                                | no                         | n/a — safe method                                                                                         | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| POST   | `/v2/checkout/orders/{id}/authorize`                      | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}`                                                                                                    |
+| POST   | `/v2/checkout/orders/{id}/capture`                        | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}`                                                                                                    |
+| POST   | `/v2/checkout/orders/{id}/track`                          | no                         | `SPEC-O`: no `paypal_request_id` parameter; idempotency is the `capture_id` + `tracking_number` body pair | **yes, via the body pair**                                           | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}`                                                                                                    |
+| POST   | `/v2/payments/authorizations/{id}/capture`                | yes                        | `DOC-CITED` [B12], [B14]                                                                                  | **yes, if the id is honoured**                                       | `AUTO (same request id)` | n/a                                                                                                                               |
+| POST   | `/v2/payments/authorizations/{id}/reauthorize`            | yes                        | `DOC-CITED` [B14]                                                                                         | **yes, if the id is honoured**                                       | `AUTO (same request id)` | n/a                                                                                                                               |
+| POST   | `/v2/payments/authorizations/{id}/void`                   | yes                        | `DOC-CITED` [B14]                                                                                         | **yes, if the id is honoured**                                       | `AUTO (same request id)` | n/a                                                                                                                               |
+| GET    | `/v2/payments/authorizations/{id}`                        | no                         | n/a — safe method                                                                                         | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| GET    | `/v2/payments/captures/{id}`                              | no                         | n/a — safe method                                                                                         | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| POST   | `/v2/payments/captures/{id}/refund`                       | yes                        | `DOC-CITED` [B12], [B14]                                                                                  | **yes, if the id is honoured**                                       | `AUTO (same request id)` | n/a                                                                                                                               |
+| GET    | `/v2/payments/refunds/{id}`                               | no                         | n/a — safe method                                                                                         | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| POST   | `/v3/vault/setup-tokens`                                  | no                         | `DOC-CITED` — `SPEC-V` declares the header, "server stores keys for 3 hours"                              | **unknown beyond 3 h**                                               | `RE-READ FIRST`          | `GET /v3/vault/setup-tokens/{id}` — see caveat below                                                                              |
+| POST   | `/v3/vault/payment-tokens`                                | no                         | `DOC-CITED` — `SPEC-V` declares the header, "server stores keys for 3 hours"                              | **unknown beyond 3 h**                                               | `RE-READ FIRST`          | `GET /v3/vault/payment-tokens/{id}` — **only reachable with the setup-token id**                                                  |
+| GET    | `/v3/vault/payment-tokens/{id}`                           | no                         | n/a — safe method                                                                                         | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| DELETE | `/v3/vault/payment-tokens/{id}`                           | no                         | n/a — idempotent by HTTP semantics (a repeat is a 404)                                                    | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| GET    | `/v1/customer/disputes`                                   | no                         | n/a — safe method                                                                                         | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| GET    | `/v1/customer/disputes/{id}`                              | no                         | n/a — safe method                                                                                         | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| POST   | `/v1/customer/disputes/{id}/provide-evidence`             | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown — and a double filing is the worst outcome in the system** | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `evidence.notes`                                                                       |
+| POST   | `/v1/customer/disputes/{id}/accept-claim`                 | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown — a double concede loses the dispute**                     | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `status`                                                                               |
+| POST   | `/v1/customer/disputes/{id}/make-offer`                   | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown — two offers is a commercial problem**                     | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `offers`                                                                               |
+| POST   | `/v1/customer/disputes/{id}/send-message`                 | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown — the buyer sees the duplicate**                           | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `messages`                                                                             |
+| POST   | `/v1/customer/disputes/{id}/appeal`                       | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `dispute_state`                                                                        |
+| POST   | `/v1/customer/disputes/{id}/acknowledge-return-item`      | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `status`                                                                               |
+| POST   | `/v1/customer/disputes/{id}/provide-supporting-info`      | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `evidence.notes`                                                                       |
+| POST   | `/v1/customer/disputes/{id}/escalate`                     | yes                        | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `dispute_life_cycle_stage`                                                             |
+| POST   | `/v1/notifications/verify-webhook-signature`              | no                         | n/a — no side effect (it only verifies)                                                                   | **yes**                                                              | `AUTO (same request id)` | n/a                                                                                                                               |
+| POST   | `/v1/customer/disputes` _(sandbox buyer simulator)_       | no                         | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes?start_time=…` (§10.3 step 3)                                                                           |
+| POST   | `/v2/customer-support/process-chargeback` _(sandbox)_     | no                         | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes?start_time=…`                                                                                          |
+| POST   | `/v1/customer/disputes/{id}/require-evidence` _(sandbox)_ | no                         | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}`                                                                                                  |
+| POST   | `/v1/customer/disputes/{id}/adjudicate` _(sandbox)_       | no                         | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `adjudication_outcome`                                                                 |
+| POST   | `/v1/customer/disputes/{id}/change-reason` _(sandbox)_    | no                         | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` then read `dispute_reason`                                                                       |
+| POST   | `/v1/customer/disputes/{id}/accept-offer` _(sandbox)_     | no                         | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}` — and note the documented **`202 Accepted`**: the buyer may have accepted while we saw a timeout |
+| POST   | `/v1/customer/disputes/{id}/deny-offer` _(sandbox)_       | no                         | `UNVERIFIED (needs sandbox probe)`                                                                        | **unknown**                                                          | `RE-READ FIRST`          | `GET /v1/customer/disputes/{id}`                                                                                                  |
 
 ### Two caveats about the `RE-READ FIRST` rows
 
@@ -106,7 +106,7 @@ Dispute action tokens: `file`, `claim`, `offer`, `msg`, `return`, `support`, `ap
    because it is buyer-present. Recorded here rather than hidden: it is a genuine gap, not an oversight.
 2. **`POST /v3/vault/payment-tokens` is reachable for re-read.** The setup-token id is the request's own
    input, so a replay can be checked with `getPaymentToken` after the first token exists. Spec §8.7
-   AT-M7.3 (*"A re-run with the same setup token is idempotent — returns the same wallet"*) is a claim
+   AT-M7.3 (_"A re-run with the same setup token is idempotent — returns the same wallet"_) is a claim
    about **our** layer, not about PayPal's.
 
 ### And why vault is still `RE-READ FIRST` even though the header is documented (2026-10-04 audit)
@@ -115,7 +115,7 @@ Dispute action tokens: `file`, `claim`, `offer`, `msg`, `return`, `support`, `ap
 provenance comment in `ENDPOINT_POLICIES` no longer says so. The remaining objection is narrower and
 still real: PayPal documents that **"the server stores keys for 3 hours"**, which does not cover a
 retry that arrives after a long outage. `RE-READ FIRST` is therefore a deliberate conservatism about
-the *retention window*, not a claim that the header is unsupported. Disputes v1 stay `RE-READ FIRST` for
+the _retention window_, not a claim that the header is unsupported. Disputes v1 stay `RE-READ FIRST` for
 the opposite reason: `SPEC-D` declares no `paypal_request_id` parameter anywhere.
 
 Note also what the re-read should look at after the audit's field-name corrections:
@@ -130,32 +130,32 @@ Note also what the re-read should look at after the audit's field-name correctio
 
 **Which limit PayPal enforces is UNKNOWN, and PayPal's own two sources contradict each other.**
 
-| Source | What it states |
-|---|---|
-| `SPEC-P` / `SPEC-V` → `components.parameters.paypal_request_id` | `minLength: 1`, **`maxLength: 10000`**, `pattern: ^.*$`, `required: false` |
-| <https://developer.paypal.com/api/rest/reference/idempotency> → "Usage notes" | *"PayPal recommends that you use the **UUID standard** for the `PayPal-Request-Id` header value because it meets the **38 single-byte character limit**."* |
+| Source                                                                        | What it states                                                                                                                                             |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SPEC-P` / `SPEC-V` → `components.parameters.paypal_request_id`               | `minLength: 1`, **`maxLength: 10000`**, `pattern: ^.*$`, `required: false`                                                                                 |
+| <https://developer.paypal.com/api/rest/reference/idempotency> → "Usage notes" | _"PayPal recommends that you use the **UUID standard** for the `PayPal-Request-Id` header value because it meets the **38 single-byte character limit**."_ |
 
 These cannot both be the enforced limit, and **nothing PayPal publishes says which is real.** 38 is the
-only number stated as a *limit*; 10 000 is a schema maximum, and a schema maximum is not a promise.
+only number stated as a _limit_; 10 000 is a schema maximum, and a schema maximum is not a promise.
 Both are kept as named constants in `src/idempotency.ts` (`PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS`,
 `PAYPAL_OPENAPI_REQUEST_ID_MAX_CHARS`) so the C-probe has something to measure against.
 
 **Our worst case is 55 characters**, computed from the formats themselves by
 `observedRequestIdLengths()` in `src/idempotency.ts`:
 
-| Format | Worst realistic length | Over the 38-char prose figure? |
-|---|---|---|
-| `cs:{attemptId}:create` | 40 | yes |
-| `cs:{authId}:cap:{shipmentId}` | 55 | yes |
-| `cs:{captureId}:ref:{refundId}` | 55 | yes |
-| `cs:{disputeId}:{action}:{packetVersion}` | 52 | yes |
-| `cs:{paypalDisputeId}:file:1` (a PayPal dispute id in the slot) | 27 | no |
+| Format                                                          | Worst realistic length | Over the 38-char prose figure? |
+| --------------------------------------------------------------- | ---------------------- | ------------------------------ |
+| `cs:{attemptId}:create`                                         | 40                     | yes                            |
+| `cs:{authId}:cap:{shipmentId}`                                  | 55                     | yes                            |
+| `cs:{captureId}:ref:{refundId}`                                 | 55                     | yes                            |
+| `cs:{disputeId}:{action}:{packetVersion}`                       | 52                     | yes                            |
+| `cs:{paypalDisputeId}:file:1` (a PayPal dispute id in the slot) | 27                     | no                             |
 
 (`attemptId` and friends are `att_` + a 26-char ULID; the PayPal auth/capture slot is 17 chars; the
 longest action token is `escalate` at 8; the largest packet version we emit is 9 digits.)
 
 **`captureRequestId` is the format to look at first.** `cs:{authId}:cap:{shipmentId}` is tied for
-longest at 55, and unlike the others its long slots are *PayPal's* ids — the 17-character
+longest at 55, and unlike the others its long slots are _PayPal's_ ids — the 17-character
 authorization id and the capture id — which is why they cannot be shortened the way our own ULID slots
 could. If the C-probe reports 38 as real, this format has to change shape (for example a hash of the
 authorization id in place of the id itself), and that is a spec-level decision because §8.6 fixes the
@@ -183,7 +183,7 @@ For each row above, in sandbox:
      by a human later).
 2. Send the call **twice with different request ids** and confirm two resources are created — otherwise
    the key is being ignored and deduplication is coming from somewhere else.
-3. For rows marked `DOC-CITED [B14]`, the answer must be read off the docs page *and* confirmed by (1),
+3. For rows marked `DOC-CITED [B14]`, the answer must be read off the docs page _and_ confirmed by (1),
    because "documented" and "deduplicates in practice" are different claims.
 4. Record the date, the sandbox app name and the debug ids in the cell, and move it to
    `MEASURED (YYYY-MM-DD)`.
@@ -193,7 +193,7 @@ For each row above, in sandbox:
    accepted. This single experiment replaces both constants above with a measurement.
 
 `test/client.sandbox.test.ts` already performs steps 1–2 for
-`POST /v2/checkout/orders` (the *"re-sending the same create request id"* test) and fails with a message
+`POST /v2/checkout/orders` (the _"re-sending the same create request id"_ test) and fails with a message
 that says exactly which cell in this table to update. It runs only with
 `pnpm --filter @countersign/paypal test:sandbox` and real credentials.
 
@@ -201,13 +201,13 @@ that says exactly which cell in this table to update. It runs only with
 
 ## Where this is enforced in code
 
-| Concern | Location |
-|---|---|
-| The four formats | [`src/idempotency.ts`](src/idempotency.ts) |
-| Per-endpoint retry/send policy | `ENDPOINT_POLICIES` in [`src/client.ts`](src/client.ts) |
-| One id for the whole retry loop | `PayPalClient.execute` → `attemptBudgetLoop` |
-| Re-read instead of blind retry | the `ambiguous` branch in `attemptBudgetLoop` |
-| A side-effecting call with no id | `PayPalClient.requireRequestId` → `CS_VALIDATION`, before any HTTP |
-| A malformed id | `validateRequestId` → `CS_VALIDATION`, before any HTTP |
-| AT-M6.2 (same id on both retries) | `test/client.retry.test.ts` |
-| EC-IDEM-3 (no blind retry on `RE-READ FIRST`) | `test/client.retry.test.ts` |
+| Concern                                       | Location                                                           |
+| --------------------------------------------- | ------------------------------------------------------------------ |
+| The four formats                              | [`src/idempotency.ts`](src/idempotency.ts)                         |
+| Per-endpoint retry/send policy                | `ENDPOINT_POLICIES` in [`src/client.ts`](src/client.ts)            |
+| One id for the whole retry loop               | `PayPalClient.execute` → `attemptBudgetLoop`                       |
+| Re-read instead of blind retry                | the `ambiguous` branch in `attemptBudgetLoop`                      |
+| A side-effecting call with no id              | `PayPalClient.requireRequestId` → `CS_VALIDATION`, before any HTTP |
+| A malformed id                                | `validateRequestId` → `CS_VALIDATION`, before any HTTP             |
+| AT-M6.2 (same id on both retries)             | `test/client.retry.test.ts`                                        |
+| EC-IDEM-3 (no blind retry on `RE-READ FIRST`) | `test/client.retry.test.ts`                                        |

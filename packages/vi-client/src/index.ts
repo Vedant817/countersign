@@ -27,7 +27,14 @@
  */
 
 // --- the client -------------------------------------------------------------------------------------
-export { ViClient, mapViError, transportError, isTimeoutError, normaliseBaseUrl, jsonSafeBody } from './client'
+export {
+  ViClient,
+  mapViError,
+  transportError,
+  isTimeoutError,
+  normaliseBaseUrl,
+  jsonSafeBody,
+} from './client'
 export {
   shouldRetry,
   retryDelayMs,

@@ -124,12 +124,7 @@ export {
 export type { Localised, LocaliseContext, LlmProposal, ScoredFields } from './proposal'
 
 // --- reading the buyer's own words -------------------------------------------
-export {
-  currenciesNamedIn,
-  literalCapIn,
-  mentionsRecurrence,
-  resolveCurrency,
-} from './literal'
+export { currenciesNamedIn, literalCapIn, mentionsRecurrence, resolveCurrency } from './literal'
 export type { CurrencyResolution } from './literal'
 
 // --- the read-back ----------------------------------------------------------

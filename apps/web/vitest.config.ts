@@ -17,7 +17,11 @@ export default mergeConfig(
       name: 'web',
       root: import.meta.dirname,
       environment: 'node',
-      include: ['test/**/*.{test,spec}.{ts,tsx}', 'app/**/*.test.{ts,tsx}', 'lib/**/*.test.{ts,tsx}'],
+      include: [
+        'test/**/*.{test,spec}.{ts,tsx}',
+        'app/**/*.test.{ts,tsx}',
+        'lib/**/*.test.{ts,tsx}',
+      ],
     },
     resolve: {
       alias: {

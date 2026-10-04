@@ -20,20 +20,20 @@ marked **public**, which are rate-limited to 30 req/min/IP. The client reads thi
 (`ROUTE_CONTRACTS` in `src/types.ts`) rather than hard-coding it, so a route added to the service without a
 bearer token cannot be reached by accident.
 
-| Method | Route | Client method | Auth | Returns |
-|---|---|---|---|---|
-| `POST` | `/v1/keys/agent` | `mintAgentKey(req)` | bearer | `MintAgentKeyResponse` |
-| `POST` | `/v1/keys/rotate` | `rotateKey(req)` | bearer | `RotateKeyResponse` |
-| `GET` | `/v1/jwks` | `jwks()` | **public** | `JwksResponse` |
-| `POST` | `/v1/l1/issue` | `issueL1(req)` | bearer | `L1IssueResponse` |
-| `POST` | `/v1/l2/prepare` | `prepareL2(req)` | bearer | `L2PrepareResponse` |
-| `POST` | `/v1/l2/finalize` | `finalizeL2(req)` | bearer | `L2FinalizeResponse` |
-| `POST` | `/v1/checkout-jwt` | `createCheckoutJwt(req)` | bearer | `CheckoutJwtResponse` |
-| `POST` | `/v1/l3/create` | `createL3(req)` | bearer | `L3CreateResponse` |
-| `POST` | `/v1/verify` | `verify(req)` | bearer | `VerifyResponse` |
-| `POST` | `/v1/public/verify` | `publicVerify(req)` | **public** | `PublicVerifyResponse` |
-| `GET` | `/v1/status` | `status()` | **public** | `StatusResponse` |
-| `GET` | `/v1/checkout-jwt/verify` | `verifyCheckoutJwt(jwt)` | bearer | `CheckoutJwtVerifyResponse` |
+| Method | Route                     | Client method            | Auth       | Returns                     |
+| ------ | ------------------------- | ------------------------ | ---------- | --------------------------- |
+| `POST` | `/v1/keys/agent`          | `mintAgentKey(req)`      | bearer     | `MintAgentKeyResponse`      |
+| `POST` | `/v1/keys/rotate`         | `rotateKey(req)`         | bearer     | `RotateKeyResponse`         |
+| `GET`  | `/v1/jwks`                | `jwks()`                 | **public** | `JwksResponse`              |
+| `POST` | `/v1/l1/issue`            | `issueL1(req)`           | bearer     | `L1IssueResponse`           |
+| `POST` | `/v1/l2/prepare`          | `prepareL2(req)`         | bearer     | `L2PrepareResponse`         |
+| `POST` | `/v1/l2/finalize`         | `finalizeL2(req)`        | bearer     | `L2FinalizeResponse`        |
+| `POST` | `/v1/checkout-jwt`        | `createCheckoutJwt(req)` | bearer     | `CheckoutJwtResponse`       |
+| `POST` | `/v1/l3/create`           | `createL3(req)`          | bearer     | `L3CreateResponse`          |
+| `POST` | `/v1/verify`              | `verify(req)`            | bearer     | `VerifyResponse`            |
+| `POST` | `/v1/public/verify`       | `publicVerify(req)`      | **public** | `PublicVerifyResponse`      |
+| `GET`  | `/v1/status`              | `status()`               | **public** | `StatusResponse`            |
+| `GET`  | `/v1/checkout-jwt/verify` | `verifyCheckoutJwt(jwt)` | bearer     | `CheckoutJwtVerifyResponse` |
 
 `GET /v1/status` is also public: it is the liveness probe and carries no secrets. Every method returns
 `Promise<Result<T, CsError>>` and never throws across the boundary (spec §8.0 rule 3).
@@ -47,7 +47,7 @@ only time source in the codebase (spec §8.0 rule 10) and there is no `Date.now(
 
 ### 1. `chain_valid: false` is a **success**
 
-`POST /v1/verify` answers `200 {chain_valid: false, errors: […]}` for an invalid chain. That is a *verdict*,
+`POST /v1/verify` answers `200 {chain_valid: false, errors: […]}` for an invalid chain. That is a _verdict_,
 so `verify()` returns `ok(...)` and the Gate reads `chain_valid`, `errors`, `constraints`, `disclosed` and
 `keys`. Returning `err(...)` would discard every input the decision is made from and leave the Gate unable
 to tell "the chain is invalid" from "we could not ask".
@@ -74,13 +74,13 @@ The pinned library appends `mandate.payment.budget`, `mandate.payment.recurrence
 
 So `skipped.includes('mandate.payment.budget')` is **`false`, always**, and a Gate written that way would
 conclude it owes nothing while a budget cap sits unevaluated — the precise failure D19 exists to prevent.
-`checked` *is* bare type names, so the two lists on one object have different element formats.
+`checked` _is_ bare type names, so the two lists on one object have different element formats.
 
 Use the helpers. They are the reason this package can hand the Gate a safe reading of that field:
 
 ```ts
-pendingNetworkEnforcement(res.constraints.skipped)   // ['mandate.payment.budget', …] — what the Gate owes
-skippedConstraintTypes(res.constraints.skipped)      // every registered type present, unannotated notes dropped
+pendingNetworkEnforcement(res.constraints.skipped) // ['mandate.payment.budget', …] — what the Gate owes
+skippedConstraintTypes(res.constraints.skipped) // every registered type present, unannotated notes dropped
 ```
 
 A non-empty result means "disclosed but evaluated by nobody". An **empty** result means none of those three
@@ -91,13 +91,13 @@ types were disclosed — a different and equally important fact, not the same as
 Spec §8.4, verbatim: **2 retries on 5xx or connection error only.** It is an exported pure function,
 `shouldRetry`, so the policy is one readable screen and `test/retry.test.ts` tables it exhaustively.
 
-| Failure | Retried? |
-|---|---|
+| Failure                           | Retried?                  |
+| --------------------------------- | ------------------------- |
 | connection error, our 5 s timeout | yes, while budget remains |
-| 5xx | yes, while budget remains |
-| **any 4xx** | **never** |
+| 5xx                               | yes, while budget remains |
+| **any 4xx**                       | **never**                 |
 
-`VI_SIGNATURE_MISMATCH` is the reason this matters. It is a *verdict*, not an outage: the browser signed
+`VI_SIGNATURE_MISMATCH` is the reason this matters. It is a _verdict_, not an outage: the browser signed
 the wrong bytes or holds the wrong key, a second identical attempt produces the identical verdict, and
 retrying multiplies the cost of a rejected signature. `CS_UNAUTHENTICATED` means the token is wrong.
 `CS_VALIDATION` means the request is wrong. **429 is 4xx and is therefore not retried either** — which looks
@@ -106,7 +106,7 @@ an immediate retry spends more of the window just exhausted and can extend the b
 comes back `retryable: true` and the caller decides when to return.
 
 The default backoff is full jitter from a 100 ms base, capped at 2 s — about 300 ms worst case for the whole
-budget. §8.4 specifies the retry *count* but not the spacing; the base is small because spec §14 budgets a
+budget. §8.4 specifies the retry _count_ but not the spacing; the base is small because spec §14 budgets a
 Gate decision at p95 400 ms. Inject `sleep` and the waits cost a test nothing.
 
 ### 4. The timeout is 5 s per attempt, and it is real
@@ -119,7 +119,7 @@ reported `CS_INTERNAL` + `retryable: true` + `ambiguous: true`: vi is our own in
 
 ### 5. `signing_input` is passed through byte for byte
 
-`prepareL2` returns the service's string verbatim, never a re-encoding, and the schema *asserts* the
+`prepareL2` returns the service's string verbatim, never a re-encoding, and the schema _asserts_ the
 invariant: exactly two non-empty base64url segments, no trailing dot, each decoding to JSON, and each
 matching the `header`/`payload` the same response returns.
 
@@ -158,8 +158,8 @@ that matters: the value that reaches vi is an exact integer, so nothing is round
 
 ## The schema drift check — AT-M4.2
 
-Spec §8.4: *"vi exposes `/openapi.json`, and a script fails CI if the request/response fields differ from the
-zod schemas."*
+Spec §8.4: _"vi exposes `/openapi.json`, and a script fails CI if the request/response fields differ from the
+zod schemas."_
 
 ```bash
 # against a running service
@@ -189,7 +189,7 @@ disappearing — is all caught above. This is a scoping decision, stated rather 
 entry and both constraint arrays as bare `dict[str, Any]`, and gives `GET /v1/checkout-jwt/verify` no schema
 at all. Those positions appear in the output as **unverifiable**, with a reason. They do not fail the check,
 because claiming a match that cannot be made would be worse — but they are visible, so "cannot check" is
-never confused with "checked". Note this client *does* type the constraint arrays (as the tagged union of the
+never confused with "checked". Note this client _does_ type the constraint arrays (as the tagged union of the
 eight registered types, spec §8.8), refusing a constraint vi would reject before spending the round trip;
 that is why those two positions are worth printing.
 
@@ -219,7 +219,7 @@ pnpm test:contract
 The suite's centrepiece is one round trip: **issue L1 → prepare L2 → sign `signing_input` with a
 locally generated P-256 key via WebCrypto → finalize → verify**. That is the real two-phase signing flow
 over real HTTP, and `finalize` succeeding is a statement about the service verifying a real ES256 signature
-against the key bound in the L1 — not about this client's plumbing. It also asserts that a *wrong* key gets
+against the key bound in the L1 — not about this client's plumbing. It also asserts that a _wrong_ key gets
 `VI_SIGNATURE_MISMATCH`. Alongside it: auth enforcement, JWKS retired keys, agent-key minting (and that the
 private half never appears in the response), the full autonomous chain with a price lock and an L3,
 out-of-mandate refusal, the checkout diagnostic, key rotation with the retired kid still resolvable, and the
@@ -227,13 +227,13 @@ drift check against the running service.
 
 ## Tests
 
-| File | What it covers |
-|---|---|
-| `types.test.ts` | the four mirroring rules, money, the constraint registry, the `signing_input` invariant, `skipped` / D19 helpers |
-| `retry.test.ts` | the retry policy as an exhaustive table, the backoff, timeout classification |
-| `client.test.ts` | transport against an injected `fetch`: auth, error mapping for every code vi can return, retry wiring, the real timeout, request serialisation |
-| `schema-drift.test.ts` | AT-M4.2 against the committed fixture, **plus every injected drift** in both directions |
-| `contract/at-m4.contract.ts` | AT-M4.1 against a live service; skipped without one |
+| File                         | What it covers                                                                                                                                 |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `types.test.ts`              | the four mirroring rules, money, the constraint registry, the `signing_input` invariant, `skipped` / D19 helpers                               |
+| `retry.test.ts`              | the retry policy as an exhaustive table, the backoff, timeout classification                                                                   |
+| `client.test.ts`             | transport against an injected `fetch`: auth, error mapping for every code vi can return, retry wiring, the real timeout, request serialisation |
+| `schema-drift.test.ts`       | AT-M4.2 against the committed fixture, **plus every injected drift** in both directions                                                        |
+| `contract/at-m4.contract.ts` | AT-M4.1 against a live service; skipped without one                                                                                            |
 
 No test in the unit suite opens a socket. `test/fixtures/README.md` explains where each shape came from and
 how to regenerate the OpenAPI fixture when `apps/vi` changes a pydantic model.

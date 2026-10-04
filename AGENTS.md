@@ -5,13 +5,13 @@ Section numbers quoted throughout the code (e.g. "§8.6", "EC-CAP-1", "D19") ref
 
 ## Agent routing rules
 
-| Deliverable | Write to |
-|---|---|
-| Status of a work package | `docs/PROGRESS.md` |
-| A deviation from the spec | `docs/DECISIONS.md` (date, reason, evidence) |
-| Where an edge case is handled / tested | `docs/EDGE-CASES.md` |
-| Something only a human can do | `docs/HUMAN_TODO.md` (top of file) |
-| Final report | `docs/FINAL_REPORT.md` |
+| Deliverable                            | Write to                                     |
+| -------------------------------------- | -------------------------------------------- |
+| Status of a work package               | `docs/PROGRESS.md`                           |
+| A deviation from the spec              | `docs/DECISIONS.md` (date, reason, evidence) |
+| Where an edge case is handled / tested | `docs/EDGE-CASES.md`                         |
+| Something only a human can do          | `docs/HUMAN_TODO.md` (top of file)           |
+| Final report                           | `docs/FINAL_REPORT.md`                       |
 
 ## Git rules (hard)
 

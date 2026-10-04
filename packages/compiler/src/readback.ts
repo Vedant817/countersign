@@ -35,7 +35,13 @@
  * from the compiled mandate, so they cannot disagree with the constraints above them.
  */
 
-import { formatIstHuman, formatMoney, toIstParts, type Currency, type Money } from '@countersign/core'
+import {
+  formatIstHuman,
+  formatMoney,
+  toIstParts,
+  type Currency,
+  type Money,
+} from '@countersign/core'
 
 import {
   constraintOfType,
@@ -75,8 +81,18 @@ export const NO_DATE = 'no date'
 // ---------------------------------------------------------------------------
 
 const MONTH_ABBREVIATIONS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ] as const
 
 /**
@@ -274,7 +290,8 @@ export const READBACK_TEMPLATES: readonly ReadBackTemplate[] = [
         `Payments repeat **${FREQUENCY_WORDS[c.frequency]}**`,
         `from **${formatIstCalendarDate(c.start_date, ctx.tz)}**`,
       ]
-      if (c.end_date !== undefined) parts.push(`until **${formatIstCalendarDate(c.end_date, ctx.tz)}**`)
+      if (c.end_date !== undefined)
+        parts.push(`until **${formatIstCalendarDate(c.end_date, ctx.tz)}**`)
       let line = parts.join(' ')
       if (c.number !== undefined) line += `, up to **${c.number}** times`
       return line
@@ -298,9 +315,7 @@ export const READBACK_TEMPLATES: readonly ReadBackTemplate[] = [
     type: REFERENCE,
     networkEnforced: false,
     render: (c) =>
-      c.type !== REFERENCE
-        ? null
-        : 'This mandate is linked to every payment it authorises',
+      c.type !== REFERENCE ? null : 'This mandate is linked to every payment it authorises',
   },
 ]
 
@@ -381,7 +396,10 @@ export function preferenceLines(preferences: CompiledPreferences): string[] {
   })
   if (found.length === 0) return []
   const quoted = found.map(([key, label]) => `**${label}** "${String(preferences[key]).trim()}"`)
-  const list = quoted.length === 1 ? quoted[0]! : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`
+  const list =
+    quoted.length === 1
+      ? quoted[0]!
+      : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`
   return [
     `We read ${list} as a preference, not a limit. These are not signed and do not bound what the agent ` +
       'may buy.',
@@ -419,7 +437,9 @@ export function readBack(c: CompiledMandate, ctx: ReadBackContext): string {
   const ordered = canonicalConstraints(c.constraints)
   const networkEnforcedOnly =
     ordered.length > 0 &&
-    ordered.every((x) => READBACK_TEMPLATES.find((t) => t.type === x.type)?.networkEnforced === true)
+    ordered.every(
+      (x) => READBACK_TEMPLATES.find((t) => t.type === x.type)?.networkEnforced === true,
+    )
 
   for (const type of READBACK_ORDER) {
     const constraint = constraintOfType(ordered, type)

@@ -17,7 +17,13 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_MAX_RETRIES, ViClient, jsonSafeBody, mapViError, normaliseBaseUrl } from '../src/client'
+import {
+  DEFAULT_MAX_RETRIES,
+  ViClient,
+  jsonSafeBody,
+  mapViError,
+  normaliseBaseUrl,
+} from '../src/client'
 import { pendingNetworkEnforcement } from '../src/types'
 import type { L2PrepareRequest } from '../src/types'
 import { isCsErrorCode } from '@countersign/core'
@@ -34,12 +40,21 @@ import {
   verifyResponse,
   viUnhandledError,
 } from './fixtures/vi-transport-double'
-import type { FetchDouble, FakeResponseSpec, RecordedCall, Stub } from './fixtures/vi-transport-double'
+import type {
+  FetchDouble,
+  FakeResponseSpec,
+  RecordedCall,
+  Stub,
+} from './fixtures/vi-transport-double'
 
 const BASE_URL = 'http://vi:8000'
 const TOKEN = 'test-service-token-do-not-use-in-prod'
 
-const MERCHANT = { id: 'mrc_northwind', name: 'Northwind Outfitters', website: 'https://northwind.test' }
+const MERCHANT = {
+  id: 'mrc_northwind',
+  name: 'Northwind Outfitters',
+  website: 'https://northwind.test',
+}
 const ITEM = { id: 'SKU-TRAIL-42', title: 'Trail Runner' }
 
 interface Harness {
@@ -49,7 +64,10 @@ interface Harness {
 }
 
 /** A client wired to a `fetch` double, a recording sleep and a frozen clock. */
-function makeClient(responder: Stub, overrides: { maxRetries?: number; timeoutMs?: number; token?: string } = {}): Harness {
+function makeClient(
+  responder: Stub,
+  overrides: { maxRetries?: number; timeoutMs?: number; token?: string } = {},
+): Harness {
   const recorder = recordingSleep()
   const fetchImpl = fakeFetch(responder)
   const client = new ViClient({
@@ -66,19 +84,35 @@ function makeClient(responder: Stub, overrides: { maxRetries?: number; timeoutMs
 
 /** Every `CsErrorCode` `apps/vi` can put on the wire, with the status `errors.py::_STATUS` gives it. */
 const SERVICE_ERRORS: readonly { code: string; status: number; why: string }[] = [
-  { code: 'CS_VALIDATION', status: 400, why: 'FastAPI request validation, converted by `_validation_error`' },
+  {
+    code: 'CS_VALIDATION',
+    status: 400,
+    why: 'FastAPI request validation, converted by `_validation_error`',
+  },
   { code: 'CS_ROUNDING', status: 400, why: 'an amount with more decimals than the currency has' },
-  { code: 'CS_CURRENCY_MISMATCH', status: 400, why: 'a USD cap against an INR purchase; we never convert' },
+  {
+    code: 'CS_CURRENCY_MISMATCH',
+    status: 400,
+    why: 'a USD cap against an INR purchase; we never convert',
+  },
   { code: 'CS_UNAUTHENTICATED', status: 401, why: 'a missing or wrong bearer token' },
   { code: 'CS_FORBIDDEN', status: 403, why: 'reserved by `_STATUS`' },
   { code: 'CS_NOT_FOUND', status: 404, why: 'an expired prepare_id, and an unknown path' },
   { code: 'CS_CONFLICT', status: 409, why: 'reserved by `_STATUS`' },
   { code: 'CS_CONFLICT', status: 429, why: "the public routes' 30/min/IP limit, with Retry-After" },
-  { code: 'VI_SIGNATURE_MISMATCH', status: 400, why: "l2/finalize with the wrong device key — spec §8.5, EC-KEY-1" },
+  {
+    code: 'VI_SIGNATURE_MISMATCH',
+    status: 400,
+    why: 'l2/finalize with the wrong device key — spec §8.5, EC-KEY-1',
+  },
   { code: 'VI_CHAIN_INVALID', status: 422, why: 'reserved by `_STATUS`' },
   { code: 'VI_EXPIRED', status: 422, why: 'reserved by `_STATUS`' },
   { code: 'VI_NOT_YET_VALID', status: 422, why: 'reserved by `_STATUS`' },
-  { code: 'VI_CONSTRAINT_VIOLATION', status: 422, why: 'a constraint vi refuses, or l3/create out of mandate' },
+  {
+    code: 'VI_CONSTRAINT_VIOLATION',
+    status: 422,
+    why: 'a constraint vi refuses, or l3/create out of mandate',
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -87,7 +121,10 @@ const SERVICE_ERRORS: readonly { code: string; status: number; why: string }[] =
 
 describe('bearer authentication', () => {
   it('sends the bearer token on every route except the three public ones', async () => {
-    const { client, fetchImpl } = makeClient(({ url }) => ({ status: 200, body: statusBodyFor(url) }))
+    const { client, fetchImpl } = makeClient(({ url }) => ({
+      status: 200,
+      body: statusBodyFor(url),
+    }))
     await client.jwks()
     await client.status()
     await client.mintAgentKey({ agent_id: 'agt_test' })
@@ -103,7 +140,10 @@ describe('bearer authentication', () => {
   })
 
   it('does not send the token on POST /v1/public/verify, which is public and rate-limited', async () => {
-    const { client, fetchImpl } = makeClient({ status: 200, body: { ...verifyResponse(), bundle_hash: 'a'.repeat(43) } })
+    const { client, fetchImpl } = makeClient({
+      status: 200,
+      body: { ...verifyResponse(), bundle_hash: 'a'.repeat(43) },
+    })
     await client.publicVerify({ bundle: { l1: 'a.b.c~', l2: 'a.b.c~d~' } })
     expect(headerOf(fetchImpl.calls[0] as RecordedCall, 'authorization')).toBeUndefined()
   })
@@ -125,7 +165,13 @@ describe('bearer authentication', () => {
 
 /** `vi_service.models.StatusResponse`. */
 function statusResponseBody(): unknown {
-  return { ok: true, app_env: 'test', issuer_kid: 'issuer-key-1', merchant_kid: 'merchant-key-1', clock_skew_seconds: 300 }
+  return {
+    ok: true,
+    app_env: 'test',
+    issuer_kid: 'issuer-key-1',
+    merchant_kid: 'merchant-key-1',
+    clock_skew_seconds: 300,
+  }
 }
 
 /** Minimal valid bodies so `status()` / `mintAgentKey()` can share one responder. */
@@ -139,18 +185,24 @@ function statusBodyFor(url: string): unknown {
 // ---------------------------------------------------------------------------
 
 describe('error-body mapping', () => {
-  it.each(SERVICE_ERRORS)('maps $code at $status without alteration ($why)', async ({ code, status }) => {
-    const { client } = makeClient({ status, body: csErrorBody(code, `vi says ${code}`, { retryable: false }) })
-    const r = await client.mintAgentKey({ agent_id: 'agt_test' })
-    expect(r.ok).toBe(false)
-    if (r.ok) return
-    // The service's code survives verbatim — that is the whole contract (spec §8.0 rule 3).
-    expect(r.error.code).toBe(code)
-    expect(isCsErrorCode(r.error.code)).toBe(true)
-    expect(r.error.message).toContain(`vi says ${code}`)
-    expect(r.error.details?.['http_status']).toBe(status)
-    expect(r.error.details?.['vi_code']).toBe(code)
-  })
+  it.each(SERVICE_ERRORS)(
+    'maps $code at $status without alteration ($why)',
+    async ({ code, status }) => {
+      const { client } = makeClient({
+        status,
+        body: csErrorBody(code, `vi says ${code}`, { retryable: false }),
+      })
+      const r = await client.mintAgentKey({ agent_id: 'agt_test' })
+      expect(r.ok).toBe(false)
+      if (r.ok) return
+      // The service's code survives verbatim — that is the whole contract (spec §8.0 rule 3).
+      expect(r.error.code).toBe(code)
+      expect(isCsErrorCode(r.error.code)).toBe(true)
+      expect(r.error.message).toContain(`vi says ${code}`)
+      expect(r.error.details?.['http_status']).toBe(status)
+      expect(r.error.details?.['vi_code']).toBe(code)
+    },
+  )
 
   /**
    * EC-KEY-1's UI hinges on this one. A user cleared their browser, a new device key was enrolled, the old
@@ -160,15 +212,21 @@ describe('error-body mapping', () => {
   it('returns VI_SIGNATURE_MISMATCH from l2/finalize as VI_SIGNATURE_MISMATCH, once, with the service copy', async () => {
     const { client, fetchImpl } = makeClient({
       status: 400,
-      body: csErrorBody('VI_SIGNATURE_MISMATCH', 'The signature does not verify against the L1 device key.', {
-        userMessage: 'The signature did not match the key in the mandate, so we stopped.',
-      }),
+      body: csErrorBody(
+        'VI_SIGNATURE_MISMATCH',
+        'The signature does not verify against the L1 device key.',
+        {
+          userMessage: 'The signature did not match the key in the mandate, so we stopped.',
+        },
+      ),
     })
     const r = await client.finalizeL2({ prepare_id: 'prep_1', signature_b64url: 'AAAA' })
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.error.code).toBe('VI_SIGNATURE_MISMATCH')
-    expect(r.error.userMessage).toBe('The signature did not match the key in the mandate, so we stopped.')
+    expect(r.error.userMessage).toBe(
+      'The signature did not match the key in the mandate, so we stopped.',
+    )
     expect(r.error.retryable).toBe(false)
     // Not retried: a second attempt signs the same wrong bytes and reaches the same verdict.
     expect(fetchImpl.calls).toHaveLength(1)
@@ -178,7 +236,11 @@ describe('error-body mapping', () => {
     const { client } = makeClient({
       status: 422,
       body: csErrorBody('VI_CONSTRAINT_VIOLATION', 'Amount exceeds maximum', {
-        details: { side: 'payment', amount_minor: 25_000, violations: ['Amount exceeds maximum: 25000 > 20000 USD'] },
+        details: {
+          side: 'payment',
+          amount_minor: 25_000,
+          violations: ['Amount exceeds maximum: 25000 > 20000 USD'],
+        },
       }),
     })
     const r = await client.createL3({
@@ -198,7 +260,7 @@ describe('error-body mapping', () => {
     expect((details['violations'] as string[])[0]).toContain('25000 > 20000 USD')
   })
 
-  it("keeps the 429 rate-limit verdict retryable, because the caller decides when to come back", async () => {
+  it('keeps the 429 rate-limit verdict retryable, because the caller decides when to come back', async () => {
     const { client, fetchImpl } = makeClient({
       status: 429,
       headers: { 'retry-after': '30' },
@@ -239,14 +301,22 @@ describe('error-body mapping', () => {
       [422, 'CS_VALIDATION'],
       [503, 'CS_INTERNAL'],
     ] as const) {
-      expect(mapViError({ status, body: '<html>502</html>', method: 'GET', path: '/v1/status' }).code).toBe(expected)
+      expect(
+        mapViError({ status, body: '<html>502</html>', method: 'GET', path: '/v1/status' }).code,
+      ).toBe(expected)
     }
   })
 
   it('names an unrecognised service code in details rather than absorbing it', () => {
     const e = mapViError({
       status: 400,
-      body: { error: { code: 'VI_SOMETHING_NEW', message: 'a code core has never heard of', retryable: false } },
+      body: {
+        error: {
+          code: 'VI_SOMETHING_NEW',
+          message: 'a code core has never heard of',
+          retryable: false,
+        },
+      },
       method: 'POST',
       path: '/v1/l3/create',
     })
@@ -255,7 +325,10 @@ describe('error-body mapping', () => {
   })
 
   it('survives a response body that is not JSON at all', async () => {
-    const { client } = makeClient({ status: 502, text: '<html><body>502 Bad Gateway</body></html>' })
+    const { client } = makeClient({
+      status: 502,
+      text: '<html><body>502 Bad Gateway</body></html>',
+    })
     const r = await client.status()
     expect(r.ok).toBe(false)
     if (r.ok) return
@@ -290,7 +363,9 @@ describe('POST /v1/verify', () => {
     expect(r.value.constraints.violations[0]).toContain('25000 > 20000 USD')
     // Spec D19: `skipped` says what the Gate still owes, and its entries are annotated — hence the helper
     // rather than `includes`, which would always be false.
-    expect(pendingNetworkEnforcement(r.value.constraints.skipped)).toContain('mandate.payment.budget')
+    expect(pendingNetworkEnforcement(r.value.constraints.skipped)).toContain(
+      'mandate.payment.budget',
+    )
     expect(r.value.disclosed).toEqual({ l1: {}, l2: {}, l3a: {}, l3b: {} })
     expect(r.value.keys.issuer_kid).toBe('issuer-key-1')
     // A 200 is a 200: not retried, one call.
@@ -307,7 +382,10 @@ describe('POST /v1/verify', () => {
   })
 
   it('returns err() only for a bad *request* or a transport failure, never for a bad chain', async () => {
-    const { client } = makeClient({ status: 400, body: csErrorBody('CS_VALIDATION', 'Request body failed validation') })
+    const { client } = makeClient({
+      status: 400,
+      body: csErrorBody('CS_VALIDATION', 'Request body failed validation'),
+    })
     const r = await client.verify({ l1: '', l2: 'a.b.c~d~' })
     expect(r.ok).toBe(false)
     if (r.ok) return
@@ -317,7 +395,10 @@ describe('POST /v1/verify', () => {
   it('publicVerify returns the same verdict plus bundle_hash, and an invalid chain is still ok()', async () => {
     const { client } = makeClient({
       status: 200,
-      body: { ...verifyResponse({ chainValid: false, errors: ['L2 signature verification failed'] }), bundle_hash: 'B'.repeat(43) },
+      body: {
+        ...verifyResponse({ chainValid: false, errors: ['L2 signature verification failed'] }),
+        bundle_hash: 'B'.repeat(43),
+      },
     })
     const r = await client.publicVerify({ bundle: { v: 'cs1', l1: 'a.b.c~', l2: 'a.b.c~d~' } })
     expect(r.ok).toBe(true)
@@ -389,7 +470,10 @@ describe('retry wiring', () => {
 
   it('never retries a 4xx, however many attempts the budget allows', async () => {
     for (const status of [400, 401, 403, 404, 409, 422, 429]) {
-      const { client, fetchImpl } = makeClient({ status, body: csErrorBody('CS_VALIDATION', 'nope') })
+      const { client, fetchImpl } = makeClient({
+        status,
+        body: csErrorBody('CS_VALIDATION', 'nope'),
+      })
       await client.mintAgentKey({ agent_id: 'agt_test' })
       expect(fetchImpl.calls, `status ${status}`).toHaveLength(1)
     }
@@ -402,7 +486,10 @@ describe('retry wiring', () => {
   })
 
   it('does not retry a 2xx whose body it does not recognise, because a 2xx will be a 2xx again', async () => {
-    const { client, fetchImpl } = makeClient({ status: 200, body: { kid: 'agt_k_1', surprise: true } })
+    const { client, fetchImpl } = makeClient({
+      status: 200,
+      body: { kid: 'agt_k_1', surprise: true },
+    })
     const r = await client.mintAgentKey({ agent_id: 'agt_test' })
     expect(fetchImpl.calls).toHaveLength(1)
     expect(r.ok).toBe(false)
@@ -413,7 +500,10 @@ describe('retry wiring', () => {
   })
 
   it('sends a signal on every request, so a hung service can always be cut loose', async () => {
-    const { client, fetchImpl } = makeClient({ status: 200, body: statusBodyFor('http://vi:8000/v1/status') })
+    const { client, fetchImpl } = makeClient({
+      status: 200,
+      body: statusBodyFor('http://vi:8000/v1/status'),
+    })
     await client.status()
     const signal = (fetchImpl.calls[0] as RecordedCall).init?.signal
     expect(signal).toBeInstanceOf(AbortSignal)
@@ -471,7 +561,14 @@ describe('request construction', () => {
   it('serialises bigint money as a JSON integer, never a float and never a string', async () => {
     const { client, fetchImpl } = makeClient({
       status: 200,
-      body: { checkout_jwt: 'a.b.c', checkout_hash: 'h', exp: 1, total_minor: 13_300, currency: 'USD', kid: 'm1' },
+      body: {
+        checkout_jwt: 'a.b.c',
+        checkout_hash: 'h',
+        exp: 1,
+        total_minor: 13_300,
+        currency: 'USD',
+        kid: 'm1',
+      },
     })
     const r = await client.createCheckoutJwt({
       merchant: MERCHANT,
@@ -486,18 +583,27 @@ describe('request construction', () => {
     expect(raw).toContain('"unit_minor":13000')
     expect(raw).toContain('"shipping_minor":500')
     expect(raw).not.toContain('13000.0')
-    expect(jsonBody(fetchImpl.calls[0] as RecordedCall)).toMatchObject({ tax_minor: 800, currency: 'USD' })
+    expect(jsonBody(fetchImpl.calls[0] as RecordedCall)).toMatchObject({
+      tax_minor: 800,
+      currency: 'USD',
+    })
   })
 
   it('sends content-type: application/json and accepts JSON', async () => {
-    const { client, fetchImpl } = makeClient({ status: 200, body: statusBodyFor('http://vi:8000/v1/status') })
+    const { client, fetchImpl } = makeClient({
+      status: 200,
+      body: statusBodyFor('http://vi:8000/v1/status'),
+    })
     await client.status()
     const call = fetchImpl.calls[0] as RecordedCall
     expect(headerOf(call, 'accept')).toBe('application/json')
     // A GET has no body, so it must not claim to have one.
     expect(headerOf(call, 'content-type')).toBeUndefined()
 
-    const { client: c2, fetchImpl: f2 } = makeClient({ status: 200, body: statusBodyFor('http://vi:8000/v1/keys/agent') })
+    const { client: c2, fetchImpl: f2 } = makeClient({
+      status: 200,
+      body: statusBodyFor('http://vi:8000/v1/keys/agent'),
+    })
     await c2.mintAgentKey({ agent_id: 'agt_test' })
     expect(headerOf(f2.calls[0] as RecordedCall, 'content-type')).toBe('application/json')
   })
@@ -531,7 +637,10 @@ describe('request construction', () => {
 
   it('refuses a prepare response whose signing_input violates the two-segment invariant', async () => {
     const body = prepareResponse()
-    const { client } = makeClient({ status: 200, body: { ...body, signing_input: `${String(body['signing_input'])}.` } })
+    const { client } = makeClient({
+      status: 200,
+      body: { ...body, signing_input: `${String(body['signing_input'])}.` },
+    })
     const r = await client.prepareL2(prepareRequest())
     expect(r.ok).toBe(false)
     if (r.ok) return
@@ -540,7 +649,10 @@ describe('request construction', () => {
   })
 
   it('URL-encodes the checkout JWT on the diagnostic route', async () => {
-    const { client, fetchImpl } = makeClient({ status: 200, body: { valid: true, reason: 'ok', checked_at: 1_790_000_000 } })
+    const { client, fetchImpl } = makeClient({
+      status: 200,
+      body: { valid: true, reason: 'ok', checked_at: 1_790_000_000 },
+    })
     const r = await client.verifyCheckoutJwt('a.b.c~d~e')
     expect(r.ok).toBe(true)
     const url = (fetchImpl.calls[0] as RecordedCall).url
@@ -559,7 +671,10 @@ describe('request construction', () => {
   })
 
   it('never sends a request body on a GET route', async () => {
-    const { client, fetchImpl } = makeClient({ status: 200, body: statusBodyFor('http://vi:8000/v1/status') })
+    const { client, fetchImpl } = makeClient({
+      status: 200,
+      body: statusBodyFor('http://vi:8000/v1/status'),
+    })
     await client.status()
     expect((fetchImpl.calls[0] as RecordedCall).body).toBeUndefined()
   })
@@ -568,13 +683,29 @@ describe('request construction', () => {
 describe('every route returns a parsed value', () => {
   it('covers all twelve methods against one responder', async () => {
     const bodies: Record<string, unknown> = {
-      '/v1/keys/agent': { kid: 'agt_k_1', public_jwk: publicJwk(), enc_private_key_b64: 'Y2lwaGVy' },
+      '/v1/keys/agent': {
+        kid: 'agt_k_1',
+        public_jwk: publicJwk(),
+        enc_private_key_b64: 'Y2lwaGVy',
+      },
       '/v1/keys/rotate': { new_kid: 'issuer-key-2', role: 'ISSUER', retired_kid: 'issuer-key-1' },
       '/v1/jwks': { keys: [{ kid: 'issuer-key-1', role: 'ISSUER', status: 'ACTIVE' }] },
       '/v1/l1/issue': l1Response(),
       '/v1/l2/prepare': prepareResponse(),
-      '/v1/l2/finalize': { l2: 'a.b.c~d~', iat: 1_790_000_000, exp: 1_790_086_400, agent_kid: 'agt_k_1' },
-      '/v1/checkout-jwt': { checkout_jwt: 'a.b.c', checkout_hash: 'h', exp: 1, total_minor: 13_300, currency: 'USD', kid: 'm1' },
+      '/v1/l2/finalize': {
+        l2: 'a.b.c~d~',
+        iat: 1_790_000_000,
+        exp: 1_790_086_400,
+        agent_kid: 'agt_k_1',
+      },
+      '/v1/checkout-jwt': {
+        checkout_jwt: 'a.b.c',
+        checkout_hash: 'h',
+        exp: 1,
+        total_minor: 13_300,
+        currency: 'USD',
+        kid: 'm1',
+      },
       '/v1/l3/create': {
         l3a: 'a.b.c',
         l3b: 'd.e.f',
@@ -601,7 +732,9 @@ describe('every route returns a parsed value', () => {
     expect((await client.jwks()).ok).toBe(true)
     expect((await client.issueL1(l1Request())).ok).toBe(true)
     expect((await client.prepareL2(prepareRequest())).ok).toBe(true)
-    expect((await client.finalizeL2({ prepare_id: 'prep_1', signature_b64url: 'AAAA' })).ok).toBe(true)
+    expect((await client.finalizeL2({ prepare_id: 'prep_1', signature_b64url: 'AAAA' })).ok).toBe(
+      true,
+    )
     expect((await client.createCheckoutJwt(checkoutRequest())).ok).toBe(true)
     expect((await client.createL3(l3Request())).ok).toBe(true)
     expect((await client.verify({ l1: 'a.b.c~', l2: 'a.b.c~d~' })).ok).toBe(true)
@@ -640,7 +773,9 @@ describe('jsonSafeBody', () => {
   it('refuses a bigint beyond the safe range rather than sending a precision-lost amount', () => {
     // `JSON.stringify` would happily emit 9007199254740993 as 9007199254740992. Refusing is the only
     // honest answer: the amount on the wire would be a different amount.
-    expect(() => jsonSafeBody({ amount_minor: BigInt(Number.MAX_SAFE_INTEGER) + 2n })).toThrow(/safe integer/)
+    expect(() => jsonSafeBody({ amount_minor: BigInt(Number.MAX_SAFE_INTEGER) + 2n })).toThrow(
+      /safe integer/,
+    )
     try {
       jsonSafeBody({ payment: { amount_minor: BigInt(Number.MAX_SAFE_INTEGER) + 2n } })
     } catch (e) {
@@ -672,7 +807,11 @@ function prepareRequest(): L2PrepareRequest {
     agent_kid: 'agt_k_1',
     merchants: [MERCHANT],
     acceptable_items: [ITEM],
-    payment_instrument: { type: 'paypal_vault', id: 'card-id-hash', description: 'PayPal ···· 1234' },
+    payment_instrument: {
+      type: 'paypal_vault',
+      id: 'card-id-hash',
+      description: 'PayPal ···· 1234',
+    },
     nonce: 'nonce-test-1',
     aud: 'https://agent.countersign.test',
     payment_constraints: [

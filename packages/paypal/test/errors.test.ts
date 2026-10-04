@@ -76,7 +76,11 @@ describe('mapPayPalError', () => {
   })
 
   it('PAYER_ACTION_REQUIRED → PP_PAYER_ACTION_REQUIRED', () => {
-    const e = mapPayPalError({ ...base, status: 422, body: { name: 'UNPROCESSABLE_ENTITY', details: [{ issue: 'PAYER_ACTION_REQUIRED' }] } })
+    const e = mapPayPalError({
+      ...base,
+      status: 422,
+      body: { name: 'UNPROCESSABLE_ENTITY', details: [{ issue: 'PAYER_ACTION_REQUIRED' }] },
+    })
     expect(e.code).toBe('PP_PAYER_ACTION_REQUIRED')
     // The Gate branches on this to tell the buyer PayPal needs an approval click.
     expect(e.userMessage).toBe('PayPal needs you to approve something before this can complete.')
@@ -93,7 +97,12 @@ describe('mapPayPalError', () => {
   })
 
   it('RATE_LIMIT_REACHED / 429 → PP_RATE_LIMITED, retryable', () => {
-    const e = mapPayPalError({ ...base, status: 429, body: { name: 'RATE_LIMIT_REACHED' }, retryAfterHeader: '2' })
+    const e = mapPayPalError({
+      ...base,
+      status: 429,
+      body: { name: 'RATE_LIMIT_REACHED' },
+      retryAfterHeader: '2',
+    })
     expect(e.code).toBe('PP_RATE_LIMITED')
     expect(e.retryable).toBe(true)
     expect(e.details?.['ambiguous']).toBe(true)
@@ -118,13 +127,17 @@ describe('mapPayPalError', () => {
   })
 
   it('404 / RESOURCE_NOT_FOUND → PP_NOT_FOUND', () => {
-    expect(mapPayPalError({ ...base, status: 404, body: { name: 'RESOURCE_NOT_FOUND' } }).code).toBe('PP_NOT_FOUND')
+    expect(
+      mapPayPalError({ ...base, status: 404, body: { name: 'RESOURCE_NOT_FOUND' } }).code,
+    ).toBe('PP_NOT_FOUND')
     // A 404 with no body at all still lands on the right code from the status.
     expect(mapPayPalError({ ...base, status: 404 }).code).toBe('PP_NOT_FOUND')
   })
 
   it('403 → CS_FORBIDDEN, not a PP code: our credentials lack the capability', () => {
-    expect(mapPayPalError({ ...base, status: 403, body: { name: 'PERMISSION_DENIED' } }).code).toBe('CS_FORBIDDEN')
+    expect(mapPayPalError({ ...base, status: 403, body: { name: 'PERMISSION_DENIED' } }).code).toBe(
+      'CS_FORBIDDEN',
+    )
   })
 
   it('DUPLICATE_INVOICE_ID → PP_DUPLICATE', () => {
@@ -172,7 +185,11 @@ describe('mapPayPalError', () => {
     const e = mapPayPalError({
       ...base,
       status: 422,
-      body: { name: 'UNPROCESSABLE_ENTITY', message: 'card 4111111111111111 declined for buyer@example.com', details: [] },
+      body: {
+        name: 'UNPROCESSABLE_ENTITY',
+        message: 'card 4111111111111111 declined for buyer@example.com',
+        details: [],
+      },
     })
     expect(e.userMessage).not.toContain('4111')
     expect(e.userMessage).not.toContain('example.com')

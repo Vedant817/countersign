@@ -49,7 +49,9 @@ const EVIDENCE_INPUT: ProvideEvidenceInput = {
     {
       evidence_type: 'PROOF_OF_FULFILLMENT',
       notes: 'Shipped 1 Oct via UPS, tracking 1Z999AA10123456784.',
-      evidence_info: { tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }] },
+      evidence_info: {
+        tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }],
+      },
     },
   ],
 }
@@ -107,7 +109,9 @@ describe('buildEvidenceForm', () => {
     expect(built.ok).toBe(true)
     if (!built.ok) return
     const parts = [...built.value.entries()]
-    expect(parts.some(([, v]) => v instanceof File && v.name === EVIDENCE_INPUT_FILENAME)).toBe(true)
+    expect(parts.some(([, v]) => v instanceof File && v.name === EVIDENCE_INPUT_FILENAME)).toBe(
+      true,
+    )
   })
 
   it('serialises the `input` part as {evidences:[…]}, the documented shape', async () => {
@@ -129,7 +133,9 @@ describe('buildEvidenceForm', () => {
   it('refuses more than the 100 evidence items PayPal caps `evidence_list` at', async () => {
     // Report §2/#4. Locally refused, so an oversized batch costs no upload at all.
     const tooMany = {
-      evidences: Array.from({ length: MAX_EVIDENCE_ITEMS + 1 }, () => ({ evidence_type: 'PROOF_OF_FULFILLMENT' })),
+      evidences: Array.from({ length: MAX_EVIDENCE_ITEMS + 1 }, () => ({
+        evidence_type: 'PROOF_OF_FULFILLMENT',
+      })),
     }
     const { client, fetchImpl } = makeClient(tokenResponse())
     const result = await client.provideEvidence(DISPUTE_ID, tooMany, [])
@@ -140,7 +146,10 @@ describe('buildEvidenceForm', () => {
   })
 
   it('defaults file field names to file1, file2, … and allows an override', async () => {
-    const built = await buildEvidenceForm(EVIDENCE_INPUT, [pdfFile(), pdfFile(onePagePdfBytes(), 'b.pdf')])
+    const built = await buildEvidenceForm(EVIDENCE_INPUT, [
+      pdfFile(),
+      pdfFile(onePagePdfBytes(), 'b.pdf'),
+    ])
     expect(built.ok).toBe(true)
     if (!built.ok) return
     expect([...built.value.keys()]).toEqual([EVIDENCE_INPUT_FIELD, 'file1', 'file2'])
@@ -224,7 +233,7 @@ describe('EC-DSP-12: local limits, before a single byte is uploaded', () => {
     expect(built.ok).toBe(true)
   })
 
-  it('refuses a total over PayPal\'s 50 MB, using the decimal reading', async () => {
+  it("refuses a total over PayPal's 50 MB, using the decimal reading", async () => {
     // Report §12/#18: the cap was 50 * 1024 * 1024 = 52 428 800, which is *looser* than PayPal's
     // "up to 50 MB per API call", so a 51 MB upload passed locally and was rejected remotely.
     expect(MAX_EVIDENCE_TOTAL_BYTES).toBe(50_000_000)
@@ -241,7 +250,7 @@ describe('EC-DSP-12: local limits, before a single byte is uploaded', () => {
     expect(built.error.message).toContain('50 MB')
   })
 
-  it('rejects 50 000 001 bytes — one byte over PayPal\'s limit — locally with CS_VALIDATION', async () => {
+  it("rejects 50 000 001 bytes — one byte over PayPal's limit — locally with CS_VALIDATION", async () => {
     // The precise regression: 50 000 001 bytes used to pass local validation (it is below the old
     // 52 428 800 ceiling) and only fail at PayPal. Five files of 9 999 999 plus one of 6 bytes is
     // exactly 50 000 001.
@@ -286,7 +295,11 @@ describe('EC-DSP-12: local limits, before a single byte is uploaded', () => {
 
   it('refuses a content type PayPal does not accept for evidence', async () => {
     const built = await buildEvidenceForm(EVIDENCE_INPUT, [
-      { fileName: 'notes.docx', contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', content: 'x' },
+      {
+        fileName: 'notes.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        content: 'x',
+      },
     ])
     expect(built.ok).toBe(false)
     if (built.ok) return
@@ -367,7 +380,9 @@ describe('the boundary is never hand-written', () => {
   it('does hand-write Content-Type for JSON bodies, where there is no boundary to compute', async () => {
     const { client, fetchImpl } = makeClient(disputeOrLinks)
     await client.sendMessage(DISPUTE_ID, 'hello')
-    expect(headerOf(callTo(fetchImpl.calls, '/send-message'), 'content-type')).toBe('application/json')
+    expect(headerOf(callTo(fetchImpl.calls, '/send-message'), 'content-type')).toBe(
+      'application/json',
+    )
   })
 })
 
@@ -375,7 +390,9 @@ describe('provideEvidence, appeal and provideSupportingInfo share the encoder', 
   it('each builds the same input part and never a boundary', async () => {
     const { client, fetchImpl } = makeClient(disputeOrLinks)
 
-    await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()], { requestId: 'cs:dsp_1:file:1' })
+    await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()], {
+      requestId: 'cs:dsp_1:file:1',
+    })
     await client.appeal(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()], { requestId: 'cs:dsp_1:appeal:1' })
     await client.provideSupportingInfo(DISPUTE_ID, 'Carrier scan attached.', [pdfFile()])
 
@@ -391,8 +408,12 @@ describe('provideEvidence, appeal and provideSupportingInfo share the encoder', 
 
   it('carries the §8.15 filing key so a retried filing is deduplicated', async () => {
     const { client, fetchImpl } = makeClient(disputeOrLinks)
-    await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()], { requestId: 'cs:dsp_1:file:1' })
-    expect(headerOf(callTo(fetchImpl.calls, '/provide-evidence'), 'paypal-request-id')).toBe('cs:dsp_1:file:1')
+    await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()], {
+      requestId: 'cs:dsp_1:file:1',
+    })
+    expect(headerOf(callTo(fetchImpl.calls, '/provide-evidence'), 'paypal-request-id')).toBe(
+      'cs:dsp_1:file:1',
+    )
   })
 
   it('a rejected oversize file never reaches the network', async () => {

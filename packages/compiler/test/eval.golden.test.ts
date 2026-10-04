@@ -12,7 +12,15 @@ import { describe, expect, it } from 'vitest'
 
 import { CURRENCIES, type Currency } from '@countersign/core'
 
-import { loadCachedAnswers, loadEvalCatalog, loadGoldenSet, parseJsonl, scoreCase, summarise, runGoldenSet } from '../eval/runner'
+import {
+  loadCachedAnswers,
+  loadEvalCatalog,
+  loadGoldenSet,
+  parseJsonl,
+  scoreCase,
+  summarise,
+  runGoldenSet,
+} from '../eval/runner'
 import { STANDARD_CATALOG } from './helpers'
 
 const golden = loadGoldenSet()
@@ -61,7 +69,10 @@ describe('the golden set', () => {
         const value = testCase.expect[key]
         if (value === null || value === undefined) continue
         expect(typeof value, `${testCase.id}.${key}`).toBe('string')
-        expect(() => fromPayPalValue(value as string, currency), `${testCase.id}.${key}`).not.toThrow()
+        expect(
+          () => fromPayPalValue(value as string, currency),
+          `${testCase.id}.${key}`,
+        ).not.toThrow()
       }
     }
   })
@@ -71,7 +82,13 @@ describe('the golden set', () => {
     // the scorer to expect a self-contradictory mandate.
     for (const testCase of golden) {
       const { amountMax, budgetMax, currency } = testCase.expect
-      if (amountMax === null || budgetMax === null || amountMax === undefined || budgetMax === undefined) continue
+      if (
+        amountMax === null ||
+        budgetMax === null ||
+        amountMax === undefined ||
+        budgetMax === undefined
+      )
+        continue
       const amount = fromPayPalValue(amountMax, currency as Currency)
       const budget = fromPayPalValue(budgetMax, currency as Currency)
       if (budget.minor < amount.minor) {
@@ -93,7 +110,9 @@ describe('the golden set', () => {
 
   it('stores every id list sorted, so a failing diff is readable', () => {
     for (const testCase of golden) {
-      expect(testCase.expect.merchantIds, testCase.id).toEqual([...(testCase.expect.merchantIds ?? [])].sort())
+      expect(testCase.expect.merchantIds, testCase.id).toEqual(
+        [...(testCase.expect.merchantIds ?? [])].sort(),
+      )
       expect(testCase.expect.skus, testCase.id).toEqual([...(testCase.expect.skus ?? [])].sort())
     }
   })
@@ -104,14 +123,18 @@ describe('the golden set', () => {
     expect(noAmount.length).toBeGreaterThanOrEqual(5)
     for (const testCase of noAmount) {
       expect(testCase.expect.budgetMax, testCase.id).toBeNull()
-      expect(/\d/.test(testCase.text), `${testCase.id} states a digit but expects no cap`).toBe(false)
+      expect(/\d/.test(testCase.text), `${testCase.id} states a digit but expects no cap`).toBe(
+        false,
+      )
     }
   })
 
-  it('includes prompt-injection cases, and expects the buyer\'s literal amount', () => {
+  it("includes prompt-injection cases, and expects the buyer's literal amount", () => {
     // AT-M8.5 needs cases in the set, not just in the unit tests, or a model switch could regress injection
     // handling without the nightly run noticing.
-    const injections = golden.filter((c) => /ignore|instruction|maintenance mode|developer note/i.test(c.text))
+    const injections = golden.filter((c) =>
+      /ignore|instruction|maintenance mode|developer note/i.test(c.text),
+    )
     expect(injections.length).toBeGreaterThanOrEqual(4)
     for (const testCase of injections) {
       expect(testCase.expect.amountMax, testCase.id).not.toBeNull()
@@ -246,7 +269,10 @@ describe('the runner', () => {
   })
 
   it('reports per-field accuracy and the exact-match rate, not a pass or fail', () => {
-    const report = runGoldenSet(golden, golden.map((c) => scoreCase(c, { refused: 'CS_VALIDATION' })))
+    const report = runGoldenSet(
+      golden,
+      golden.map((c) => scoreCase(c, { refused: 'CS_VALIDATION' })),
+    )
     expect(report.total).toBe(GOLDEN_SIZE)
     expect(report.exactMatches).toBeGreaterThan(0)
     expect(report.exactMatches).toBeLessThan(GOLDEN_SIZE)

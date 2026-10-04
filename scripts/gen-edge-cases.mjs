@@ -20,20 +20,44 @@ const OUT = join(ROOT, 'docs/edge-cases.json')
 
 /** §12 subsections -> owning work package(s). Mirrors spec §15 lanes and §12 headings. */
 const SECTION_WP = {
-  '12.1': { wp: 'WP-11', module: 'M11 orders', title: 'Captures, refunds and partial refunds' },
-  '12.2': { wp: 'WP-06, WP-10, WP-11', module: 'M6/M10/M11', title: 'Duplicates, retries and idempotency' },
-  '12.3': { wp: 'WP-12', module: 'M12 webhooks', title: 'Webhooks: loss, duplication, out-of-order' },
-  '12.4': { wp: 'WP-10, WP-11', module: 'M10/M11', title: 'Mandates: expiry, revocation, suspension' },
-  '12.5': { wp: 'WP-03, WP-10', module: 'M3/M10', title: 'Time and clock skew' },
-  '12.6': { wp: 'WP-01, WP-09, WP-11', module: 'M1/M9/M11', title: 'Currency, FX and rounding' },
-  '12.7': { wp: 'WP-09, WP-10, WP-11', module: 'M9/M10/M11', title: 'Price, stock and fulfilment' },
-  '12.8': { wp: 'WP-15', module: 'M15 defender', title: 'Buyer remorse vs. true fraud vs. friendly fraud' },
-  '12.9': { wp: 'WP-05, WP-10, WP-13', module: 'M5/M10/M13', title: 'Agents, keys and people' },
-  '12.10': { wp: 'WP-15, WP-18', module: 'M15/M18', title: 'Merchant-side abuse and evidence gaming' },
-  '12.11': { wp: 'WP-15, WP-16', module: 'M15/M16', title: 'Disputes: stages, deadlines, chargeback after refund' },
-  '12.12': { wp: 'WP-06', module: 'M6 paypal', title: 'PayPal outages, rate limits, sandbox vs. live' },
-  '12.13': { wp: 'WP-19', module: 'M19 privacy', title: 'Privacy and data retention' },
-  '12.14': { wp: 'WP-08, WP-13, WP-15', module: 'M8/M13/M15', title: 'LLM failures' },
+  12.1: { wp: 'WP-11', module: 'M11 orders', title: 'Captures, refunds and partial refunds' },
+  12.2: {
+    wp: 'WP-06, WP-10, WP-11',
+    module: 'M6/M10/M11',
+    title: 'Duplicates, retries and idempotency',
+  },
+  12.3: { wp: 'WP-12', module: 'M12 webhooks', title: 'Webhooks: loss, duplication, out-of-order' },
+  12.4: {
+    wp: 'WP-10, WP-11',
+    module: 'M10/M11',
+    title: 'Mandates: expiry, revocation, suspension',
+  },
+  12.5: { wp: 'WP-03, WP-10', module: 'M3/M10', title: 'Time and clock skew' },
+  12.6: { wp: 'WP-01, WP-09, WP-11', module: 'M1/M9/M11', title: 'Currency, FX and rounding' },
+  12.7: { wp: 'WP-09, WP-10, WP-11', module: 'M9/M10/M11', title: 'Price, stock and fulfilment' },
+  12.8: {
+    wp: 'WP-15',
+    module: 'M15 defender',
+    title: 'Buyer remorse vs. true fraud vs. friendly fraud',
+  },
+  12.9: { wp: 'WP-05, WP-10, WP-13', module: 'M5/M10/M13', title: 'Agents, keys and people' },
+  '12.10': {
+    wp: 'WP-15, WP-18',
+    module: 'M15/M18',
+    title: 'Merchant-side abuse and evidence gaming',
+  },
+  12.11: {
+    wp: 'WP-15, WP-16',
+    module: 'M15/M16',
+    title: 'Disputes: stages, deadlines, chargeback after refund',
+  },
+  12.12: {
+    wp: 'WP-06',
+    module: 'M6 paypal',
+    title: 'PayPal outages, rate limits, sandbox vs. live',
+  },
+  12.13: { wp: 'WP-19', module: 'M19 privacy', title: 'Privacy and data retention' },
+  12.14: { wp: 'WP-08, WP-13, WP-15', module: 'M8/M13/M15', title: 'LLM failures' },
 }
 
 /** Split a spec table row into trimmed cells, stripping markdown emphasis and inline code. */
@@ -199,10 +223,14 @@ function main() {
       console.error('docs/edge-cases.json is stale relative to the spec:')
       for (const d of drift.slice(0, 20)) console.error(`  - ${d}`)
       if (drift.length > 20) console.error(`  … and ${drift.length - 20} more`)
-      console.error('\nRun: node scripts/gen-edge-cases.mjs   (status/notes/blockedReason are preserved)')
+      console.error(
+        '\nRun: node scripts/gen-edge-cases.mjs   (status/notes/blockedReason are preserved)',
+      )
       process.exit(1)
     }
-    console.log(`docs/edge-cases.json matches spec §12 (${rows.length} cases). Hand-maintained fields intact.`)
+    console.log(
+      `docs/edge-cases.json matches spec §12 (${rows.length} cases). Hand-maintained fields intact.`,
+    )
     return
   }
 

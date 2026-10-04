@@ -43,7 +43,10 @@ type GenerateResult = Awaited<ReturnType<V4Model['doGenerate']>>
  * An id with no answer is an **error**, not a skip: a missing recording would otherwise show up as an
  * unexplained drop in the denominator and the score would quietly improve.
  */
-export function replayModel(answers: ReadonlyMap<string, string>, order: readonly string[]): LanguageModel {
+export function replayModel(
+  answers: ReadonlyMap<string, string>,
+  order: readonly string[],
+): LanguageModel {
   const remaining = new Map(answers)
   let cursor = 0
   return {
@@ -132,7 +135,10 @@ export async function runEvalCase(
   model: LanguageModel,
   catalog: CatalogProjection,
   args: RunCaseArgs,
-): Promise<{ ok: true; value: CompiledMandate; scored: ScoredFields } | { ok: false; code: string; message: string }> {
+): Promise<
+  | { ok: true; value: CompiledMandate; scored: ScoredFields }
+  | { ok: false; code: string; message: string }
+> {
   const result = await compile(
     {
       userId: EVAL_USER,

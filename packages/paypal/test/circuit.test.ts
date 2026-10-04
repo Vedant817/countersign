@@ -56,7 +56,8 @@ describe('CircuitBreaker (EC-PP-1)', () => {
   it('does not reset the counter on repeated fast-fails', () => {
     const { breaker } = makeBreaker()
     for (let i = 0; i < 5; i++) breaker.recordUnavailable('api-m.sandbox.paypal.com')
-    for (let i = 0; i < 10; i++) expect(breaker.preflight('api-m.sandbox.paypal.com').ok).toBe(false)
+    for (let i = 0; i < 10; i++)
+      expect(breaker.preflight('api-m.sandbox.paypal.com').ok).toBe(false)
   })
 
   it('resets the counter on any reachable outcome — consecutive, not cumulative', () => {

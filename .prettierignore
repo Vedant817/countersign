@@ -1,3 +1,6 @@
+# Prettier is not applied to these paths. Each exclusion states *why*, because a formatter exclusion
+# with no reason is indistinguishable from sloppiness and gets removed by the next person who tidies up.
+
 node_modules
 .next
 dist
@@ -5,5 +8,18 @@ build
 coverage
 pnpm-lock.yaml
 uv.lock
-docs/spec/countersign-blueprint.pdf
+
+# Generated. Regenerate with `pnpm test:ec`, never hand-edit.
 docs/EDGE_CASES.md
+
+# The specification itself.
+#
+# It is the authoritative source of truth: it is quoted by section number in hundreds of comments, its
+# line numbers are recorded in `docs/edge-cases.json` (`specLine`), and it is the input to
+# `scripts/gen-edge-cases.mjs`. Reformatting it would produce a ~1,700-line diff, move every recorded
+# line number, and risk mangling a table that the whole project parses. It is also not our prose.
+docs/spec/countersign-blueprint.md
+
+# Markdown tables in the decision log are hand-aligned for readability; Prettier reflows them and the
+# result is harder to diff-review, which is the opposite of what a decision log is for.
+docs/DECISIONS.md

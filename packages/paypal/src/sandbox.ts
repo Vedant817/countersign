@@ -125,9 +125,13 @@ export function parseUnsignedAuthAssertion(token: string): Result<UnsignedAuthAs
   const parts = token.split('.')
   if (parts.length !== 3 || parts[2] !== '') {
     return err(
-      csError('CS_VALIDATION', 'A PayPal-Auth-Assertion must be "header.payload." with an empty signature', {
-        segments: parts.length,
-      }),
+      csError(
+        'CS_VALIDATION',
+        'A PayPal-Auth-Assertion must be "header.payload." with an empty signature',
+        {
+          segments: parts.length,
+        },
+      ),
     )
   }
   try {
@@ -150,7 +154,9 @@ export function parseUnsignedAuthAssertion(token: string): Result<UnsignedAuthAs
       },
     }
   } catch {
-    return err(csError('CS_VALIDATION', 'A PayPal-Auth-Assertion header/payload must be base64url JSON'))
+    return err(
+      csError('CS_VALIDATION', 'A PayPal-Auth-Assertion header/payload must be base64url JSON'),
+    )
   }
 }
 
@@ -187,7 +193,10 @@ export class PayPalSandboxApi {
       )
     }
     if (this.env.PAYPAL_ENV !== undefined) {
-      assertSandbox({ PAYPAL_ENV: this.env.PAYPAL_ENV, PAYPAL_API_BASE: this.env.PAYPAL_API_BASE ?? '' })
+      assertSandbox({
+        PAYPAL_ENV: this.env.PAYPAL_ENV,
+        PAYPAL_API_BASE: this.env.PAYPAL_API_BASE ?? '',
+      })
     }
   }
 
@@ -225,7 +234,10 @@ export class PayPalSandboxApi {
    * @param buyerEmail `PAYPAL_BUYER_EMAIL` — the personal account that will own the dispute.
    * @param body the `input` payload: the disputed transaction, the reason, optionally the amount.
    */
-  async createBuyerDispute(buyerEmail: string, body: SimDisputeReq): Promise<Result<Links, CsError>> {
+  async createBuyerDispute(
+    buyerEmail: string,
+    body: SimDisputeReq,
+  ): Promise<Result<Links, CsError>> {
     const assertion = this.assertionOrError(buyerEmail)
     if (!assertion.ok) return assertion
     const parsed = simDisputeReqSchema.safeParse(body)
@@ -236,7 +248,9 @@ export class PayPalSandboxApi {
           'createBuyerDispute needs {disputed_transactions:[{buyer_transaction_id}], reason} — that is the ' +
             'documented `input` part, not {transaction_id, dispute_reason}',
           {
-            issues: parsed.error.issues.slice(0, 8).map((i) => ({ path: i.path.join('.'), message: i.message })),
+            issues: parsed.error.issues
+              .slice(0, 8)
+              .map((i) => ({ path: i.path.join('.'), message: i.message })),
           },
         ),
       )
@@ -295,11 +309,17 @@ export class PayPalSandboxApi {
     receiveDate?: string
     responseDate?: string
   }): Promise<Result<ProcessChargebackRes, CsError>> {
-    const bad = requireText(input?.sellerTransactionId, 'processChargeback needs the seller transaction id')
+    const bad = requireText(
+      input?.sellerTransactionId,
+      'processChargeback needs the seller transaction id',
+    )
     if (bad) return err(bad)
     const badMerchant = requireText(input?.merchantId, 'processChargeback needs the merchant id')
     if (badMerchant) return err(badMerchant)
-    const badReason = requireText(input?.reason, 'processChargeback needs a reason, e.g. UNAUTHORISED')
+    const badReason = requireText(
+      input?.reason,
+      'processChargeback needs a reason, e.g. UNAUTHORISED',
+    )
     if (badReason) return err(badReason)
     if (input.amount === undefined) {
       return err(csError('CS_VALIDATION', 'processChargeback needs the captured amount'))
@@ -336,9 +356,15 @@ export class PayPalSandboxApi {
     const parsed = processChargebackReqSchema.safeParse(body)
     if (!parsed.success) {
       return err(
-        csError('CS_VALIDATION', 'processChargeback built a body that does not match PayPal\'s schema', {
-          issues: parsed.error.issues.slice(0, 8).map((i) => ({ path: i.path.join('.'), message: i.message })),
-        }),
+        csError(
+          'CS_VALIDATION',
+          "processChargeback built a body that does not match PayPal's schema",
+          {
+            issues: parsed.error.issues
+              .slice(0, 8)
+              .map((i) => ({ path: i.path.join('.'), message: i.message })),
+          },
+        ),
       )
     }
     return this.transport<ProcessChargebackRes>({
@@ -351,12 +377,18 @@ export class PayPalSandboxApi {
   }
 
   /** `POST /v1/customer/disputes/{id}/require-evidence` with `{action}` [B16]. */
-  async requireEvidence(id: string, action: RequireEvidenceAction): Promise<Result<Links, CsError>> {
+  async requireEvidence(
+    id: string,
+    action: RequireEvidenceAction,
+  ): Promise<Result<Links, CsError>> {
     const bad = requireId(id, 'requireEvidence')
     if (bad) return err(bad)
     if (action !== 'BUYER_EVIDENCE' && action !== 'SELLER_EVIDENCE') {
       return err(
-        csError('CS_VALIDATION', `requireEvidence action must be BUYER_EVIDENCE or SELLER_EVIDENCE, got "${action}"`),
+        csError(
+          'CS_VALIDATION',
+          `requireEvidence action must be BUYER_EVIDENCE or SELLER_EVIDENCE, got "${action}"`,
+        ),
       )
     }
     return this.transport<Links>({
@@ -374,7 +406,10 @@ export class PayPalSandboxApi {
     if (bad) return err(bad)
     if (outcome !== 'BUYER_FAVOR' && outcome !== 'SELLER_FAVOR') {
       return err(
-        csError('CS_VALIDATION', `adjudicate outcome must be BUYER_FAVOR or SELLER_FAVOR, got "${outcome}"`),
+        csError(
+          'CS_VALIDATION',
+          `adjudicate outcome must be BUYER_FAVOR or SELLER_FAVOR, got "${outcome}"`,
+        ),
       )
     }
     return this.transport<Links>({
@@ -414,7 +449,9 @@ export class PayPalSandboxApi {
           'CS_VALIDATION',
           'changeReason needs {reason, note?, item_info?} — the documented `input` part (report §30)',
           {
-            issues: parsed.error.issues.slice(0, 8).map((i) => ({ path: i.path.join('.'), message: i.message })),
+            issues: parsed.error.issues
+              .slice(0, 8)
+              .map((i) => ({ path: i.path.join('.'), message: i.message })),
           },
         ),
       )
@@ -504,7 +541,8 @@ export class PayPalSandboxApi {
 }
 
 function requireId(id: string, method: string): CsError | null {
-  if (typeof id !== 'string' || id.trim() === '') return csError('CS_VALIDATION', `${method} needs a dispute id`)
+  if (typeof id !== 'string' || id.trim() === '')
+    return csError('CS_VALIDATION', `${method} needs a dispute id`)
   return null
 }
 

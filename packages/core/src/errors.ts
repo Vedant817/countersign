@@ -118,7 +118,8 @@ const USER_MESSAGES: Partial<Record<CsErrorCode, string>> = {
   CS_FORBIDDEN: 'You do not have access to that.',
   CS_CURRENCY_MISMATCH:
     'Your limit and this purchase are in different currencies, so we did not convert them. Create a mandate in the store currency.',
-  CS_ROUNDING: 'That amount has more decimal places than its currency allows, so we refused to round it.',
+  CS_ROUNDING:
+    'That amount has more decimal places than its currency allows, so we refused to round it.',
   CS_RATE_LIMITED: 'Too many requests just now. Please wait a moment and try again.',
   CS_INTERNAL:
     'Something went wrong on our side. Nothing was charged. We have the details and will fix it.',
@@ -141,7 +142,8 @@ const USER_MESSAGES: Partial<Record<CsErrorCode, string>> = {
   PP_UNPROCESSABLE: 'PayPal rejected the request details.',
   PP_DUPLICATE: 'That request was already made.',
   PP_NOT_FOUND: 'PayPal could not find that record.',
-  PP_INSTRUMENT_DECLINED: 'PayPal declined the payment. Nothing was charged. Update PayPal and retry.',
+  PP_INSTRUMENT_DECLINED:
+    'PayPal declined the payment. Nothing was charged. Update PayPal and retry.',
   PP_PAYER_ACTION_REQUIRED: 'PayPal needs you to approve something before this can complete.',
   PP_AUTH_EXPIRED: 'The authorisation expired before it was captured, so it was released.',
   WH_SIGNATURE_INVALID: 'A webhook failed its signature check and was rejected.',
@@ -228,7 +230,9 @@ export interface CsErrorBody {
 const NEVER_SERIALISE =
   /(cause|stack|secret|password|token|authorization|cookie|credential|private|key|kid|client_id|session_id|clientid)/i
 
-function safeDetails(details: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+function safeDetails(
+  details: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
   if (!details) return undefined
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(details)) {
@@ -260,7 +264,12 @@ export function toBody(e: CsError): CsErrorBody {
  */
 export function toCsError(cause: unknown, fallbackCode: CsErrorCode = 'CS_INTERNAL'): CsError {
   if (typeof cause === 'object' && cause !== null && 'code' in cause && 'message' in cause) {
-    const maybe = cause as { code: unknown; message: unknown; userMessage?: unknown; details?: unknown }
+    const maybe = cause as {
+      code: unknown
+      message: unknown
+      userMessage?: unknown
+      details?: unknown
+    }
     if (isCsErrorCode(maybe.code) && typeof maybe.message === 'string') {
       return csError(
         maybe.code,
@@ -276,7 +285,12 @@ export function toCsError(cause: unknown, fallbackCode: CsErrorCode = 'CS_INTERN
   if (cause instanceof Error) {
     return csError(fallbackCode, cause.message, undefined, { cause })
   }
-  return csError(fallbackCode, typeof cause === 'string' ? cause : JSON.stringify(cause), undefined, { cause })
+  return csError(
+    fallbackCode,
+    typeof cause === 'string' ? cause : JSON.stringify(cause),
+    undefined,
+    { cause },
+  )
 }
 
 /**
@@ -286,7 +300,10 @@ export function toCsError(cause: unknown, fallbackCode: CsErrorCode = 'CS_INTERN
  * is an unhandled fault, and reporting it to a user as "check your input" sends them off to fix
  * something that was never wrong (DECISIONS D-007).
  */
-export async function attempt<T>(fn: () => Promise<T>, fallbackCode?: CsErrorCode): Promise<Result<T, CsError>> {
+export async function attempt<T>(
+  fn: () => Promise<T>,
+  fallbackCode?: CsErrorCode,
+): Promise<Result<T, CsError>> {
   try {
     return ok(await fn())
   } catch (e) {

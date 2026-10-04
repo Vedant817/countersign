@@ -70,13 +70,15 @@ export function scrubPii(text: string): string {
   return out
 }
 
-export function createLogger(opts: {
-  level?: LogLevel
-  base?: LoggerFields
-  sink?: LogSink
-  /** Concrete secret values to scrub out of free text (env values). */
-  secrets?: (string | undefined)[]
-} = {}): Logger {
+export function createLogger(
+  opts: {
+    level?: LogLevel
+    base?: LoggerFields
+    sink?: LogSink
+    /** Concrete secret values to scrub out of free text (env values). */
+    secrets?: (string | undefined)[]
+  } = {},
+): Logger {
   const level = opts.level ?? resolveLevel()
   const base = opts.base ?? {}
   const secrets = opts.secrets ?? SECRET_ENV_KEYS.map((k) => process.env[k])

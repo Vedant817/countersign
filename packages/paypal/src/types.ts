@@ -206,7 +206,9 @@ export const vaultPaymentSourcePaypalSchema: z.ZodType<VaultPaymentSourcePaypal>
   account_id: z.string().optional(),
   account_status: z.string().optional(),
   email_address: z.string().optional(),
-  name: z.looseObject({ given_name: z.string().optional(), surname: z.string().optional() }).optional(),
+  name: z
+    .looseObject({ given_name: z.string().optional(), surname: z.string().optional() })
+    .optional(),
   address: z.looseObject({}).optional(),
   /** `MERCHANT` | `PLATFORM` (`SPEC-V` `paypal_wallet_request.usage_type`). Spec §10.2's `MERCHANT`
    *  claim is confirmed by the report. */
@@ -436,7 +438,12 @@ export type PurchaseUnit = {
   description?: string
   custom_id?: string
   invoice_id?: string
-  items?: { name?: string; quantity?: string; unit_amount?: PPMoneyResponse; [key: string]: unknown }[]
+  items?: {
+    name?: string
+    quantity?: string
+    unit_amount?: PPMoneyResponse
+    [key: string]: unknown
+  }[]
   /** Where an AUTHORIZE or CAPTURE order reports the ids it created. */
   payments?: OrderPayments
   [key: string]: unknown
@@ -578,7 +585,11 @@ export type Capture = {
   invoice_id?: string
   custom_id?: string
   /** EC-FX-2: what the buyer paid in their own currency. */
-  seller_receivable_breakdown?: { gross_amount?: PPMoneyResponse; net_amount?: PPMoneyResponse; [key: string]: unknown }
+  seller_receivable_breakdown?: {
+    gross_amount?: PPMoneyResponse
+    net_amount?: PPMoneyResponse
+    [key: string]: unknown
+  }
   [key: string]: unknown
 }
 
@@ -780,13 +791,24 @@ export const disputeEvidenceSchema = z.looseObject({
   evidence_info: z
     .looseObject({
       tracking_info: z
-        .array(z.looseObject({ carrier_name: z.string().optional(), tracking_number: z.string().optional() }))
+        .array(
+          z.looseObject({
+            carrier_name: z.string().optional(),
+            tracking_number: z.string().optional(),
+          }),
+        )
         .optional(),
       refund_ids: z.array(z.string()).optional(),
     })
     .optional(),
   documents: z
-    .array(z.looseObject({ name: z.string().optional(), size: z.number().optional(), type: z.string().optional() }))
+    .array(
+      z.looseObject({
+        name: z.string().optional(),
+        size: z.number().optional(),
+        type: z.string().optional(),
+      }),
+    )
     .optional(),
   source: z.string().optional(),
   dispute_life_cycle_stage: z.string().optional(),
@@ -822,7 +844,9 @@ export type DisputeTransactionInfo = {
 
 /** `allowed_response_options` — the discovery endpoint for `accept-claim`/`make-offer`/`acknowledge`. */
 export const allowedResponseOptionsSchema = z.looseObject({
-  acknowledge_return_item: z.looseObject({ acknowledgement_types: z.array(z.string()).optional() }).optional(),
+  acknowledge_return_item: z
+    .looseObject({ acknowledgement_types: z.array(z.string()).optional() })
+    .optional(),
   accept_claim: z.looseObject({ accept_claim_types: z.array(z.string()).optional() }).optional(),
   make_offer: z.looseObject({ offer_types: z.array(z.string()).optional() }).optional(),
 })
@@ -866,7 +890,9 @@ export const disputeSchema = z.looseObject({
   adjudication_outcome: z.string().optional(),
   escalation_deadline: z.string().optional(),
   return_eligibility_deadline: z.string().optional(),
-  require_evidence: z.looseObject({ action: z.string().optional(), due_date: z.string().optional() }).optional(),
+  require_evidence: z
+    .looseObject({ action: z.string().optional(), due_date: z.string().optional() })
+    .optional(),
   items: z.array(z.looseObject({})).optional(),
   offers: z.array(disputeOfferSchema).optional(),
   /**
@@ -907,7 +933,12 @@ export type Dispute = {
   /** Evidence already on file, as an array. */
   evidences?: DisputeEvidence[]
   /** §8.16: the strategist proposes accepting or denying an offer from here. */
-  offers?: { offer_type?: string; terms?: string; offer_amount?: PPMoneyResponse; [key: string]: unknown }[]
+  offers?: {
+    offer_type?: string
+    terms?: string
+    offer_amount?: PPMoneyResponse
+    [key: string]: unknown
+  }[]
   /** `posted_by` ∈ `BUYER | SELLER | ARBITER` — there is no `sender` field. */
   messages?: { content?: string; posted_by?: string; [key: string]: unknown }[]
   allowed_response_options?: {
@@ -1056,14 +1087,25 @@ export const provideEvidenceInputSchema = z.looseObject({
         evidence_info: z
           .looseObject({
             tracking_info: z
-              .array(z.looseObject({ carrier_name: z.string().optional(), tracking_number: z.string().optional() }))
+              .array(
+                z.looseObject({
+                  carrier_name: z.string().optional(),
+                  tracking_number: z.string().optional(),
+                }),
+              )
               .optional(),
             refund_ids: z.array(z.string()).optional(),
           })
           .optional(),
         notes: z.string().min(1).max(2000).optional(),
         documents: z
-          .array(z.looseObject({ name: z.string().optional(), size: z.number().optional(), type: z.string().optional() }))
+          .array(
+            z.looseObject({
+              name: z.string().optional(),
+              size: z.number().optional(),
+              type: z.string().optional(),
+            }),
+          )
           .optional(),
       }),
     )
@@ -1207,7 +1249,9 @@ export const simDisputeReqSchema = z.looseObject({
     .looseObject({
       merchant_contacted: z.boolean().optional(),
       merchant_contacted_outcome: z.string().optional(),
-      merchandise_dispute_properties: z.looseObject({ issue_type: z.string().optional() }).optional(),
+      merchandise_dispute_properties: z
+        .looseObject({ issue_type: z.string().optional() })
+        .optional(),
     })
     .optional(),
 })
@@ -1352,7 +1396,9 @@ export const changeReasonReqSchema = z.looseObject({
         item_quantity: z.string().optional(),
         reason: z.string().optional(),
         item_type: z.string().optional(),
-        product_details: z.looseObject({ sub_reason: z.string().optional(), category: z.string().optional() }).optional(),
+        product_details: z
+          .looseObject({ sub_reason: z.string().optional(), category: z.string().optional() })
+          .optional(),
         expected_refund: ppAmountSchema.optional(),
       }),
     )
@@ -1502,7 +1548,14 @@ export const PAYMENT_STATUSES = [
 
 /** `SPEC-P` `authorization_status` — `CREATED`, `CAPTURED`, `DENIED`, `PARTIALLY_CAPTURED`,
  *  `VOIDED`, `PENDING` (report §16). */
-export const AUTHORIZATION_STATUSES = ['CREATED', 'CAPTURED', 'DENIED', 'PARTIALLY_CAPTURED', 'VOIDED', 'PENDING'] as const
+export const AUTHORIZATION_STATUSES = [
+  'CREATED',
+  'CAPTURED',
+  'DENIED',
+  'PARTIALLY_CAPTURED',
+  'VOIDED',
+  'PENDING',
+] as const
 
 /** Capture statuses we act on. `COMPLETED` / `PARTIALLY_REFUNDED` / `REFUNDED` are the money-moving
  *  ones; `REVERSED` / `DECLINED` / `FAILED` are terminal. */

@@ -143,9 +143,9 @@ export function mergeAmbiguities(
     order.push(a.field)
   }
   const modelByField = new Map(fromModel.map((a) => [a.field, a]))
-  return order.map((field) => requiredByField.get(field) ?? modelByField.get(field)).filter(
-    (a): a is Ambiguity => a !== undefined,
-  )
+  return order
+    .map((field) => requiredByField.get(field) ?? modelByField.get(field))
+    .filter((a): a is Ambiguity => a !== undefined)
 }
 
 /**

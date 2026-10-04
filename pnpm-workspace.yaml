@@ -1,7 +1,7 @@
 # pnpm workspace (spec §5, D1)
 packages:
-  - "apps/*"
-  - "packages/*"
+  - 'apps/*'
+  - 'packages/*'
 
 # Supply-chain policy: pnpm 12 defaults to `minimumReleaseAge: 1440` (one day) so that a
 # compromised release cannot be picked up by an automated install minutes after it is published.

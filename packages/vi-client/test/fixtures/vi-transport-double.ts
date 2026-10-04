@@ -94,7 +94,8 @@ export function fakeFetch(responder: Stub): FetchDouble {
   const single = !queue && typeof responder !== 'function' ? (responder as FakeResponseSpec) : null
 
   const impl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const url =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     const record: RecordedCall = {
       index: calls.length,
       url,
@@ -107,7 +108,7 @@ export function fakeFetch(responder: Stub): FetchDouble {
 
     const spec = queue
       ? (queue[Math.min(calls.length - 1, queue.length - 1)] as FakeResponseSpec)
-      : single ?? (await (responder as Responder)(record))
+      : (single ?? (await (responder as Responder)(record)))
 
     if (spec.hangUntilAbort) {
       return new Promise<Response>((_resolve, reject) => {
@@ -118,7 +119,11 @@ export function fakeFetch(responder: Stub): FetchDouble {
         }
         signal.addEventListener('abort', () => {
           // Exactly what `AbortSignal.timeout` rejects with, so the client classifies it as a timeout.
-          reject(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }))
+          reject(
+            Object.assign(new Error('The operation was aborted due to timeout'), {
+              name: 'TimeoutError',
+            }),
+          )
         })
       })
     }
@@ -158,7 +163,9 @@ export function publicJwk(
  * library's own compact JWS, joined with a dot. Building it here from `header` and `payload` is safe
  * *for a fixture* — the client must never rebuild it, and `test/types.test.ts` asserts it does not.
  */
-export function prepareResponse(overrides: { prepareId?: string; expiresAt?: number } = {}): Record<string, unknown> {
+export function prepareResponse(
+  overrides: { prepareId?: string; expiresAt?: number } = {},
+): Record<string, unknown> {
   const header = { alg: 'ES256', typ: 'JWT', kid: 'dev_key_test_1' }
   const payload = {
     iss: 'https://wallet.countersign.test',
@@ -277,7 +284,8 @@ export function csErrorBody(
     error: {
       code,
       message,
-      userMessage: overrides.userMessage ?? 'Something went wrong. Nothing was charged. Please try again.',
+      userMessage:
+        overrides.userMessage ?? 'Something went wrong. Nothing was charged. Please try again.',
       retryable: overrides.retryable ?? false,
       ...(overrides.details ? { details: overrides.details } : {}),
     },

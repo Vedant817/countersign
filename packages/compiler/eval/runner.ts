@@ -137,7 +137,9 @@ export function loadCachedAnswers(): CachedAnswer[] {
     readFileSync(`${evalDir}cached.jsonl`, 'utf8'),
     'cached.jsonl',
   )
-  const answers = all.filter((a): a is CachedAnswer => typeof a.id === 'string' && typeof a.answer === 'string')
+  const answers = all.filter(
+    (a): a is CachedAnswer => typeof a.id === 'string' && typeof a.answer === 'string',
+  )
   if (answers.length === 0) throw new Error('cached.jsonl has no usable answers')
   return answers
 }
@@ -163,7 +165,8 @@ export function loadEvalCatalog(): CatalogProjection {
   cachedCatalog = {
     merchants: raw.merchants,
     skus: raw.skus.map((s) => {
-      if (!isCurrency(s.currency)) throw new Error(`catalog.json: ${s.id} has an unsupported currency`)
+      if (!isCurrency(s.currency))
+        throw new Error(`catalog.json: ${s.id} has an unsupported currency`)
       return { ...s, priceMinor: BigInt(s.priceMinor) }
     }),
   }
@@ -204,11 +207,15 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
  * A case that states neither an amount nor a budget scores a refusal as a **failure**: with nothing to
  * check, "the compiler declined" cannot be called correct.
  */
-export function scoreCase(testCase: GoldenCase, got: ScoredFields | { readonly refused: string }): CaseResult {
+export function scoreCase(
+  testCase: GoldenCase,
+  got: ScoredFields | { readonly refused: string },
+): CaseResult {
   const fields: Record<string, boolean> = {}
 
   if ('refused' in got) {
-    const checksCap = testCase.expect.amountMax !== undefined || testCase.expect.budgetMax !== undefined
+    const checksCap =
+      testCase.expect.amountMax !== undefined || testCase.expect.budgetMax !== undefined
     if (!checksCap) return { id: testCase.id, text: testCase.text, got, fields, exact: false }
     if (testCase.expect.amountMax !== undefined) {
       fields['amountMax'] = testCase.expect.amountMax === null
@@ -226,10 +233,16 @@ export function scoreCase(testCase: GoldenCase, got: ScoredFields | { readonly r
   }
 
   if (testCase.expect.amountMax !== undefined) {
-    fields['amountMax'] = testCase.expect.amountMax === null ? got.amountMax === null : got.amountMax === testCase.expect.amountMax
+    fields['amountMax'] =
+      testCase.expect.amountMax === null
+        ? got.amountMax === null
+        : got.amountMax === testCase.expect.amountMax
   }
   if (testCase.expect.budgetMax !== undefined) {
-    fields['budgetMax'] = testCase.expect.budgetMax === null ? got.budgetMax === null : got.budgetMax === testCase.expect.budgetMax
+    fields['budgetMax'] =
+      testCase.expect.budgetMax === null
+        ? got.budgetMax === null
+        : got.budgetMax === testCase.expect.budgetMax
   }
   if (testCase.expect.merchantIds !== undefined) {
     fields['merchantIds'] = sameSet(got.merchantIds, testCase.expect.merchantIds)
@@ -251,7 +264,10 @@ export function scoreCase(testCase: GoldenCase, got: ScoredFields | { readonly r
 }
 
 /** Score a whole run. `cases` and `results` are matched by `id`, not by position. */
-export function runGoldenSet(cases: readonly GoldenCase[], results: readonly CaseResult[]): ScoreReport {
+export function runGoldenSet(
+  cases: readonly GoldenCase[],
+  results: readonly CaseResult[],
+): ScoreReport {
   const byId = new Map(results.map((r) => [r.id, r]))
   const perField: Record<string, { correct: number; scored: number; accuracy: number }> = {}
   let exactMatches = 0
@@ -283,13 +299,17 @@ export function summarise(report: ScoreReport, source: string): string {
   ]
   for (const field of Object.keys(report.perField).sort()) {
     const b = report.perField[field]!
-    lines.push(`  ${field.padEnd(12)} ${String(b.correct).padStart(3)}/${String(b.scored).padEnd(3)} ${pct(b.accuracy)}`)
+    lines.push(
+      `  ${field.padEnd(12)} ${String(b.correct).padStart(3)}/${String(b.scored).padEnd(3)} ${pct(b.accuracy)}`,
+    )
   }
   const failures = report.cases.filter((c) => !c.exact)
   for (const f of failures) {
     lines.push(`  FAIL ${f.id} ${JSON.stringify(f.text)}`)
     lines.push(`       fields ${JSON.stringify(f.fields)}`)
-    lines.push(`       got    ${'refused' in f.got ? JSON.stringify(f.got) : JSON.stringify(f.got)}`)
+    lines.push(
+      `       got    ${'refused' in f.got ? JSON.stringify(f.got) : JSON.stringify(f.got)}`,
+    )
   }
   return lines.join('\n')
 }

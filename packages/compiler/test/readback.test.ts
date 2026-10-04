@@ -43,7 +43,14 @@ import {
   type ReadBackContext,
   type VIConstraint,
 } from '../src/index'
-import { CONTOSO, NORTHWIND, catalogOf, compileInput, scriptedModel, STANDARD_CATALOG } from './helpers'
+import {
+  CONTOSO,
+  NORTHWIND,
+  catalogOf,
+  compileInput,
+  scriptedModel,
+  STANDARD_CATALOG,
+} from './helpers'
 import { fixedClock } from '@countersign/core'
 
 const CTX: ReadBackContext = {
@@ -54,7 +61,10 @@ const CTX: ReadBackContext = {
 /** 2026-10-09T18:29:00Z — a fixed instant so every date in every snapshot is reproducible. */
 const EXPIRES_AT = 1_790_529_540
 
-function mandate(constraints: VIConstraint[], overrides: Partial<CompiledMandate> = {}): CompiledMandate {
+function mandate(
+  constraints: VIConstraint[],
+  overrides: Partial<CompiledMandate> = {},
+): CompiledMandate {
   return {
     constraints,
     currency: 'USD',
@@ -149,7 +159,15 @@ const D19_LINE =
 describe('AT-M8.4 readBack snapshot, one per constraint type', () => {
   it('mandate.payment.budget → "Spend at most $130.00 in total"', () => {
     expect(readBack(mandate([BUDGET]), CTX)).toBe(
-      [READBACK_HEADER, 'Spend at most **$130.00** in total', `This mandate expires **${formatIstHuman(EXPIRES_AT)}**`, D19_LINE, '', READBACK_NOT_COVERED_HEADER, '- Expiry: there is no automatic renewal. When this mandate expires the agent cannot spend under it again, even if it meant to.'].join('\n'),
+      [
+        READBACK_HEADER,
+        'Spend at most **$130.00** in total',
+        `This mandate expires **${formatIstHuman(EXPIRES_AT)}**`,
+        D19_LINE,
+        '',
+        READBACK_NOT_COVERED_HEADER,
+        '- Expiry: there is no automatic renewal. When this mandate expires the agent cannot spend under it again, even if it meant to.',
+      ].join('\n'),
     )
   })
 
@@ -164,11 +182,15 @@ describe('AT-M8.4 readBack snapshot, one per constraint type', () => {
   })
 
   it('mandate.checkout.line_items', () => {
-    expect(readBack(mandate([LINE_ITEMS]), CTX)).toContain('Buy at least **1** of **Trail Runner** or **Alpine Boot**')
+    expect(readBack(mandate([LINE_ITEMS]), CTX)).toContain(
+      'Buy at least **1** of **Trail Runner** or **Alpine Boot**',
+    )
   })
 
   it('mandate.payment.amount_range', () => {
-    expect(readBack(mandate([AMOUNT_RANGE]), CTX)).toContain('Spend at most **$130.00** per payment')
+    expect(readBack(mandate([AMOUNT_RANGE]), CTX)).toContain(
+      'Spend at most **$130.00** per payment',
+    )
   })
 
   it('mandate.payment.recurrence', () => {
@@ -233,9 +255,12 @@ describe('the full read-back, end to end', () => {
   })
 
   it('says plainly when a limit has no upper bound, instead of omitting it', () => {
-    expect(readBack(mandate([{ type: 'mandate.payment.amount_range', currency: 'USD', min: 2000n }]), CTX)).toContain(
-      'Spend at least **$20.00** per payment',
-    )
+    expect(
+      readBack(
+        mandate([{ type: 'mandate.payment.amount_range', currency: 'USD', min: 2000n }]),
+        CTX,
+      ),
+    ).toContain('Spend at least **$20.00** per payment')
   })
 
   it('says when a mandate constrains nothing, rather than printing a bare expiry line', () => {
@@ -266,20 +291,36 @@ describe('the full read-back, end to end', () => {
     // Dropping it would make "Only at X" true of a mandate that also allows Y. An ugly id is visible;
     // a silently dropped constraint is not.
     const text = readBack(
-      mandate([{ type: 'mandate.checkout.allowed_merchants', allowed: [{ id: 'mrc_ghost', name: 'Ghost', website: 'https://ghost.test' }] }]),
+      mandate([
+        {
+          type: 'mandate.checkout.allowed_merchants',
+          allowed: [{ id: 'mrc_ghost', name: 'Ghost', website: 'https://ghost.test' }],
+        },
+      ]),
       { merchants: {}, tz: 'Asia/Kolkata' },
     )
     expect(text).toContain('Only at **mrc_ghost**')
   })
 
   it('lists every ISO 20022 frequency as words, never as a code', () => {
-    const frequencies = ['INDA', 'DAIL', 'WEEK', 'TWOK', 'TWMN', 'MNTH', 'TOMN', 'QUTR', 'FOMN', 'SEMI', 'YEAR', 'TYEA'] as const
+    const frequencies = [
+      'INDA',
+      'DAIL',
+      'WEEK',
+      'TWOK',
+      'TWMN',
+      'MNTH',
+      'TOMN',
+      'QUTR',
+      'FOMN',
+      'SEMI',
+      'YEAR',
+      'TYEA',
+    ] as const
     const words: string[] = []
     for (const frequency of frequencies) {
       const text = readBack(
-        mandate([
-          { type: 'mandate.payment.recurrence', frequency, start_date: '2026-10-01' },
-        ]),
+        mandate([{ type: 'mandate.payment.recurrence', frequency, start_date: '2026-10-01' }]),
         CTX,
       )
       expect(text).not.toContain(frequency)
@@ -304,7 +345,13 @@ describe('the full read-back, end to end', () => {
   it('distinguishes match_mode "minimum" from "exact"', () => {
     const exact: VIConstraint = {
       type: 'mandate.checkout.line_items',
-      items: [{ id: 'line-item-1', acceptable_items: [{ id: 'SKU-TRAIL-42', title: 'Trail Runner' }], quantity: 2 }],
+      items: [
+        {
+          id: 'line-item-1',
+          acceptable_items: [{ id: 'SKU-TRAIL-42', title: 'Trail Runner' }],
+          quantity: 2,
+        },
+      ],
       match_mode: 'exact',
     }
     expect(readBack(mandate([exact]), CTX)).toContain('Buy exactly **2** of **Trail Runner**')
@@ -328,7 +375,10 @@ describe('the full read-back, end to end', () => {
 
 describe('purity and stability', () => {
   const subject = mandate([MERCHANTS, PAYEES, LINE_ITEMS, AMOUNT_RANGE, BUDGET], {
-    assumptions: ['Assumed USD because you did not name a currency.', 'Assumed USD because you did not name a currency.'],
+    assumptions: [
+      'Assumed USD because you did not name a currency.',
+      'Assumed USD because you did not name a currency.',
+    ],
   })
 
   it('repeated calls are byte-identical', () => {
@@ -338,16 +388,22 @@ describe('purity and stability', () => {
 
   it('the order of the constraints array does not change a byte', () => {
     const shuffled = [...subject.constraints].reverse()
-    expect(readBack(mandate(shuffled, { assumptions: subject.assumptions }), CTX)).toBe(readBack(subject, CTX))
+    expect(readBack(mandate(shuffled, { assumptions: subject.assumptions }), CTX)).toBe(
+      readBack(subject, CTX),
+    )
   })
 
   it('the order of the merchant name map does not change a byte', () => {
-    const reversed: ReadBackContext = { tz: 'Asia/Kolkata', merchants: { [CONTOSO.id]: CONTOSO.name, [NORTHWIND.id]: NORTHWIND.name } }
+    const reversed: ReadBackContext = {
+      tz: 'Asia/Kolkata',
+      merchants: { [CONTOSO.id]: CONTOSO.name, [NORTHWIND.id]: NORTHWIND.name },
+    }
     expect(readBack(subject, reversed)).toBe(readBack(subject, CTX))
   })
 
   it('duplicate assumptions are collapsed', () => {
-    const occurrences = readBack(subject, CTX).split('because you did not name a currency.').length - 1
+    const occurrences =
+      readBack(subject, CTX).split('because you did not name a currency.').length - 1
     expect(occurrences).toBe(1)
   })
 
@@ -400,10 +456,41 @@ describe('totality', () => {
     // The read-back is lossless by construction: whatever is in `constraints` contributes a line. This
     // asserts the negative space — a constraint type with no template would print nothing at all, which
     // is the failure mode the totality tests above exist to prevent.
-    const text = readBack(mandate([MERCHANTS, PAYEES, LINE_ITEMS, AMOUNT_RANGE, BUDGET, RECURRENCE, AGENT_RECURRENCE, REFERENCE]), CTX)
+    const text = readBack(
+      mandate([
+        MERCHANTS,
+        PAYEES,
+        LINE_ITEMS,
+        AMOUNT_RANGE,
+        BUDGET,
+        RECURRENCE,
+        AGENT_RECURRENCE,
+        REFERENCE,
+      ]),
+      CTX,
+    )
     for (const type of CONSTRAINT_TYPES) {
-      const present = constraintOfType(text.length > 0 ? [MERCHANTS, PAYEES, LINE_ITEMS, AMOUNT_RANGE, BUDGET, RECURRENCE, AGENT_RECURRENCE, REFERENCE] : [], type)
-      if (present !== null) expect(text).toContain(READBACK_TEMPLATES.find((t) => t.type === type)!.render(present, CTX)!.split('\n')[0]!)
+      const present = constraintOfType(
+        text.length > 0
+          ? [
+              MERCHANTS,
+              PAYEES,
+              LINE_ITEMS,
+              AMOUNT_RANGE,
+              BUDGET,
+              RECURRENCE,
+              AGENT_RECURRENCE,
+              REFERENCE,
+            ]
+          : [],
+        type,
+      )
+      if (present !== null)
+        expect(text).toContain(
+          READBACK_TEMPLATES.find((t) => t.type === type)!
+            .render(present, CTX)!
+            .split('\n')[0]!,
+        )
     }
   })
 })
@@ -432,7 +519,7 @@ describe('formatIstCalendarDate', () => {
 })
 
 describe('the read-back and the ambiguities gate', () => {
-  it('an unresolved ambiguity is the UI\'s business, and the read-back stays a statement about a finished mandate', async () => {
+  it("an unresolved ambiguity is the UI's business, and the read-back stays a statement about a finished mandate", async () => {
     const { model } = scriptedModel([
       { kind: 'text', text: JSON.stringify({ currency: 'USD', merchantIds: [NORTHWIND.id] }) },
     ])

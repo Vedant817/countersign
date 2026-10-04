@@ -80,7 +80,10 @@ export function currenciesNamedIn(text: string): Currency[] {
     if (match === null) continue
     if (!found.includes(currency)) found.push(currency)
     // Blank the match rather than splicing it out, so offsets cannot shift under a later pattern.
-    remaining = remaining.slice(0, match.index) + ' '.repeat(match[0].length) + remaining.slice(match.index + match[0].length)
+    remaining =
+      remaining.slice(0, match.index) +
+      ' '.repeat(match[0].length) +
+      remaining.slice(match.index + match[0].length)
   }
   return found
 }
@@ -120,7 +123,9 @@ export function resolveCurrency(args: {
     return {
       ok: true,
       currency: only,
-      assumptions: [`Assumed ${only} because every item in the store you chose is priced in ${only}.`],
+      assumptions: [
+        `Assumed ${only} because every item in the store you chose is priced in ${only}.`,
+      ],
     }
   }
   return {
@@ -157,7 +162,11 @@ function normaliseDigits(raw: string): string {
  * which is `CS_ROUNDING` there and must stay a refusal here too (EC-FX-5). A literal the compiler
  * cannot read exactly is not a cap it should enforce against.
  */
-function toMinor(rawDigits: string, magnitude: string | undefined, currency: Currency): bigint | null {
+function toMinor(
+  rawDigits: string,
+  magnitude: string | undefined,
+  currency: Currency,
+): bigint | null {
   let money: Money
   try {
     money = fromPayPalValue(normaliseDigits(rawDigits), currency)
@@ -173,7 +182,8 @@ function toMinor(rawDigits: string, magnitude: string | undefined, currency: Cur
  * The digit group's leading lookbehind rejects a preceding `-` or `.`, so a *negative* amount ("under -50")
  * is not read as a positive cap. `$` immediately before the digits is fine and still matches.
  */
-const SYMBOL_AMOUNT_RE = /([A-Za-z]{0,2})\s?([$€£₹¥])\s*(?<![\d.-])(\d[\d,]*(?:\.\d+)?)\s*([kmb])?/giu
+const SYMBOL_AMOUNT_RE =
+  /([A-Za-z]{0,2})\s?([$€£₹¥])\s*(?<![\d.-])(\d[\d,]*(?:\.\d+)?)\s*([kmb])?/giu
 
 /**
  * `130 dollars`, `1M USD`, `200 rupees` — a currency word immediately after the number.
@@ -243,4 +253,3 @@ const RECURRENCE_WORDS_RE =
 export function mentionsRecurrence(text: string): boolean {
   return RECURRENCE_WORDS_RE.test(text)
 }
-

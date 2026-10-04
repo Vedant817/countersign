@@ -16,27 +16,34 @@ It imports nothing from the repository, nothing from the network, and nothing fr
 > — spec §0
 
 ```ts
-import { add, allocate, formatMoney, fromPayPalValue, money, toPayPalValue } from '@countersign/core'
+import {
+  add,
+  allocate,
+  formatMoney,
+  fromPayPalValue,
+  money,
+  toPayPalValue,
+} from '@countersign/core'
 
-toPayPalValue({ minor: 12345n, currency: 'USD' })  // "123.45"
-toPayPalValue({ minor: 500n, currency: 'JPY' })    // "500"   (zero-decimal currency)
-fromPayPalValue('123.45', 'USD')                   // { minor: 12345n, currency: 'USD' }
-fromPayPalValue('1.005', 'USD')                    // throws CS_ROUNDING — never rounds
+toPayPalValue({ minor: 12345n, currency: 'USD' }) // "123.45"
+toPayPalValue({ minor: 500n, currency: 'JPY' }) // "500"   (zero-decimal currency)
+fromPayPalValue('123.45', 'USD') // { minor: 12345n, currency: 'USD' }
+fromPayPalValue('1.005', 'USD') // throws CS_ROUNDING — never rounds
 add({ minor: 10n, currency: 'USD' }, { minor: 20n, currency: 'INR' }) // throws CS_CURRENCY_MISMATCH
-allocate({ minor: 1000n, currency: 'USD' }, [1n, 1n, 1n])             // [334n, 333n, 333n]
-formatMoney({ minor: 13000n, currency: 'USD' })                       // "$130.00"
+allocate({ minor: 1000n, currency: 'USD' }, [1n, 1n, 1n]) // [334n, 333n, 333n]
+formatMoney({ minor: 13000n, currency: 'USD' }) // "$130.00"
 ```
 
 Four properties are enforced, not merely intended:
 
-| Property | How | Test |
-|---|---|---|
-| No float ever represents money | `Money.minor` is `bigint`; boundary schemas reject JS numbers | `AT-M1.1`, `EC-FX-5` |
-| Sub-minor precision is refused, never rounded | `fromPayPalValue` throws `CS_ROUNDING` | `AT-M1.2` |
-| Currencies are never mixed or converted | `add`/`sub`/`compare`/`sum`/`withinRange` throw `CS_CURRENCY_MISMATCH` | `AT-M1.4`, `EC-FX-1` |
-| A split loses no minor unit | `allocate` uses largest remainder; `sum(parts) === total` exactly | `AT-M1.3`, `EC-FX-4` |
+| Property                                      | How                                                                    | Test                 |
+| --------------------------------------------- | ---------------------------------------------------------------------- | -------------------- |
+| No float ever represents money                | `Money.minor` is `bigint`; boundary schemas reject JS numbers          | `AT-M1.1`, `EC-FX-5` |
+| Sub-minor precision is refused, never rounded | `fromPayPalValue` throws `CS_ROUNDING`                                 | `AT-M1.2`            |
+| Currencies are never mixed or converted       | `add`/`sub`/`compare`/`sum`/`withinRange` throw `CS_CURRENCY_MISMATCH` | `AT-M1.4`, `EC-FX-1` |
+| A split loses no minor unit                   | `allocate` uses largest remainder; `sum(parts) === total` exactly      | `AT-M1.3`, `EC-FX-4` |
 
-`allocateWithRemainderLast` is the variant that pins *every* leftover cent on the final part, for
+`allocateWithRemainderLast` is the variant that pins _every_ leftover cent on the final part, for
 rows where a human has to be able to check the last number.
 
 **Enforcement beyond tests.** `pnpm lint` runs `scripts/check-money-discipline.mjs`, which greps the
@@ -51,9 +58,9 @@ Prefixed, ULID-bodied, sortable by creation time. The prefix lives in the type, 
 cannot be passed where an `OrderId` belongs.
 
 ```ts
-const id = newId('mdt')   // "mdt_01J9Z…"; typed as Id<'mdt'>
-asId('ord', id)          // null — the prefix does not match
-idCreatedAtMs(id)        // 1_760_000_000_000
+const id = newId('mdt') // "mdt_01J9Z…"; typed as Id<'mdt'>
+asId('ord', id) // null — the prefix does not match
+idCreatedAtMs(id) // 1_760_000_000_000
 ```
 
 ## Errors
@@ -82,10 +89,10 @@ crosses a trust boundary to a browser.
 The only time source. No module calls `Date.now()` for business logic.
 
 ```ts
-const clock = fixedClock(1_760_000_000)   // tests: pin expiry, price locks, deadlines
+const clock = fixedClock(1_760_000_000) // tests: pin expiry, price locks, deadlines
 clock.advance(3600)
-withinValidity(at, { iat, exp }, skewSeconds)   // 300 s default, matching the VI library
-formatIstHuman(1_760_000_000)              // "Fri 9 Oct, 11:59 PM IST"
+withinValidity(at, { iat, exp }, skewSeconds) // 300 s default, matching the VI library
+formatIstHuman(1_760_000_000) // "Fri 9 Oct, 11:59 PM IST"
 ```
 
 IST conversion uses a fixed +05:30 offset, which is exact rather than approximate: Asia/Kolkata has
@@ -98,9 +105,9 @@ Validated at boot by zod. **The process refuses to start if a required variable 
 real money is the worst available failure.
 
 ```ts
-const env = env()          // throws a CsError listing *every* missing key at once
-assertSandbox({ PAYPAL_ENV, PAYPAL_API_BASE })   // also enforced at call time
-parsePartialEnv()          // for scripts that only need a few variables
+const env = env() // throws a CsError listing *every* missing key at once
+assertSandbox({ PAYPAL_ENV, PAYPAL_API_BASE }) // also enforced at call time
+parsePartialEnv() // for scripts that only need a few variables
 ```
 
 ## Logging
@@ -113,7 +120,7 @@ parsePartialEnv()          // for scripts that only need a few variables
    `Bearer …` shapes.
 3. **shape** — emails, card numbers and phone numbers, by value.
 
-**Honest limit:** no regex can find a person's *name* inside a free-text message. The rule for
+**Honest limit:** no regex can find a person's _name_ inside a free-text message. The rule for
 callers is "put names in a named field, never in the message string", and filter 1 enforces the
 second half of it. Claiming otherwise would be a false assurance.
 

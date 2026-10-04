@@ -103,7 +103,9 @@ export class CircuitBreaker {
 
     // half-open
     if (s.probeInFlight) {
-      return err(this.openError(hostname, Math.max(0, s.openUntilMs - now), s.consecutiveUnavailable))
+      return err(
+        this.openError(hostname, Math.max(0, s.openUntilMs - now), s.consecutiveUnavailable),
+      )
     }
     s.probeInFlight = true
     return ok(undefined)

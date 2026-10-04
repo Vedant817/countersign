@@ -613,6 +613,9 @@ importers:
       '@countersign/db':
         specifier: workspace:*
         version: link:../db
+      '@countersign/ledger':
+        specifier: workspace:*
+        version: link:../ledger
       '@countersign/paypal':
         specifier: workspace:*
         version: link:../paypal
@@ -654,6 +657,9 @@ importers:
       '@types/node':
         specifier: 24.19.1
         version: 24.19.1
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       tsx:
         specifier: 4.23.15
         version: 4.23.15

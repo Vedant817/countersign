@@ -148,7 +148,10 @@ function contentTypeFromFileName(fileName: string): AllowedEvidenceContentType |
  * has `type === ''`, and an untyped part is how an image arrives at PayPal as an unrecognised
  * attachment.
  */
-async function toBlob(content: EvidenceFile['content'], contentType: AllowedEvidenceContentType): Promise<Blob> {
+async function toBlob(
+  content: EvidenceFile['content'],
+  contentType: AllowedEvidenceContentType,
+): Promise<Blob> {
   if (content instanceof Blob) return new Blob([content], { type: contentType })
   if (content instanceof Uint8Array) {
     // Copy into a fresh ArrayBuffer: a Uint8Array view may be a window onto a larger buffer, and
@@ -167,12 +170,17 @@ async function toBlob(content: EvidenceFile['content'], contentType: AllowedEvid
  * @returns the file resolved to a `Blob` with a known type and a measured size, or the reason it is
  *   refused. The size is measured from the bytes, never declared by the caller.
  */
-async function resolveFile(file: EvidenceFile, index: number, fieldName: string): Promise<Result<ResolvedFile, CsError>> {
+async function resolveFile(
+  file: EvidenceFile,
+  index: number,
+  fieldName: string,
+): Promise<Result<ResolvedFile, CsError>> {
   if (typeof file.fileName !== 'string' || file.fileName.trim() === '') {
     return err(csError('CS_VALIDATION', `Evidence file ${index + 1} has no fileName`, { index }))
   }
 
-  const declared = file.contentType === undefined ? undefined : normaliseContentType(file.contentType)
+  const declared =
+    file.contentType === undefined ? undefined : normaliseContentType(file.contentType)
   const inferred = contentTypeFromFileName(file.fileName)
   const contentType = declared ?? inferred
   if (contentType === undefined) {
@@ -189,7 +197,12 @@ async function resolveFile(file: EvidenceFile, index: number, fieldName: string)
       csError(
         'CS_VALIDATION',
         `Evidence file "${file.fileName}" is ${contentType}; PayPal accepts only ${ALLOWED_EVIDENCE_CONTENT_TYPES.join(', ')} (EC-DSP-12)`,
-        { file_name: file.fileName, index, content_type: contentType, allowed: [...ALLOWED_EVIDENCE_CONTENT_TYPES] },
+        {
+          file_name: file.fileName,
+          index,
+          content_type: contentType,
+          allowed: [...ALLOWED_EVIDENCE_CONTENT_TYPES],
+        },
       ),
     )
   }
@@ -199,17 +212,25 @@ async function resolveFile(file: EvidenceFile, index: number, fieldName: string)
     blob = await toBlob(file.content, contentType)
   } catch (e) {
     return err(
-      csError('CS_VALIDATION', `Evidence file "${file.fileName}" could not be read`, {
-        file_name: file.fileName,
-        index,
-      }, { cause: e }),
+      csError(
+        'CS_VALIDATION',
+        `Evidence file "${file.fileName}" could not be read`,
+        {
+          file_name: file.fileName,
+          index,
+        },
+        { cause: e },
+      ),
     )
   }
 
   const size = blob.size
   if (size <= 0) {
     return err(
-      csError('CS_VALIDATION', `Evidence file "${file.fileName}" is empty`, { file_name: file.fileName, index }),
+      csError('CS_VALIDATION', `Evidence file "${file.fileName}" is empty`, {
+        file_name: file.fileName,
+        index,
+      }),
     )
   }
   if (size >= MAX_EVIDENCE_FILE_BYTES) {
@@ -253,10 +274,14 @@ export async function buildEvidenceForm(
 
   if (inputBytes > MAX_EVIDENCE_FILE_BYTES) {
     return err(
-      csError('CS_VALIDATION', `The evidence "input" part is ${inputBytes} bytes, over the ${MAX_EVIDENCE_FILE_BYTES}-byte limit`, {
-        size: inputBytes,
-        max_bytes: MAX_EVIDENCE_FILE_BYTES,
-      }),
+      csError(
+        'CS_VALIDATION',
+        `The evidence "input" part is ${inputBytes} bytes, over the ${MAX_EVIDENCE_FILE_BYTES}-byte limit`,
+        {
+          size: inputBytes,
+          max_bytes: MAX_EVIDENCE_FILE_BYTES,
+        },
+      ),
     )
   }
 
@@ -273,9 +298,13 @@ export async function buildEvidenceForm(
   for (const f of resolved) {
     if (seen.has(f.fieldName)) {
       return err(
-        csError('CS_VALIDATION', `Duplicate multipart field name "${f.fieldName}" in one evidence upload`, {
-          field_name: f.fieldName,
-        }),
+        csError(
+          'CS_VALIDATION',
+          `Duplicate multipart field name "${f.fieldName}" in one evidence upload`,
+          {
+            field_name: f.fieldName,
+          },
+        ),
       )
     }
     seen.add(f.fieldName)
@@ -295,7 +324,11 @@ export async function buildEvidenceForm(
   const form = new FormData()
   // The `input` part is a real file part with an explicit JSON type, so the boundary and the
   // content-disposition come from the runtime along with everything else.
-  form.append(EVIDENCE_INPUT_FIELD, new Blob([json], { type: 'application/json' }), EVIDENCE_INPUT_FILENAME)
+  form.append(
+    EVIDENCE_INPUT_FIELD,
+    new Blob([json], { type: 'application/json' }),
+    EVIDENCE_INPUT_FILENAME,
+  )
   for (const f of resolved) {
     form.append(f.fieldName, f.blob, f.fileName)
   }

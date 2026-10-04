@@ -174,7 +174,9 @@ function isUnconstrained(node: Json): boolean {
 function structuralBranch(node: Json): Json | undefined {
   const branches = branchesOf(node)
   if (branches.length === 0) return undefined
-  const structural = branches.filter((b) => !isUnconstrained(b) && !(typeSet(b).size === 1 && typeSet(b).has('null')))
+  const structural = branches.filter(
+    (b) => !isUnconstrained(b) && !(typeSet(b).size === 1 && typeSet(b).has('null')),
+  )
   return structural.length === 1 ? structural[0] : undefined
 }
 
@@ -245,8 +247,23 @@ interface Ctx {
   readonly side: ContractSide
 }
 
-function add(ctx: Ctx, path: string, kind: DriftKind, direction: DriftDirection, severity: 'breaking' | 'informational', detail: string): void {
-  ctx.differences.push({ route: ctx.route, side: ctx.side, path, kind, direction, severity, detail })
+function add(
+  ctx: Ctx,
+  path: string,
+  kind: DriftKind,
+  direction: DriftDirection,
+  severity: 'breaking' | 'informational',
+  detail: string,
+): void {
+  ctx.differences.push({
+    route: ctx.route,
+    side: ctx.side,
+    path,
+    kind,
+    direction,
+    severity,
+    detail,
+  })
 }
 
 function note(ctx: Ctx, path: string, reason: string): void {
@@ -267,12 +284,23 @@ function child(path: string, key: string): string {
 function compareNode(ctx: Ctx, serviceRaw: Json, clientRaw: Json, path: string): void {
   const service = ctx.resolve(serviceRaw)
   if (service === undefined) {
-    note(ctx, path, 'the document uses a $ref this comparator cannot resolve (expected #/components/schemas/…)')
+    note(
+      ctx,
+      path,
+      'the document uses a $ref this comparator cannot resolve (expected #/components/schemas/…)',
+    )
     return
   }
   const client = ctx.resolve(clientRaw)
   if (client === undefined) {
-    add(ctx, path, 'field', 'client-only', 'breaking', 'the client schema is an unresolvable $ref, which cannot happen')
+    add(
+      ctx,
+      path,
+      'field',
+      'client-only',
+      'breaking',
+      'the client schema is an unresolvable $ref, which cannot happen',
+    )
     return
   }
 
@@ -300,7 +328,14 @@ function compareNode(ctx: Ctx, serviceRaw: Json, clientRaw: Json, path: string):
   // A client that refuses null where the service may send it is a runtime parse failure waiting to
   // happen on an optional field.
   if (allowsNull(service) && !allowsNull(client) && ctx.side === 'response') {
-    add(ctx, path, 'type', 'service-only', 'breaking', 'the service may send null here but the client schema is not nullable')
+    add(
+      ctx,
+      path,
+      'type',
+      'service-only',
+      'breaking',
+      'the service may send null here but the client schema is not nullable',
+    )
   }
 
   // --- enum / const -------------------------------------------------------------------------------
@@ -312,17 +347,38 @@ function compareNode(ctx: Ctx, serviceRaw: Json, clientRaw: Json, path: string):
     const onlyService = [...s].filter((v) => !c.has(v))
     const onlyClient = [...c].filter((v) => !s.has(v))
     for (const v of onlyService) {
-      add(ctx, path, 'enum', 'service-only', 'informational', `the service allows ${v} and the client does not`)
+      add(
+        ctx,
+        path,
+        'enum',
+        'service-only',
+        'informational',
+        `the service allows ${v} and the client does not`,
+      )
     }
     for (const v of onlyClient) {
-      add(ctx, path, 'enum', 'client-only', 'breaking', `the client allows ${v} and the service does not`)
+      add(
+        ctx,
+        path,
+        'enum',
+        'client-only',
+        'breaking',
+        `the client allows ${v} and the service does not`,
+      )
     }
   }
   if ('const' in service || 'const' in client) {
     const sv = JSON.stringify(service['const'])
     const cv = JSON.stringify(client['const'])
     if (sv !== cv) {
-      add(ctx, path, 'const', sv === undefined ? 'client-only' : 'service-only', 'breaking', `the service pins ${sv} and the client pins ${cv}`)
+      add(
+        ctx,
+        path,
+        'const',
+        sv === undefined ? 'client-only' : 'service-only',
+        'breaking',
+        `the service pins ${sv} and the client pins ${cv}`,
+      )
     }
   }
 
@@ -338,7 +394,8 @@ function compareNode(ctx: Ctx, serviceRaw: Json, clientRaw: Json, path: string):
   // Unwrap a nullable wrapper (`anyOf: [{$ref: AtTimeCheck}, {type: null}]`) and then resolve the `$ref`,
   // in that order: an unresolved `{$ref: …}` wrapper has no `type` and no `properties`, so it would look
   // like an opaque dict and every field inside it would go unreported.
-  const serviceStructural = ctx.resolve(structuralBranch(service) ?? service) ?? (structuralBranch(service) ?? service)
+  const serviceStructural =
+    ctx.resolve(structuralBranch(service) ?? service) ?? structuralBranch(service) ?? service
   const clientStructural = structuralBranch(client) ?? client
   // Both sides are leaves (a string, an integer, …). The type comparison above has already had its say.
   if (!isObjectLike(serviceStructural) && !isObjectLike(clientStructural)) return
@@ -349,7 +406,11 @@ function compareNode(ctx: Ctx, serviceRaw: Json, clientRaw: Json, path: string):
   // `{"type": "object"}`. Nothing about its fields can be compared, whichever side is typed.
   if (Object.keys(serviceProps).length === 0 && !isClosed(serviceStructural)) {
     if (Object.keys(clientProps).length === 0) {
-      note(ctx, path, 'the service declares an opaque object (dict[str, Any]); both sides are untyped here')
+      note(
+        ctx,
+        path,
+        'the service declares an opaque object (dict[str, Any]); both sides are untyped here',
+      )
     } else {
       note(
         ctx,
@@ -360,7 +421,11 @@ function compareNode(ctx: Ctx, serviceRaw: Json, clientRaw: Json, path: string):
     return
   }
   if (Object.keys(clientProps).length === 0) {
-    note(ctx, path, 'the client types this position as opaque while the service declares named fields')
+    note(
+      ctx,
+      path,
+      'the client types this position as opaque while the service declares named fields',
+    )
     return
   }
 
@@ -399,14 +464,28 @@ function compareNode(ctx: Ctx, serviceRaw: Json, clientRaw: Json, path: string):
   // --- fields, both directions ---------------------------------------------------------------------
   for (const [name, node] of Object.entries(serviceProps)) {
     if (!(name in clientProps)) {
-      add(ctx, child(path, name), 'field', 'service-only', 'informational', 'the service sends this field and the client does not model it')
+      add(
+        ctx,
+        child(path, name),
+        'field',
+        'service-only',
+        'informational',
+        'the service sends this field and the client does not model it',
+      )
       continue
     }
     compareNode(ctx, node, clientProps[name] as Json, child(path, name))
   }
   for (const name of Object.keys(clientProps)) {
     if (!(name in serviceProps)) {
-      add(ctx, child(path, name), 'field', 'client-only', 'breaking', 'the client requires this field and the service does not declare it')
+      add(
+        ctx,
+        child(path, name),
+        'field',
+        'client-only',
+        'breaking',
+        'the client requires this field and the service does not declare it',
+      )
     }
   }
 
@@ -517,7 +596,11 @@ function compareSide(
     // drift on every money field.
     clientNode = z.toJSONSchema(clientSchema, { io: 'input', unrepresentable: 'any' }) as Json
   } catch (e) {
-    note(ctx, '$', `the client schema could not be converted to JSON Schema: ${e instanceof Error ? e.message : String(e)}`)
+    note(
+      ctx,
+      '$',
+      `the client schema could not be converted to JSON Schema: ${e instanceof Error ? e.message : String(e)}`,
+    )
     return
   }
   compareNode(ctx, serviceNode, clientNode, '$')
@@ -557,7 +640,8 @@ export function compareSchemas(
     const item = asRecord(paths[p])
     if (!item) continue
     for (const m of Object.keys(item)) {
-      if (m === 'get' || m === 'post' || m === 'put' || m === 'patch' || m === 'delete') routesInDocument += 1
+      if (m === 'get' || m === 'post' || m === 'put' || m === 'patch' || m === 'delete')
+        routesInDocument += 1
     }
   }
 
@@ -581,9 +665,25 @@ export function compareSchemas(
     seen.add(`${contract.method} ${contract.path}`)
     routesCompared += 1
     if (contract.request !== undefined) {
-      compareSide(resolve, contract, requestSchemaOf(op), contract.request, 'request', differences, unverifiable)
+      compareSide(
+        resolve,
+        contract,
+        requestSchemaOf(op),
+        contract.request,
+        'request',
+        differences,
+        unverifiable,
+      )
     }
-    compareSide(resolve, contract, responseSchemaOf(op), contract.response, 'response', differences, unverifiable)
+    compareSide(
+      resolve,
+      contract,
+      responseSchemaOf(op),
+      contract.response,
+      'response',
+      differences,
+      unverifiable,
+    )
   }
 
   for (const [path, item] of Object.entries(paths)) {
@@ -631,15 +731,23 @@ export interface LoadOpenApiOptions {
  * - `http://…` / `https://…` → `GET <url>`, expecting JSON.
  * - anything else → treated as a filesystem path.
  */
-export async function loadOpenApiDocument(source: string, options: LoadOpenApiOptions = {}): Promise<unknown> {
+export async function loadOpenApiDocument(
+  source: string,
+  options: LoadOpenApiOptions = {},
+): Promise<unknown> {
   const timeoutMs = options.timeoutMs ?? 10_000
   if (/^https?:\/\//i.test(source)) {
     const doFetch = options.fetchImpl ?? fetch
     let response: Response
     try {
-      response = await doFetch(source, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) })
+      response = await doFetch(source, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(timeoutMs),
+      })
     } catch (e) {
-      throw new Error(`Could not fetch ${source}: ${e instanceof Error ? e.message : String(e)}`, { cause: e })
+      throw new Error(`Could not fetch ${source}: ${e instanceof Error ? e.message : String(e)}`, {
+        cause: e,
+      })
     }
     if (!response.ok) {
       throw new Error(`Could not fetch ${source}: HTTP ${response.status} ${response.statusText}`)
@@ -655,7 +763,9 @@ export async function loadOpenApiDocument(source: string, options: LoadOpenApiOp
 // ---------------------------------------------------------------------------
 
 function pad(s: string, width: number): string {
-  return s.length >= width ? `${s.slice(0, Math.max(0, width - 1))}…` : s + ' '.repeat(width - s.length)
+  return s.length >= width
+    ? `${s.slice(0, Math.max(0, width - 1))}…`
+    : s + ' '.repeat(width - s.length)
 }
 
 /**
@@ -666,7 +776,9 @@ function pad(s: string, width: number): string {
  */
 export function formatDriftTable(report: DriftReport): string {
   const lines: string[] = []
-  lines.push(`schema drift: ${report.routesCompared}/${report.routesInDocument} routes in the document are modelled by this client`)
+  lines.push(
+    `schema drift: ${report.routesCompared}/${report.routesInDocument} routes in the document are modelled by this client`,
+  )
   lines.push('')
   if (report.differences.length === 0) {
     lines.push('  no differences')
@@ -675,7 +787,9 @@ export function formatDriftTable(report: DriftReport): string {
       `${pad('ROUTE', 26)} ${pad('SIDE', 9)} ${pad('PATH', 30)} ${pad('KIND', 12)} ${pad('DIR', 13)} ${pad('SEVERITY', 13)} DETAIL`,
     )
     const rows = [...report.differences].sort((a, b) =>
-      `${a.route}|${a.side}|${a.path}|${a.kind}`.localeCompare(`${b.route}|${b.side}|${b.path}|${b.kind}`),
+      `${a.route}|${a.side}|${a.path}|${a.kind}`.localeCompare(
+        `${b.route}|${b.side}|${b.path}|${b.kind}`,
+      ),
     )
     for (const d of rows) {
       lines.push(

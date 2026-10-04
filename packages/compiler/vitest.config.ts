@@ -4,7 +4,7 @@ import { baseConfig } from '../../vitest.config.base'
 /**
  * compiler: inherits every shared setting from vitest.config.base.
  *
- * `exclude` lists `**/eval/**`, which keeps `pnpm --filter @countersign/compiler test` away from the live
+ * `exclude` lists `**/ eval /**`, which keeps `pnpm --filter @countersign/compiler test` away from the live
  * golden-set suite. **It is the second of three guards, not the first**, and it is worth being precise about
  * why, because the obvious version of this file does not work:
  *

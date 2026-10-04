@@ -25,16 +25,25 @@ describe('spec §8.4 defaults', () => {
 
 describe('shouldRetry: connection errors and timeouts', () => {
   it.each(['connection', 'timeout'] as const)('retries a %s while budget remains', (kind) => {
-    expect(shouldRetry({ kind, attempt: 1, maxRetries: 2 })).toEqual({ retry: true, reason: 'transport' })
-    expect(shouldRetry({ kind, attempt: 2, maxRetries: 2 })).toEqual({ retry: true, reason: 'transport' })
-  })
-
-  it.each(['connection', 'timeout'] as const)('stops retrying a %s once the budget is spent', (kind) => {
-    expect(shouldRetry({ kind, attempt: 3, maxRetries: 2 })).toEqual({
-      retry: false,
-      reason: 'budget-exhausted',
+    expect(shouldRetry({ kind, attempt: 1, maxRetries: 2 })).toEqual({
+      retry: true,
+      reason: 'transport',
+    })
+    expect(shouldRetry({ kind, attempt: 2, maxRetries: 2 })).toEqual({
+      retry: true,
+      reason: 'transport',
     })
   })
+
+  it.each(['connection', 'timeout'] as const)(
+    'stops retrying a %s once the budget is spent',
+    (kind) => {
+      expect(shouldRetry({ kind, attempt: 3, maxRetries: 2 })).toEqual({
+        retry: false,
+        reason: 'budget-exhausted',
+      })
+    },
+  )
 
   it('never retries when the budget is zero, however many attempts are configured', () => {
     expect(shouldRetry({ kind: 'connection', attempt: 1, maxRetries: 0 })).toEqual({
@@ -60,7 +69,9 @@ describe('shouldRetry: 5xx', () => {
   })
 
   it('treats the whole 5xx range as retryable, not a hard-coded list', () => {
-    expect(shouldRetry({ kind: 'response', status: 599, attempt: 1, maxRetries: 1 }).retry).toBe(true)
+    expect(shouldRetry({ kind: 'response', status: 599, attempt: 1, maxRetries: 1 }).retry).toBe(
+      true,
+    )
   })
 })
 
@@ -87,12 +98,18 @@ describe('shouldRetry: 4xx is never retried', () => {
     // apps/vi rate-limits GET /v1/jwks and POST /v1/public/verify at 30/min/IP and answers 429 with
     // `Retry-After`. Retrying immediately spends more of the window we just exhausted, and on a 30/min
     // budget can extend the block. The error still comes back `retryable: true`, so the caller decides.
-    expect(shouldRetry({ kind: 'response', status: 429, attempt: 1, maxRetries: 2 }).retry).toBe(false)
+    expect(shouldRetry({ kind: 'response', status: 429, attempt: 1, maxRetries: 2 }).retry).toBe(
+      false,
+    )
   })
 
   it('does not retry a 4xx even on the last remaining budget, which would be the only time it could', () => {
-    expect(shouldRetry({ kind: 'response', status: 400, attempt: 1, maxRetries: 1 }).retry).toBe(false)
-    expect(shouldRetry({ kind: 'response', status: 422, attempt: 2, maxRetries: 2 }).retry).toBe(false)
+    expect(shouldRetry({ kind: 'response', status: 400, attempt: 1, maxRetries: 1 }).retry).toBe(
+      false,
+    )
+    expect(shouldRetry({ kind: 'response', status: 422, attempt: 2, maxRetries: 2 }).retry).toBe(
+      false,
+    )
   })
 })
 
@@ -144,7 +161,9 @@ describe('the retry backoff', () => {
 
 describe('isTimeoutError', () => {
   it('recognises the TimeoutError that AbortSignal.timeout rejects with', () => {
-    expect(isTimeoutError(Object.assign(new Error('timed out'), { name: 'TimeoutError' }))).toBe(true)
+    expect(isTimeoutError(Object.assign(new Error('timed out'), { name: 'TimeoutError' }))).toBe(
+      true,
+    )
   })
 
   it('recognises an AbortError, which is what a caller-supplied AbortController produces', () => {
