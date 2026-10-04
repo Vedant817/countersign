@@ -169,36 +169,55 @@ async function fuzzWorld(): Promise<World> {
 }
 
 describe('AT-M10.6 — 1,000 fuzzed L3 mutations produce 0 ALLOWs', () => {
-  it('never ALLOWs a mutated L3a, whatever bit was flipped', async () => {
-    const world = await fuzzWorld()
-    // "counters", as a 32-bit seed: 0x636f756e = 1668246894. The 64-bit spelling
-    // 0x636f_756e_7465_7273 is above Number.MAX_SAFE_INTEGER and loses precision.
-    const random = makeRandom(0x636f_756e)
-    const allowed: ReturnType<typeof describeAllow>[] = []
-    let mutated = 0
+  /**
+   * The two fuzz tests do real cryptographic work: 1,000 Ed25519 verifications each, ~10–13 s for the
+   * file.
+   *
+   * They ran under vitest's shared 5 s `testTimeout`, so they passed when the file ran alone and
+   * **timed out whenever the 48-file root suite loaded the CPU** — reporting
+   * `Test timed out in 5000ms`, not a failed assertion. A timeout here reads like a broken invariant,
+   * sends someone hunting a signature-verification bypass that does not exist, and is the kind of flake
+   * that gets "fixed" by deleting the test.
+   *
+   * So the timeout is explicit, generous, and the reason is written down. A test that takes as long as
+   * the work it does — and says so — is a test a future reader can trust.
+   */
+  const CRYPTO_HEAVY_MS = 120_000
 
-    for (let i = 0; i < MUTATIONS; i++) {
-      const seedInput = await signedInput(world, i)
-      const mutatedL3a = flipBit(seedInput.l3a, random)
-      if (mutatedL3a !== seedInput.l3a) mutated++
+  it(
+    'never ALLOWs a mutated L3a, whatever bit was flipped',
+    { timeout: CRYPTO_HEAVY_MS },
+    async () => {
+      const world = await fuzzWorld()
+      // "counters", as a 32-bit seed: 0x636f756e = 1668246894. The 64-bit spelling
+      // 0x636f_756e_7465_7273 is above Number.MAX_SAFE_INTEGER and loses precision.
+      const random = makeRandom(0x636f_756e)
+      const allowed: ReturnType<typeof describeAllow>[] = []
+      let mutated = 0
 
-      const result = await evaluate({ ...seedInput, l3a: mutatedL3a }, world.deps)
-      if (!result.ok) continue
-      if (result.value.decision !== 'ALLOW') continue
-      // An ALLOW is only acceptable if the mutation did not change what was actually signed. See
-      // `sameSignedContent` for the base64url trailing-bits case this excludes, and why it is not a bypass.
-      if (sameSignedContent(mutatedL3a, seedInput.l3a)) continue
-      allowed.push(describeAllow(i, result.value))
-    }
+      for (let i = 0; i < MUTATIONS; i++) {
+        const seedInput = await signedInput(world, i)
+        const mutatedL3a = flipBit(seedInput.l3a, random)
+        if (mutatedL3a !== seedInput.l3a) mutated++
 
-    // **The assertion.** Zero mutations that changed the signed content produced an ALLOW.
-    expect(
-      allowed,
-      'a mutation that changed the signed content produced an ALLOW: a signature is not being verified',
-    ).toEqual([])
-    // The mutations were real. If `mutated` were 0 the loop proved nothing.
-    expect(mutated).toBeGreaterThan(MUTATIONS * 0.99)
-  })
+        const result = await evaluate({ ...seedInput, l3a: mutatedL3a }, world.deps)
+        if (!result.ok) continue
+        if (result.value.decision !== 'ALLOW') continue
+        // An ALLOW is only acceptable if the mutation did not change what was actually signed. See
+        // `sameSignedContent` for the base64url trailing-bits case this excludes, and why it is not a bypass.
+        if (sameSignedContent(mutatedL3a, seedInput.l3a)) continue
+        allowed.push(describeAllow(i, result.value))
+      }
+
+      // **The assertion.** Zero mutations that changed the signed content produced an ALLOW.
+      expect(
+        allowed,
+        'a mutation that changed the signed content produced an ALLOW: a signature is not being verified',
+      ).toEqual([])
+      // The mutations were real. If `mutated` were 0 the loop proved nothing.
+      expect(mutated).toBeGreaterThan(MUTATIONS * 0.99)
+    },
+  )
 
   it('the one ALLOW a bit-flip can produce is a non-canonical spelling of the same signature', async () => {
     // The finding, pinned so it cannot be forgotten. See `sameSignedContent`: a 64-byte Ed25519 signature
@@ -239,26 +258,30 @@ describe('AT-M10.6 — 1,000 fuzzed L3 mutations produce 0 ALLOWs', () => {
     expect(sameSignedContent(mutated, seedInput.l3a)).toBe(true)
   })
 
-  it('never ALLOWs a mutated L3b — check 5 binds it and check 4 verifies the pair', async () => {
-    const world = await fuzzWorld()
-    const random = makeRandom(0x6c33_6230_6261)
-    const allowed: ReturnType<typeof describeAllow>[] = []
+  it(
+    'never ALLOWs a mutated L3b — check 5 binds it and check 4 verifies the pair',
+    { timeout: CRYPTO_HEAVY_MS },
+    async () => {
+      const world = await fuzzWorld()
+      const random = makeRandom(0x6c33_6230_6261)
+      const allowed: ReturnType<typeof describeAllow>[] = []
 
-    for (let i = 0; i < MUTATIONS; i++) {
-      const seedInput = await signedInput(world, i)
-      const mutatedL3b = flipBit(seedInput.l3b, random)
-      const result = await evaluate({ ...seedInput, l3b: mutatedL3b }, world.deps)
-      if (!result.ok) continue
-      if (result.value.decision !== 'ALLOW') continue
-      if (sameSignedContent(mutatedL3b, seedInput.l3b)) continue
-      allowed.push(describeAllow(i, result.value))
-    }
+      for (let i = 0; i < MUTATIONS; i++) {
+        const seedInput = await signedInput(world, i)
+        const mutatedL3b = flipBit(seedInput.l3b, random)
+        const result = await evaluate({ ...seedInput, l3b: mutatedL3b }, world.deps)
+        if (!result.ok) continue
+        if (result.value.decision !== 'ALLOW') continue
+        if (sameSignedContent(mutatedL3b, seedInput.l3b)) continue
+        allowed.push(describeAllow(i, result.value))
+      }
 
-    expect(
-      allowed,
-      'a mutation of the L3b content produced an ALLOW: the binding is not checked',
-    ).toEqual([])
-  })
+      expect(
+        allowed,
+        'a mutation of the L3b content produced an ALLOW: the binding is not checked',
+      ).toEqual([])
+    },
+  )
 
   it('the unmutated, genuinely signed token ALLOWs', async () => {
     // The control. Without it, "0 ALLOWs" is equally consistent with "the Gate refuses everything", which
@@ -304,24 +327,28 @@ describe('AT-M10.6 — 1,000 fuzzed L3 mutations produce 0 ALLOWs', () => {
     expect(result.value.reasons.map((r) => r.code)).toContain('VI_CHAIN_INVALID')
   })
 
-  it('every mutation still respects the cap, even when it reaches check 8', async () => {
-    // A second, independent claim: fuzzing must not be able to *overspend* even when it gets past check 4.
-    // A mutation that flips `amount_minor` is caught by check 6 — the amount must equal the locked total —
-    // and neither direction may leave an over-cap reservation behind.
-    const world = await makeWorld({ capMinor: CART_MINOR * 2n, signWithRealChain: true })
-    const random = makeRandom(0x616d_6f75_6e74)
+  it(
+    'every mutation still respects the cap, even when it reaches check 8',
+    { timeout: CRYPTO_HEAVY_MS },
+    async () => {
+      // A second, independent claim: fuzzing must not be able to *overspend* even when it gets past check 4.
+      // A mutation that flips `amount_minor` is caught by check 6 — the amount must equal the locked total —
+      // and neither direction may leave an over-cap reservation behind.
+      const world = await makeWorld({ capMinor: CART_MINOR * 2n, signWithRealChain: true })
+      const random = makeRandom(0x616d_6f75_6e74)
 
-    for (let i = 0; i < 200; i++) {
-      const seedInput = await signedInput(world, i)
-      const result = await evaluate(
-        { ...seedInput, l3a: flipBit(seedInput.l3a, random) },
-        world.deps,
-      )
-      if (!result.ok) continue
-      const snapshot = world.snapshot()
-      expect(snapshot.reserved + snapshot.spent).toBeLessThanOrEqual(snapshot.cap)
-    }
-  })
+      for (let i = 0; i < 200; i++) {
+        const seedInput = await signedInput(world, i)
+        const result = await evaluate(
+          { ...seedInput, l3a: flipBit(seedInput.l3a, random) },
+          world.deps,
+        )
+        if (!result.ok) continue
+        const snapshot = world.snapshot()
+        expect(snapshot.reserved + snapshot.spent).toBeLessThanOrEqual(snapshot.cap)
+      }
+    },
+  )
 
   it('a caller cannot make a forged chain pass by claiming chain_valid: true', async () => {
     // The double's ordering, stated as a test: `seed.verify.chain_valid` is applied **after** real signature

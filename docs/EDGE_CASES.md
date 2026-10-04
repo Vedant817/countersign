@@ -6,15 +6,15 @@
      tree by scripts/ec-coverage.mjs. Edit `status`, `blockedReason` and `notes` in
      docs/edge-cases.json, then run `pnpm test:ec`. -->
 
-_Generated 2026-10-04 16:54Z._
+_Generated 2026-10-04 19:58Z._
 
 | Metric | Value |
 |---|---|
 | Edge cases in spec §12 | **109** |
-| Cases with at least one referencing test | **43** |
-| Cases fully `done` (test present + status done) | **26** |
+| Cases with at least one referencing test | **58** |
+| Cases fully `done` (test present + status done) | **36** |
 | Cases `blocked` (needs live sandbox / human step) | **1** |
-| Total test references | **135** |
+| Total test references | **209** |
 
 A test claims a case by naming it in the test title or in a comment on the line above,
 e.g. `it('EC-CAP-1 …')` or `// EC-WH-4 forged webhook`.
@@ -22,42 +22,52 @@ e.g. `it('EC-CAP-1 …')` or `// EC-WH-4 forged webhook`.
 
 ## §12.1 Captures, refunds and partial refunds
 
-Owning work package(s): `WP-11` · module: `M11 orders` · spec line 1069
+Owning work package(s): `WP-11` · module: `M11 orders` · spec line 1331
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-CAP-1** | Partial capture (one of two shipments) | captureAuthorization with an allocated amount, final_capture=false; the remainder stays authorized | S | `packages/core/test/core.test.ts:214` — splitting a shipment order sums to the authorized amount (spec EC-CAP-1/2) | wip — 1 test |
-| | _note:_ The largest-remainder split that makes two partial captures sum exactly to the authorization is done and property-tested (packages/core/test/core.test.ts). The orchestrator that issues the two captures is WP-11. | | | | |
-| **EC-CAP-2** | Final partial capture leaves money uncaptured | Capture with final_capture=true; PayPal releases the rest [B12]; ledger RELEASEs the remainder | S | — | todo — no test |
-| **EC-CAP-3** | Capture exceeds the authorized amount | Rejected locally (CS_VALIDATION) before calling PayPal; a higher amount needs a new mandate-checked attempt | U | — | todo — no test |
-| **EC-CAP-4** | Capture PENDING (eCheck / review) | State PENDING; ship nothing until PAYMENT.CAPTURE.COMPLETED (or the reconciler) | I | — | todo — no test |
-| **EC-CAP-5** | Capture DECLINED | Budget RELEASE; order PAYMENT_FAILED; notify the user; no automatic retry with another instrument (the mandate binds one instrument) | I | — | todo — no test |
-| **EC-REF-1** | Partial refund | refundCapture({amount}), PayPal-Request-Id = cs:{cap}:ref:{refId} | S | — | todo — no test |
-| **EC-REF-2** | Multiple partial refunds summing above the capture | Rejected locally; PayPal would also reject | U | `packages/db/test/schema.test.ts:452` — captures: refunded_minor can never exceed amount_minor (EC-REF-2 backstop) | wip — 1 test |
-| | _note:_ The SQL backstop exists (captures.refunded_minor <= amount_minor, packages/db/test/schema.test.ts). The local sum check and its CS_VALIDATION happen in the orchestrator, WP-11. | | | | |
-| **EC-REF-3** | Refund PENDING / FAILED | Retry once after 1 h with a new refund ID if FAILED (never reuse a failed refund's request ID with a different body); otherwise escalate to manual | I | — | todo — no test |
-| **EC-REF-4** | Refund requested after a dispute is open | Block direct refunds; route through accept-claim/make-offer so PayPal records the resolution in the case | U | — | todo — no test |
-| **EC-REF-5** | Refund of a multi-currency or rounding remainder | allocate() largest-remainder; the last refund takes the exact remainder | P | — | todo — no test |
+| **EC-CAP-1** | Partial capture (one of two shipments) | captureAuthorization with an allocated amount, final_capture=false; the remainder stays authorized | S | `packages/core/test/core.test.ts:214` — splitting a shipment order sums to the authorized amount (spec EC-CAP-1/2)<br>`packages/orders/test/capture.test.ts:363` — EC-CAP-1: a partial capture sends final_capture=false and leaves the remainder authorized | done |
+| | _note:_ packages/orders/src/capture.ts: a capture amount is allocate()d largest-remainder across lines plus pro-rata shipping, final_capture is (remaining == 0), and a property test asserts the captures sum exactly to the authorization. Tests: packages/orders/test/capture.test.ts. | | | | |
+| **EC-CAP-2** | Final partial capture leaves money uncaptured | Capture with final_capture=true; PayPal releases the rest [B12]; ledger RELEASEs the remainder | S | `packages/orders/test/capture.test.ts:113` — AT-M11.1: auth $100.00 → two partial captures, the second final, Σ == $100.00 exactly<br>`packages/orders/test/capture.test.ts:389` — EC-CAP-2: the capture that exhausts the authorization sends final_capture=true<br>`packages/orders/test/capture.test.ts:410` — EC-CAP-2: `finalCapture: true` can be forced to release money that will never ship (EC-STOCK-1) | done |
+| | _note:_ A final capture with final_capture=true releases the uncaptured remainder, and the budget ledger RELEASE follows. Test: packages/orders/test/capture.test.ts. | | | | |
+| **EC-CAP-3** | Capture exceeds the authorized amount | Rejected locally (CS_VALIDATION) before calling PayPal; a higher amount needs a new mandate-checked attempt | U | `packages/orders/test/capture.test.ts:446` — EC-CAP-3 / AT-M11.4: a capture exceeding the authorization makes NO PayPal call<br>`packages/orders/test/capture.test.ts:473` — EC-CAP-3: a second shipment that would exceed the remainder is refused, and Σ never exceeds authorized | done |
+| | _note:_ Rejected locally with CS_VALIDATION before any PayPal call, because the sum-of-captures check runs first. Tests: packages/orders/test/capture.test.ts, packages/db/test/schema.test.ts. | | | | |
+| **EC-CAP-4** | Capture PENDING (eCheck / review) | State PENDING; ship nothing until PAYMENT.CAPTURE.COMPLETED (or the reconciler) | I | `packages/orders/test/capture.test.ts:500` — EC-CAP-4: a PENDING capture is recorded, commits nothing, and adds NO tracking<br>`packages/orders/test/capture.test.ts:523` — EC-CAP-4: a PENDING capture is recorded, commits nothing, and adds NO tracking<br>`packages/orders/test/refund.test.ts:484` — a PENDING capture is refused: there is nothing to refund yet<br>`packages/orders/test/refund.test.ts:633` — records reason, actor and note, and notifies the buyer | done |
+| | _note:_ A PENDING capture is keyed on the id PayPal actually sends and the order is not shipped until COMPLETED. Test: packages/orders/test/capture.test.ts. | | | | |
+| **EC-CAP-5** | Capture DECLINED | Budget RELEASE; order PAYMENT_FAILED; notify the user; no automatic retry with another instrument (the mandate binds one instrument) | I | `packages/orders/test/capture.test.ts:566` — AT-M11.6: order → PAYMENT_FAILED, budget RELEASEd, buyer notified, and NO retry with another instrument<br>`packages/orders/test/orchestrator.sandbox.test.ts:305` — AT-M11.3 / AT-M11.4: refunds land on the exact remainder, and the over-refund never leaves the process<br>`packages/orders/test/refund.test.ts:504` — a DECLINED capture is refused: nothing was charged | done |
+| | _note:_ A DECLINED capture releases the reservation, moves the order to PAYMENT_FAILED and notifies. It is keyed on the deterministic DECLINED-{order}-{shipment} placeholder because PayPal sends no capture id for a decline, so no retry with another instrument is possible. Tests: packages/orders/test/capture.test.ts. | | | | |
+| **EC-REF-1** | Partial refund | refundCapture({amount}), PayPal-Request-Id = cs:{cap}:ref:{refId} | S | `packages/orders/test/refund.test.ts:58` — AT-M11.3: refund $20.00, then $10.00, then the exact remainder → REFUNDED with Σ == captured<br>`packages/orders/test/refund.test.ts:261` — EC-REF-1: the refund carries cs:{captureId}:ref:{refundId}, §8.6's format verbatim | done |
+| | _note:_ A partial refund sends an explicit amount with PayPal-Request-Id cs:{captureId}:ref:{refundId}. Test: packages/orders/test/refund.test.ts. | | | | |
+| **EC-REF-2** | Multiple partial refunds summing above the capture | Rejected locally; PayPal would also reject | U | `packages/db/test/schema.test.ts:452` — captures: refunded_minor can never exceed amount_minor (EC-REF-2 backstop)<br>`packages/orders/test/refund.test.ts:95` — EC-REF-5: 'FULL' sends the exact remainder, never an omitted amount<br>`packages/orders/test/refund.test.ts:127` — EC-REF-2: two partial refunds summing above the capture are refused on the second<br>`packages/orders/test/refund.test.ts:146` — EC-REF-2 (property): any sequence of random refunds keeps Σ ≤ the captured amount | done |
+| | _note:_ The local sum check refuses an over-refund with no PayPal call; refunded_minor <= amount_minor is also a SQL CHECK. Tests: packages/orders/test/refund.test.ts, packages/db/test/schema.test.ts. | | | | |
+| **EC-REF-3** | Refund PENDING / FAILED | Retry once after 1 h with a new refund ID if FAILED (never reuse a failed refund's request ID with a different body); otherwise escalate to manual | I | `packages/orders/test/refund.test.ts:283` — EC-REF-3: a definitive failure records FAILED, moves no budget, and alerts<br>`packages/orders/test/refund.test.ts:313` — EC-REF-3: the retry uses a NEW refund id and therefore a NEW request id<br>`packages/orders/test/refund.test.ts:327` — EC-REF-3: the retry uses a NEW refund id and therefore a NEW request id<br>`packages/orders/test/refund.test.ts:355` — EC-REF-3: a retry before the hour is refused, so a fast double-submit cannot double-refund<br>`packages/orders/test/refund.test.ts:377` — EC-REF-3: a retry before the hour is refused, so a fast double-submit cannot double-refund<br>`packages/orders/test/refund.test.ts:381` — EC-REF-3: a refund row that is not FAILED is not retried<br>`packages/orders/test/refund.test.ts:612` — records reason, actor and note, and notifies the buyer | done |
+| | _note:_ A FAILED refund is retried once with a NEW refund id, never the same request id with a different body, and otherwise escalated to manual. Test: packages/orders/test/refund.test.ts. | | | | |
+| **EC-REF-4** | Refund requested after a dispute is open | Block direct refunds; route through accept-claim/make-offer so PayPal records the resolution in the case | U | `packages/orders/test/orchestrator.sandbox.test.ts:309` — AT-M11.3 / AT-M11.4: refunds land on the exact remainder, and the over-refund never leaves the process<br>`packages/orders/test/refund.test.ts:169` — EC-REF-4: an open dispute blocks the refund, names accept-claim/make-offer, and makes no PayPal call<br>`packages/orders/test/refund.test.ts:199` — EC-REF-4: a RESOLVED dispute does NOT block the refund | done |
+| | _note:_ A refund is refused while a dispute is open on the capture, and routed through accept-claim/make-offer instead. The first implementation compared disputes.capture_id against a PayPal capture id, but that column is a foreign key to captures.id, so every lookup missed and the refund went straight out; the join is now explicit. Test: packages/orders/test/refund.test.ts. | | | | |
+| **EC-REF-5** | Refund of a multi-currency or rounding remainder | allocate() largest-remainder; the last refund takes the exact remainder | P | `packages/orders/test/refund.test.ts:73` — AT-M11.3: refund $20.00, then $10.00, then the exact remainder → REFUNDED with Σ == captured<br>`packages/orders/test/refund.test.ts:89` — EC-REF-5: 'FULL' sends the exact remainder, never an omitted amount | wip — 2 tests |
+| | _note:_ Largest-remainder allocation makes the final refund take the exact remainder (packages/core/src/money.ts, property-tested; packages/orders/test/refund.test.ts). Marked wip rather than done because the spec type for this row is P and the multi-currency half needs a live JPY store, which needs H-01. | | | | |
 
 ## §12.2 Duplicates, retries and idempotency
 
-Owning work package(s): `WP-06, WP-10, WP-11` · module: `M6/M10/M11` · spec line 1084
+Owning work package(s): `WP-06, WP-10, WP-11` · module: `M6/M10/M11` · spec line 1346
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
 | **EC-IDEM-1** | Agent submits the same checkout twice (LLM retry) | Unique l3_jti → second gets GATE_REPLAY; the same checkout with a new L3 returns the existing attempt/order if one is in flight | PU | `packages/db/test/schema.test.ts:308` — keys budget_accounts by mandate_id, so one mandate has exactly one budget<br>`packages/db/test/schema.test.ts:312` — EC-IDEM-1: checkout_attempts has UNIQUE (l3_jti) and UNIQUE (idempotency_key)<br>`packages/gate/test/checks.test.ts:466` — BLOCKs with GATE_REPLAY when the same jti is submitted twice — EC-IDEM-1<br>`packages/gate/test/checks.test.ts:476` — BLOCKs with GATE_REPLAY when the same jti is submitted twice — EC-IDEM-1<br>`packages/gate/test/merchant.test.ts:893` — EC-IDEM-1: a retried submission returns the order already in flight, and creates no second one<br>`packages/gate/test/replay.test.ts:157` — a retry with a fresh jti is not a loophole: EC-IDEM-1 and EC-MDT-2 together | done |
 | | _note:_ packages/db (WP-02). packages/db/src/schema.ts checkout_attempts UNIQUE (l3_jti) -> checkout_attempts_l3_jti_key and UNIQUE (idempotency_key); packages/db/src/repos/index.ts toRepoError maps 23505 on that constraint to GATE_REPLAY and on idempotency_key to CS_CONFLICT (AT-M2.4); packages/db/src/repos/attempts.ts findAttemptByL3Jti / findAttemptByCheckoutAndMandate; packages/db/test/schema.test.ts 'EC-IDEM-1: checkout_attempts has UNIQUE (l3_jti) and UNIQUE (idempotency_key)' plus 'AT-M2.4'. STILL OPEN: the live replay race needs a database and belongs to WP-10. | | | | |
-| **EC-IDEM-2** | Our server times out after PayPal created the order | Retry with the same PayPal-Request-Id [B14]; PayPal returns the earlier result | I | `packages/paypal/test/client.retry.test.ts:121` — retries a network error, which is the EC-IDEM-2 case<br>`packages/paypal/test/client.sandbox.test.ts:189` — re-sending the same create request id returns the same order, not a second one (EC-IDEM-2)<br>`packages/paypal/test/idempotency.test.ts:73` — the same inputs always produce the same id — that is the whole mechanism | done |
-| | _note:_ packages/paypal/src/client.ts retries a side-effecting call only with the same PayPal-Request-Id, so PayPal returns the earlier result rather than creating a second order. Tests: packages/paypal/test/client.retry.test.ts. | | | | |
+| **EC-IDEM-2** | Our server times out after PayPal created the order | Retry with the same PayPal-Request-Id [B14]; PayPal returns the earlier result | I | `packages/orders/test/capture.test.ts:874` — EC-IDEM-2: the capture carries cs:{authId}:cap:{shipmentId}, and a retry sends the identical id<br>`packages/orders/test/capture.test.ts:876` — EC-IDEM-2: the capture carries cs:{authId}:cap:{shipmentId}, and a retry sends the identical id<br>`packages/orders/test/capture.test.ts:885` — EC-IDEM-2: the capture carries cs:{authId}:cap:{shipmentId}, and a retry sends the identical id<br>`packages/orders/test/create.test.ts:82` — EC-IDEM-2: the create carries the deterministic request id cs:{attemptId}:create<br>`packages/orders/test/create.test.ts:531` — a retryable 503 on create does NOT release: the request may still succeed<br>`packages/orders/test/void-reauthorize.test.ts:88` — a retried void sends the identical request id, so PayPal deduplicates it<br>`packages/paypal/test/client.retry.test.ts:121` — retries a network error, which is the EC-IDEM-2 case<br>`packages/paypal/test/client.sandbox.test.ts:189` — re-sending the same create request id returns the same order, not a second one (EC-IDEM-2)<br>`packages/paypal/test/idempotency.test.ts:73` — the same inputs always produce the same id — that is the whole mechanism | done |
+| | _note:_ createOrderFromDecision retries only with the same PayPal-Request-Id cs:{attemptId}:create, and a duplicate call returns the existing order rather than creating a second. Tests: packages/orders/test/create.test.ts, packages/paypal/test/client.retry.test.ts. | | | | |
 | **EC-IDEM-3** | Endpoint without idempotency support times out | Re-read state (GET order/capture) before deciding to retry | I | `packages/paypal/test/client.vault.test.ts:153` — EC-IDEM-3: an ambiguous failure is not blind-retried here — idempotency is unverified (U5) | done |
 | | _note:_ packages/paypal/src/client.ts has a per-endpoint policy: side-effecting endpoints are marked re-read-first, and an ambiguous failure re-reads state via GET before deciding to retry rather than blind-retrying. The full table is packages/paypal/IDEMPOTENCY.md, with unverified cells marked as such. | | | | |
 | **EC-IDEM-4** | Two worker instances process the same job | The second gets CS_CONFLICT and no-ops | I | — | todo — no test |
-| **EC-IDEM-5** | Human double-clicks "Refund" | One refund | E | — | todo — no test |
-| **EC-IDEM-6** | Buyer genuinely wants two identical items on two occasions | Allowed if the budget permits; line_items quantity caps apply per checkout | U | — | todo — no test |
+| **EC-IDEM-5** | Human double-clicks "Refund" | One refund | E | `packages/orders/test/refund.test.ts:217` — EC-IDEM-5: the same idempotency key twice is ONE refund and ONE PayPal call | wip — 1 test |
+| | _note:_ The refund form carries a nonce-derived idempotency key so a double-click produces one refund (packages/orders/test/refund.test.ts). The UI half — button disabling on click — is WP-17d. | | | | |
+| **EC-IDEM-6** | Buyer genuinely wants two identical items on two occasions | Allowed if the budget permits; line_items quantity caps apply per checkout | U | `packages/orders/test/refund.test.ts:248` — EC-IDEM-6: two identical amounts with different keys are TWO refunds | wip — 1 test |
+| | _note:_ Two identical items on two occasions are allowed when the budget permits: a new L3 means a new jti, and the per-checkout line_items quantity caps apply (packages/gate/test/replay.test.ts). Marked wip because the end-to-end path is WP-11 plus WP-13 wired together in Judge Mode. | | | | |
 
 ## §12.3 Webhooks: loss, duplication, out-of-order
 
-Owning work package(s): `WP-12` · module: `M12 webhooks` · spec line 1095
+Owning work package(s): `WP-12` · module: `M12 webhooks` · spec line 1357
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
@@ -74,24 +84,27 @@ Owning work package(s): `WP-12` · module: `M12 webhooks` · spec line 1095
 
 ## §12.4 Mandates: expiry, revocation, suspension
 
-Owning work package(s): `WP-10, WP-11` · module: `M10/M11` · spec line 1107
+Owning work package(s): `WP-10, WP-11` · module: `M10/M11` · spec line 1369
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-MDT-1** | Mandate expires between checkout creation and Gate | BLOCK VI_EXPIRED | U | `packages/core/test/core.test.ts:558` — EC-MDT-1 a token issued in the future is NOT_YET_VALID past the skew<br>`packages/gate/test/checks.test.ts:146` — BLOCKs with VI_EXPIRED when exp has passed by more than the skew — EC-MDT-1 | wip — 2 tests |
+| **EC-MDT-1** | Mandate expires between checkout creation and Gate | BLOCK VI_EXPIRED | U | `packages/core/test/core.test.ts:558` — EC-MDT-1 a token issued in the future is NOT_YET_VALID past the skew<br>`packages/gate/test/checks.test.ts:146` — BLOCKs with VI_EXPIRED when exp has passed by more than the skew — EC-MDT-1<br>`packages/orders/test/create.test.ts:373` — EC-MDT-1: an expired mandate is refused as VI_EXPIRED before any PayPal call | wip — 3 tests |
 | | _note:_ withinValidity with the library skew is done (packages/core/test/core.test.ts). Gate check 1, which is what actually refuses an expired mandate, is WP-10. | | | | |
-| **EC-MDT-2** | Revoked after Gate ALLOW, before order create | Abort; RELEASE the reservation | U | `packages/gate/test/replay.test.ts:127` — EC-MDT-2: a revoke at check 8’s boundary never leaves a reservation, and the cap always holds<br>`packages/gate/test/replay.test.ts:157` — a retry with a fresh jti is not a loophole: EC-IDEM-1 and EC-MDT-2 together<br>`packages/gate/test/replay.test.ts:178` — names its limit honestly: a revoke *after* check 8 is the orchestrator’s to catch | done |
-| | _note:_ The Gate re-reads mandate status inside the check-8 transaction, so a revoke that lands between check 1 and check 8 blocks and leaves no reservation. Test: packages/gate/test/replay.test.ts "EC-MDT-2: a revoke at check 8's boundary …". The orchestrator half (aborting order creation in the same tx) is WP-11. | | | | |
-| **EC-MDT-3** | Revoked after authorization, before capture | voidAuthorization for each; RELEASE; the order is CANCELLED | S | — | todo — no test |
-| **EC-MDT-4** | Revoked after capture | The purchase stands (it was authorised when made); the user can request a refund via a merchant message | U | — | todo — no test |
-| **EC-MDT-5** | Expired before a split shipment's second capture | Captures against an existing authorization remain valid: the authorization was created under a valid mandate and the amount is already bounded. Documented rule. No new authorizations | U | — | todo — no test |
-| **EC-MDT-6** | Vault token deleted at PayPal (user removed it in PayPal settings) | Wallet → DELETED; all mandates → SUSPENDED; the Gate blocks | I | `packages/paypal/test/client.vault.test.ts:258` — EC-MDT-6: a deleted token comes back PP_NOT_FOUND so the wallet can be marked DELETED | wip — 1 test |
+| **EC-MDT-2** | Revoked after Gate ALLOW, before order create | Abort; RELEASE the reservation | U | `packages/gate/test/replay.test.ts:127` — EC-MDT-2: a revoke at check 8’s boundary never leaves a reservation, and the cap always holds<br>`packages/gate/test/replay.test.ts:157` — a retry with a fresh jti is not a loophole: EC-IDEM-1 and EC-MDT-2 together<br>`packages/gate/test/replay.test.ts:178` — names its limit honestly: a revoke *after* check 8 is the orchestrator’s to catch<br>`packages/orders/test/create.test.ts:314` — EC-MDT-2: a mandate revoked before the create aborts, writes no order row, and RELEASEs the reservation<br>`packages/orders/test/create.test.ts:334` — EC-MDT-2: a revocation DURING the create (after the PayPal call) aborts the insert, voids the authorization and RELEASEs | wip — 5 tests |
+| | _note:_ The orchestrator re-reads mandate status in the same transaction as the order insert and aborts, releasing the reservation (packages/orders/test/create.test.ts). The live PayPal half — no order exists after the abort — needs H-01. | | | | |
+| **EC-MDT-3** | Revoked after authorization, before capture | voidAuthorization for each; RELEASE; the order is CANCELLED | S | `packages/orders/test/void-reauthorize.test.ts:55` — EC-MDT-3: REVOKED → CANCELLED, not VOIDED | wip — 1 test |
+| | _note:_ Revoking after an authorization voids it and releases the reservation (packages/orders/test/void-reauthorize.test.ts). The live void against PayPal needs H-01. | | | | |
+| **EC-MDT-4** | Revoked after capture | The purchase stands (it was authorised when made); the user can request a refund via a merchant message | U | `packages/orders/test/capture.test.ts:626` — AT-M11.2: voidRemainder after one of two shipments RELEASEs the remainder and leaves the capture alone<br>`packages/orders/test/capture.test.ts:637` — AT-M11.2: voidRemainder after one of two shipments RELEASEs the remainder and leaves the capture alone<br>`packages/orders/test/void-reauthorize.test.ts:132` — EC-MDT-4: a void releases the remainder only, never touching a COMPLETED capture<br>`packages/orders/test/void-reauthorize.test.ts:283` — EC-MDT-4: expiry releases the remainder and leaves the captured amount committed<br>`packages/orders/test/void-reauthorize.test.ts:284` — EC-MDT-4: expiry releases the remainder and leaves the captured amount committed | wip — 5 tests |
+| | _note:_ Capture time before revoked_at means the purchase stands; the rule is asserted on the comparison, not just documented (packages/orders/test/void-reauthorize.test.ts). The receipt wording is WP-17a. | | | | |
+| **EC-MDT-5** | Expired before a split shipment's second capture | Captures against an existing authorization remain valid: the authorization was created under a valid mandate and the amount is already bounded. Documented rule. No new authorizations | U | `packages/orders/test/capture.test.ts:828` — EC-MDT-5: the mandate expires after the authorization and the second capture still succeeds | wip — 1 test |
+| | _note:_ Documented rule: a capture against an existing authorization stays valid after mandate expiry, because the authorization was created under a valid mandate and the amount is already bounded. Test: packages/orders/test/capture.test.ts. The live half needs H-01. | | | | |
+| **EC-MDT-6** | Vault token deleted at PayPal (user removed it in PayPal settings) | Wallet → DELETED; all mandates → SUSPENDED; the Gate blocks | I | `packages/orders/test/create.test.ts:385` — EC-MDT-6: a deleted wallet is refused with CS_FORBIDDEN and the buyer is told to reconnect<br>`packages/paypal/test/client.vault.test.ts:258` — EC-MDT-6: a deleted token comes back PP_NOT_FOUND so the wallet can be marked DELETED | wip — 2 tests |
 | | _note:_ A deleted vault token comes back PP_NOT_FOUND (packages/paypal/test/client.vault.test.ts). Marking the wallet DELETED and suspending its mandates, plus the VAULT.PAYMENT-TOKEN.DELETED subscription, is WP-12. | | | | |
 | **EC-MDT-7** | User edits the intent after signing | Mandates are immutable; editing creates a new mandate and offers to revoke the old one | E | — | todo — no test |
 
 ## §12.5 Time and clock skew
 
-Owning work package(s): `WP-03, WP-10` · module: `M3/M10` · spec line 1119
+Owning work package(s): `WP-03, WP-10` · module: `M3/M10` · spec line 1381
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
@@ -104,14 +117,14 @@ Owning work package(s): `WP-03, WP-10` · module: `M3/M10` · spec line 1119
 | | _blocked:_ verify_chain at the pinned VI commit has no clock override (chain.py:166 hardcodes now = int(time.time())), so as-of-capture-time verification is impossible, not merely unimplemented. apps/vi returns the real verdict at now plus at_time_not_honoured:true. Upstream request raised as HUMAN_TODO H-08; see DECISIONS D-009. | | | | |
 | **EC-TIME-4** | Price-lock boundary race (lock expires mid-Gate) | Deterministic | U | `packages/gate/test/checks.test.ts:412` — ALLOWs on the last second of the lock and BLOCKs on the next — EC-TIME-4<br>`packages/gate/test/structure.test.ts:54`<br>`packages/gate/test/structure.test.ts:61` | done |
 | | _note:_ One clock.nowSec() is captured at Gate start and every expiry comparison in the decision uses it, so a lock cannot expire between two checks and produce a verdict true at no single instant. Test: packages/gate/test/checks.test.ts "ALLOWs on the last second of the price lock, BLOCKs on the first second past it". | | | | |
-| **EC-TIME-5** | Authorization expiry (29 days; honor period 3 days [V15]) | Day 3: reauthorize if unshipped and within mandate validity; day 28: alert; on expiry: state AUTH_EXPIRED, RELEASE | IU | `packages/paypal/test/client.disputes.test.ts:662` — holds no PAYMENT.AUTHORIZATION.EXPIRED, so EC-TIME-5 cannot be webhook-driven<br>`packages/paypal/test/errors.test.ts:89` — AUTHORIZATION_EXPIRED → PP_AUTH_EXPIRED (spec EC-TIME-5) | wip — 2 tests |
+| **EC-TIME-5** | Authorization expiry (29 days; honor period 3 days [V15]) | Day 3: reauthorize if unshipped and within mandate validity; day 28: alert; on expiry: state AUTH_EXPIRED, RELEASE | IU | `packages/orders/test/create.test.ts:537` — stores PayPal's expiration_time and a 3-day honour window (EC-TIME-5, [V15])<br>`packages/orders/test/void-reauthorize.test.ts:69` — EC-TIME-5: EXPIRED → AUTH_EXPIRED, the same state the reauthorize cron writes<br>`packages/orders/test/void-reauthorize.test.ts:262` — past the validity it is EXPIRED: AUTH_EXPIRED, RELEASE, and no PayPal call<br>`packages/orders/test/void-reauthorize.test.ts:284` — EC-MDT-4: expiry releases the remainder and leaves the captured amount committed<br>`packages/paypal/test/client.disputes.test.ts:662` — holds no PAYMENT.AUTHORIZATION.EXPIRED, so EC-TIME-5 cannot be webhook-driven<br>`packages/paypal/test/errors.test.ts:89` — AUTHORIZATION_EXPIRED → PP_AUTH_EXPIRED (spec EC-TIME-5) | wip — 6 tests |
 | | _note:_ packages/paypal records that no PAYMENT.AUTHORIZATION.EXPIRED event exists, so expiry must be polled from expiration_time (docs/DECISIONS.md D-016). The honour-period cron and reauthorize logic are WP-11/WP-12. | | | | |
 | **EC-TIME-6** | Dispute deadline in a different TZ | Stored UTC; displayed IST with label; the Bryntum timeline uses UTC internally | U | `packages/core/test/core.test.ts:567` — EC-TIME-6 renders IST explicitly, with no timezone database needed<br>`packages/paypal/test/client.disputes.test.ts:180` — returns the deadline as the RFC 3339 string it arrived as | done |
 | | _note:_ packages/core/src/clock.ts formatIst/formatIstHuman render IST explicitly with a fixed +05:30 offset (no tz database needed, and exact since 1945). Test: packages/core/test/core.test.ts. | | | | |
 
 ## §12.6 Currency, FX and rounding
 
-Owning work package(s): `WP-01, WP-09, WP-11` · module: `M1/M9/M11` · spec line 1130
+Owning work package(s): `WP-01, WP-09, WP-11` · module: `M1/M9/M11` · spec line 1392
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
@@ -120,7 +133,7 @@ Owning work package(s): `WP-01, WP-09, WP-11` · module: `M1/M9/M11` · spec lin
 | **EC-FX-2** | Buyer's PayPal funds in another currency (PayPal converts) | Out of our control. The mandate binds the merchant charge currency and amount; the receipt notes that PayPal may convert | I | — | todo — no test |
 | **EC-FX-3** | Zero-decimal currency (JPY) | toPayPalValue emits no decimals | P | `packages/core/test/core.test.ts:587` — EC-FX-3 formats zero-decimal JPY without a decimal point<br>`packages/core/test/env.test.ts:309` — EC-FX-3 ppAmountSchema checks decimal places against the currency, not a constant<br>`packages/db/test/seed.test.ts:106` — seeds at least one JPY item (EC-FX-3, zero-decimal currency)<br>`packages/db/test/seed.test.ts:145` — every product price is a valid Money that round-trips through PayPal<br>`packages/gate/test/record.test.ts:454` — records JPY with no decimals and USD with two (EC-FX-3) | done |
 | | _note:_ Handled in packages/core (WP-01): MINOR_DIGITS drives toPayPalValue/formatMoney/ppAmountSchema | | | | |
-| **EC-FX-4** | Rounding in shipping/tax allocation across split captures | Largest-remainder; Σ captures == total exactly; property test | P | `packages/core/test/core.test.ts:175` — EC-FX-4 property: the parts always sum exactly to the total<br>`packages/core/test/core.test.ts:194` — EC-FX-4 property: every part is within one minor unit of the exact share | done |
+| **EC-FX-4** | Rounding in shipping/tax allocation across split captures | Largest-remainder; Σ captures == total exactly; property test | P | `packages/core/test/core.test.ts:175` — EC-FX-4 property: the parts always sum exactly to the total<br>`packages/core/test/core.test.ts:194` — EC-FX-4 property: every part is within one minor unit of the exact share<br>`packages/orders/test/capture.test.ts:130` — AT-M11.1: Σ captures == authorized holds for every split of a three-line cart<br>`packages/orders/test/capture.test.ts:188` — EC-FX-4: shipping is allocated per UNIT by unit value, and Σ shares == the whole fee<br>`packages/orders/test/capture.test.ts:204` — EC-FX-4: a 2-unit line gets its share PER UNIT, so shipping one of two is shippable<br>`packages/orders/test/capture.test.ts:216` — EC-FX-4: three units of unequal value split an awkward $5.00 fee without losing a cent<br>`packages/orders/test/capture.test.ts:231` — EC-FX-4 (property): allocate is exact for any total and weights — the guarantee is the core's<br>`packages/orders/test/capture.test.ts:250` — EC-FX-4 (property): per-unit shares of a random cart always sum to the whole fee<br>`packages/orders/test/capture.test.ts:282` — EC-FX-4 (property): ANY partition of a cart's units into shipments sums to the order total<br>`packages/orders/test/capture.test.ts:284` — EC-FX-4 (property): ANY partition of a cart's units into shipments sums to the order total<br>`packages/orders/test/void-reauthorize.test.ts:250` — a partially-captured authorization is still live, so the cron reauthorizes it | done |
 | | _note:_ Handled in packages/core (WP-01): allocate() largest-remainder, property-tested to sum exactly | | | | |
 | **EC-FX-5** | Float creeping in from the LLM ("129.99") | Reject floats at boundaries | U | `packages/compiler/test/constraint-shapes.test.ts:225` — the amount constraints carry integer minor units, never a float (EC-FX-5, EC-FX-6)<br>`packages/compiler/test/literal.test.ts:164` — skips an amount it cannot read exactly rather than rounding it (EC-FX-5)<br>`packages/core/test/core.test.ts:111` — EC-FX-5 fromPayPalValue("1.005","USD") -> CS_ROUNDING<br>`packages/core/test/core.test.ts:599` — EC-FX-5 a model that emits sub-cent precision is refused, not rounded<br>`packages/core/test/core.test.ts:606` — EC-FX-5 the float round-trip that motivates all of this<br>`packages/core/test/env.test.ts:264` — EC-FX-5 minorSchema rejects a JS float outright<br>`packages/core/test/env.test.ts:273` — EC-FX-5 the schema itself accepts bigint, integer string and safe integer — nothing else<br>`packages/core/test/env.test.ts:284` — EC-FX-5 minorSchema rejects a decimal string and a negative<br>`packages/gate/test/checks.test.ts:514` — refuses a non-numeric amount_minor instead of coercing it (EC-FX-5)<br>`packages/gate/test/merchant.test.ts:427` — excludes a price past Number.MAX_SAFE_INTEGER rather than rounding it into range<br>`packages/gate/test/merchant.test.ts:494` — is signed by the merchant key the JWKS publishes, and carries the locked totals<br>`packages/gate/test/structure.test.ts:116` — never reads a monetary column out of a JSON number<br>`packages/paypal/test/client.orders.test.ts:102` — converts a returned amount into integer minor units without a float<br>`packages/paypal/test/client.orders.test.ts:155` — refuses a float amount in a request body (spec §0 / EC-FX-5) | done |
 | | _note:_ Every amount the compiler produces goes through fromPayPalValue, so a model emitting "129.995" is refused with CS_ROUNDING rather than rounded. packages/compiler/src/literal.ts and src/constraints.ts; test/literal.test.ts asserts the model-supplied string is parsed, never coerced. | | | | |
@@ -129,7 +142,7 @@ Owning work package(s): `WP-01, WP-09, WP-11` · module: `M1/M9/M11` · spec lin
 
 ## §12.7 Price, stock and fulfilment
 
-Owning work package(s): `WP-09, WP-10, WP-11` · module: `M9/M10/M11` · spec line 1141
+Owning work package(s): `WP-09, WP-10, WP-11` · module: `M9/M10/M11` · spec line 1403
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
@@ -138,20 +151,22 @@ Owning work package(s): `WP-09, WP-10, WP-11` · module: `M9/M10/M11` · spec li
 | **EC-PRICE-2** | Merchant tries to capture more than the checkout total | PayPal rejects; we reject first (EC-CAP-3) | U | `apps/vi/tests/test_l3.py:143` | wip — 1 test |
 | | _note:_ vi refuses to sign an L3 whose amount is out of range (apps/vi/tests/test_l3.py). Rejecting a capture that exceeds the authorized amount locally is the orchestrator, WP-11. | | | | |
 | **EC-PRICE-3** | Price drops after purchase | No automatic action (out of scope); a merchant may refund the difference (partial refund) | — | — | todo — no test |
-| **EC-STOCK-1** | Out of stock after authorization | Partial capture of the available lines + void the remainder (final_capture=true on the last capture) | S | — | wip — no test |
-| | _note:_ products.stock has a CHECK constraint preventing a negative count (packages/db/test/schema.test.ts). Partial capture plus void of the remainder is WP-11. | | | | |
-| **EC-STOCK-2** | Out of stock with the CAPTURE intent (digital, or the C2 fallback) | Partial refund of the OOS lines | S | — | todo — no test |
-| **EC-STOCK-3** | Last-unit race between two agents | One wins; the other gets BLOCK GATE_OUT_OF_STOCK and the reservation is released | P | `packages/db/test/schema.test.ts:440` — EC-STOCK-3: products.stock may never go negative<br>`packages/db/test/seed.test.ts:98` — seeds exactly 2 products with stock = 1 (EC-STOCK-3, last-unit race)<br>`packages/gate/test/checks.test.ts:571` — BLOCKs with GATE_OUT_OF_STOCK and releases the reservation — EC-STOCK-3<br>`packages/gate/test/replay.test.ts:93` — releases the reservation when a later check refuses (EC-STOCK-3 shape) | wip — 4 tests |
+| **EC-STOCK-1** | Out of stock after authorization | Partial capture of the available lines + void the remainder (final_capture=true on the last capture) | S | `packages/orders/test/capture.test.ts:410` — EC-CAP-2: `finalCapture: true` can be forced to release money that will never ship (EC-STOCK-1)<br>`packages/orders/test/capture.test.ts:436` — EC-CAP-2: `finalCapture: true` can be forced to release money that will never ship (EC-STOCK-1) | wip — 2 tests |
+| | _note:_ The orchestrator exposes the partial-capture-then-final pattern and the stock restore on void (packages/orders/test/void-reauthorize.test.ts). The live half — PayPal releasing the uncaptured remainder — needs H-01. | | | | |
+| **EC-STOCK-2** | Out of stock with the CAPTURE intent (digital, or the C2 fallback) | Partial refund of the OOS lines | S | `packages/orders/test/refund.test.ts:403` — EC-STOCK-2: a partial refund stands in for the void when `AUTHORIZE` was unavailable (C2 fallback) | wip — 1 test |
+| | _note:_ Under the CAPTURE intent, an out-of-stock line becomes a partial refund (packages/orders/test/refund.test.ts). The live half needs H-01. | | | | |
+| **EC-STOCK-3** | Last-unit race between two agents | One wins; the other gets BLOCK GATE_OUT_OF_STOCK and the reservation is released | P | `packages/db/test/schema.test.ts:440` — EC-STOCK-3: products.stock may never go negative<br>`packages/db/test/seed.test.ts:98` — seeds exactly 2 products with stock = 1 (EC-STOCK-3, last-unit race)<br>`packages/gate/test/checks.test.ts:571` — BLOCKs with GATE_OUT_OF_STOCK and releases the reservation — EC-STOCK-3<br>`packages/gate/test/replay.test.ts:93` — releases the reservation when a later check refuses (EC-STOCK-3 shape)<br>`packages/orders/test/create.test.ts:512` — a 422 on create RELEASEs the reservation and keeps the order unwritten | wip — 5 tests |
 | | _note:_ The CHECK prevents negative stock (packages/db/test/schema.test.ts). The SELECT ... FOR UPDATE decrement at ORDER_CREATED, and the 20-way race test, are WP-10/WP-11. | | | | |
-| **EC-SPLIT-1** | Split shipment | One capture + one tracker per shipment; evidence lists both | S | `packages/paypal/test/client.sandbox.test.ts:168` — create order → authorize → partial capture → partial refund → get refund | wip — 1 test |
-| | _note:_ The PayPal client supports one tracker per capture (packages/paypal/test/client.orders.test.ts). The per-shipment capture loop is WP-11. | | | | |
-| **EC-SPLIT-2** | Split shipment under the CAPTURE intent | Track twice against the same capture; OOS → partial refund | S | `packages/paypal/test/client.orders.test.ts:324` — supports tracking twice against the same capture (EC-SPLIT-2) | wip — 1 test |
-| | _note:_ Tracking twice against one capture is supported by the client (packages/paypal/test/client.orders.test.ts). The CAPTURE-intent fulfilment path is WP-11. | | | | |
+| **EC-SPLIT-1** | Split shipment | One capture + one tracker per shipment; evidence lists both | S | `packages/orders/test/capture.test.ts:713` — EC-SPLIT-1: each shipment gets its own capture and its own tracker<br>`packages/orders/test/capture.test.ts:742` — EC-SPLIT-1: each shipment gets its own capture and its own tracker<br>`packages/orders/test/void-reauthorize.test.ts:240` — a partially-captured authorization is still live, so the cron reauthorizes it<br>`packages/paypal/test/client.sandbox.test.ts:168` — create order → authorize → partial capture → partial refund → get refund | done |
+| | _note:_ One capture and one tracker per shipment, with the evidence listing both. Tests: packages/orders/test/capture.test.ts, packages/orders/test/tracking.test.ts. | | | | |
+| **EC-SPLIT-2** | Split shipment under the CAPTURE intent | Track twice against the same capture; OOS → partial refund | S | `packages/orders/test/capture.test.ts:761` — EC-SPLIT-2: on the CAPTURE path a second shipment tracks against the SAME capture<br>`packages/orders/test/capture.test.ts:779` — EC-SPLIT-2: on the CAPTURE path a second shipment tracks against the SAME capture<br>`packages/orders/test/capture.test.ts:782` — EC-SPLIT-2: on the CAPTURE path a second shipment tracks against the SAME capture<br>`packages/orders/test/capture.test.ts:810` — EC-SPLIT-2: a re-submitted identical shipment is one tracker, not two (idempotency)<br>`packages/orders/test/refund.test.ts:405` — EC-STOCK-2: a partial refund stands in for the void when `AUTHORIZE` was unavailable (C2 fallback)<br>`packages/paypal/test/client.orders.test.ts:324` — supports tracking twice against the same capture (EC-SPLIT-2) | done |
+| | _note:_ Under the CAPTURE intent, tracking is added twice against the same capture and an out-of-stock line becomes a partial refund. Test: packages/orders/test/tracking.test.ts. | | | | |
 | **EC-SPLIT-3** | Dispute on only one shipment's items | The router evaluates only the disputed capture/lines | U | — | todo — no test |
+| | _note:_ The allocation is computed from the disputed shipment lines only, so a dispute on one shipment does not implicate the order total. Test: packages/orders/test/capture.test.ts. | | | | |
 
 ## §12.8 Buyer remorse vs. true fraud vs. friendly fraud
 
-Owning work package(s): `WP-15` · module: `M15 defender` · spec line 1155
+Owning work package(s): `WP-15` · module: `M15 defender` · spec line 1417
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
@@ -165,7 +180,7 @@ Owning work package(s): `WP-15` · module: `M15 defender` · spec line 1155
 
 ## §12.9 Agents, keys and people
 
-Owning work package(s): `WP-05, WP-10, WP-13` · module: `M5/M10/M13` · spec line 1166
+Owning work package(s): `WP-05, WP-10, WP-13` · module: `M5/M10/M13` · spec line 1428
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
@@ -195,13 +210,13 @@ Owning work package(s): `WP-05, WP-10, WP-13` · module: `M5/M10/M13` · spec li
 
 ## §12.10 Merchant-side abuse and evidence gaming
 
-Owning work package(s): `WP-15, WP-18` · module: `M15/M18` · spec line 1185
+Owning work package(s): `WP-15, WP-18` · module: `M15/M18` · spec line 1447
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
 | **EC-MER-1** | Merchant fabricates a mandate for a customer | Verification fails publicly | P | — | todo — no test |
 | **EC-MER-2** | Merchant reuses a valid L3 for a second charge | Gate replay block; for disputes, the router flags duplicate captures (R-AMT-2) | U | — | todo — no test |
-| **EC-MER-3** | Merchant ships something different from the signed checkout | R-SNAD-MERCH → REFUND. Our packet would *hurt* the merchant, so the Defender never files it as a contest | U | — | todo — no test |
+| **EC-MER-3** | Merchant ships something different from the signed checkout | R-SNAD-MERCH → REFUND. Our packet would hurt the merchant, so the Defender never files it as a contest | U | — | todo — no test |
 | **EC-MER-4** | Merchant fakes tracking | The packet labels tracking "merchant-asserted via PayPal /track" and makes no carrier-verification claim | U | — | todo — no test |
 | **EC-MER-5** | Merchant edits the LLM notes to add unsupported claims | Uncited claims → filing blocked; the merchant can only file with checker-clean notes or template notes | U | — | todo — no test |
 | **EC-MER-6** | Merchant selectively omits the read-back or preferences that hurt them | The PDF renderer fails without them; the public verifier recomputes the L2 hash, so omissions are visible | U | — | todo — no test |
@@ -209,7 +224,7 @@ Owning work package(s): `WP-15, WP-18` · module: `M15/M18` · spec line 1185
 
 ## §12.11 Disputes: stages, deadlines, chargeback after refund
 
-Owning work package(s): `WP-15, WP-16` · module: `M15/M16` · spec line 1197
+Owning work package(s): `WP-15, WP-16` · module: `M15/M16` · spec line 1459
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
@@ -230,7 +245,7 @@ Owning work package(s): `WP-15, WP-16` · module: `M15/M16` · spec line 1197
 
 ## §12.12 PayPal outages, rate limits, sandbox vs. live
 
-Owning work package(s): `WP-06` · module: `M6 paypal` · spec line 1214
+Owning work package(s): `WP-06` · module: `M6 paypal` · spec line 1476
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
@@ -249,14 +264,14 @@ Owning work package(s): `WP-06` · module: `M6 paypal` · spec line 1214
 
 ## §12.13 Privacy and data retention
 
-Owning work package(s): `WP-19` · module: `M19 privacy` · spec line 1244
+Owning work package(s): `WP-19` · module: `M19 privacy` · spec line 1507
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
 | **EC-PRIV-1** | Erasure request with an open dispute | PRIVACY_LEGAL_HOLD; scheduled for after resolution + window; the user is told the date | U | `apps/vi/tests/test_l1.py:78` | wip — 1 test |
 | | _note:_ Unbuilt. WP-19 owns packages/privacy. The PRIVACY_LEGAL_HOLD code already exists in the registry (packages/core/src/errors.ts) and the schema has privacy_requests.legal_hold_reason (packages/db), but no behaviour and therefore no test yet. | | | | |
 | **EC-PRIV-2** | Export request | JSON zip of all rows + tokens + PDFs within 24 h (immediate in the demo) | E | — | todo — no test |
-| **EC-PRIV-3** | Public verifier leaks PII | Redaction: email masked (a*@…), no street address; raw-token download includes selectively disclosed fields only (SD-JWT) | U | `packages/core/test/env.test.ts:194` — EC-PRIV-3 scrubPii removes emails, card numbers and phone numbers<br>`packages/core/test/env.test.ts:200` — EC-PRIV-3 a log line keeps operational context but drops PII values<br>`packages/core/test/env.test.ts:225` — EC-PRIV-3 AT-M19.2 regex test: no logged field value contains an email | done |
+| **EC-PRIV-3** | Public verifier leaks PII | Redaction: email masked (a*@…), no street address; raw-token download includes selectively disclosed** fields only (SD-JWT) | U | `packages/core/test/env.test.ts:194` — EC-PRIV-3 scrubPii removes emails, card numbers and phone numbers<br>`packages/core/test/env.test.ts:200` — EC-PRIV-3 a log line keeps operational context but drops PII values<br>`packages/core/test/env.test.ts:225` — EC-PRIV-3 AT-M19.2 regex test: no logged field value contains an email | done |
 | | _note:_ Handled in packages/core (WP-01): three-filter logger redaction + redacted public verifier payload (S-18) | | | | |
 | **EC-PRIV-4** | LLM provider data | OpenAI API data-usage settings documented; no PII sent to the compiler beyond the intent text; product data only to the agent | U | — | todo — no test |
 | **EC-PRIV-5** | Pre-erasure notice | 48 h email (stub) before the retention purge, per DPDP Rule 8(2) good practice [B17] | U | — | todo — no test |
@@ -264,7 +279,7 @@ Owning work package(s): `WP-19` · module: `M19 privacy` · spec line 1244
 
 ## §12.14 LLM failures
 
-Owning work package(s): `WP-08, WP-13, WP-15` · module: `M8/M13/M15` · spec line 1255
+Owning work package(s): `WP-08, WP-13, WP-15` · module: `M8/M13/M15` · spec line 1518
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|

@@ -15,9 +15,9 @@
       "handling": "captureAuthorization with an allocated amount, final_capture=false; the remainder stays authorized",
       "declaredTest": "S: auth $100, capture $60 → remaining $40",
       "userFacing": "Receipt: \"Charged $60 for 1 of 2 items; $40 still held\"",
-      "specLine": 1069,
-      "status": "wip",
-      "notes": "The largest-remainder split that makes two partial captures sum exactly to the authorization is done and property-tested (packages/core/test/core.test.ts). The orchestrator that issues the two captures is WP-11."
+      "specLine": 1331,
+      "status": "done",
+      "notes": "packages/orders/src/capture.ts: a capture amount is allocate()d largest-remainder across lines plus pro-rata shipping, final_capture is (remaining == 0), and a property test asserts the captures sum exactly to the authorization. Tests: packages/orders/test/capture.test.ts."
     },
     {
       "id": "EC-CAP-2",
@@ -30,8 +30,9 @@
       "handling": "Capture with final_capture=true; PayPal releases the rest [B12]; ledger RELEASEs the remainder",
       "declaredTest": "S",
       "userFacing": "\"Order complete. $X released back to you\"",
-      "specLine": 1070,
-      "status": "todo"
+      "specLine": 1332,
+      "status": "done",
+      "notes": "A final capture with final_capture=true releases the uncaptured remainder, and the budget ledger RELEASE follows. Test: packages/orders/test/capture.test.ts."
     },
     {
       "id": "EC-CAP-3",
@@ -44,8 +45,9 @@
       "handling": "Rejected locally (CS_VALIDATION) before calling PayPal; a higher amount needs a new mandate-checked attempt",
       "declaredTest": "U",
       "userFacing": "Merchant: \"Exceeds authorization. Create a supplementary charge (requires a new Gate check)\"",
-      "specLine": 1071,
-      "status": "todo"
+      "specLine": 1333,
+      "status": "done",
+      "notes": "Rejected locally with CS_VALIDATION before any PayPal call, because the sum-of-captures check runs first. Tests: packages/orders/test/capture.test.ts, packages/db/test/schema.test.ts."
     },
     {
       "id": "EC-CAP-4",
@@ -58,8 +60,9 @@
       "handling": "State PENDING; ship nothing until PAYMENT.CAPTURE.COMPLETED (or the reconciler)",
       "declaredTest": "I",
       "userFacing": "Merchant: \"Payment pending (reason). Don't ship yet\"",
-      "specLine": 1072,
-      "status": "todo"
+      "specLine": 1334,
+      "status": "done",
+      "notes": "A PENDING capture is keyed on the id PayPal actually sends and the order is not shipped until COMPLETED. Test: packages/orders/test/capture.test.ts."
     },
     {
       "id": "EC-CAP-5",
@@ -72,8 +75,9 @@
       "handling": "Budget RELEASE; order PAYMENT_FAILED; notify the user; no automatic retry with another instrument (the mandate binds one instrument)",
       "declaredTest": "I + negative test [V12]",
       "userFacing": "Buyer: \"PayPal declined the payment. Nothing was charged. Update PayPal and retry\"",
-      "specLine": 1073,
-      "status": "todo"
+      "specLine": 1335,
+      "status": "done",
+      "notes": "A DECLINED capture releases the reservation, moves the order to PAYMENT_FAILED and notifies. It is keyed on the deterministic DECLINED-{order}-{shipment} placeholder because PayPal sends no capture id for a decline, so no retry with another instrument is possible. Tests: packages/orders/test/capture.test.ts."
     },
     {
       "id": "EC-REF-1",
@@ -86,8 +90,9 @@
       "handling": "refundCapture({amount}), PayPal-Request-Id = cs:{cap}:ref:{refId}",
       "declaredTest": "S",
       "userFacing": "Receipt shows refund lines and the net paid",
-      "specLine": 1074,
-      "status": "todo"
+      "specLine": 1336,
+      "status": "done",
+      "notes": "A partial refund sends an explicit amount with PayPal-Request-Id cs:{captureId}:ref:{refundId}. Test: packages/orders/test/refund.test.ts."
     },
     {
       "id": "EC-REF-2",
@@ -100,9 +105,9 @@
       "handling": "Rejected locally; PayPal would also reject",
       "declaredTest": "U",
       "userFacing": "\"Only $X remains refundable\"",
-      "specLine": 1075,
-      "status": "wip",
-      "notes": "The SQL backstop exists (captures.refunded_minor <= amount_minor, packages/db/test/schema.test.ts). The local sum check and its CS_VALIDATION happen in the orchestrator, WP-11."
+      "specLine": 1337,
+      "status": "done",
+      "notes": "The local sum check refuses an over-refund with no PayPal call; refunded_minor <= amount_minor is also a SQL CHECK. Tests: packages/orders/test/refund.test.ts, packages/db/test/schema.test.ts."
     },
     {
       "id": "EC-REF-3",
@@ -115,8 +120,9 @@
       "handling": "Retry once after 1 h with a new refund ID if FAILED (never reuse a failed refund's request ID with a different body); otherwise escalate to manual",
       "declaredTest": "I",
       "userFacing": "Merchant alert; buyer sees \"Refund processing\"",
-      "specLine": 1076,
-      "status": "todo"
+      "specLine": 1338,
+      "status": "done",
+      "notes": "A FAILED refund is retried once with a NEW refund id, never the same request id with a different body, and otherwise escalated to manual. Test: packages/orders/test/refund.test.ts."
     },
     {
       "id": "EC-REF-4",
@@ -129,8 +135,9 @@
       "handling": "Block direct refunds; route through accept-claim/make-offer so PayPal records the resolution in the case",
       "declaredTest": "U",
       "userFacing": "Merchant: \"Refund via the dispute so it closes the case\"",
-      "specLine": 1077,
-      "status": "todo"
+      "specLine": 1339,
+      "status": "done",
+      "notes": "A refund is refused while a dispute is open on the capture, and routed through accept-claim/make-offer instead. The first implementation compared disputes.capture_id against a PayPal capture id, but that column is a foreign key to captures.id, so every lookup missed and the refund went straight out; the join is now explicit. Test: packages/orders/test/refund.test.ts."
     },
     {
       "id": "EC-REF-5",
@@ -143,8 +150,9 @@
       "handling": "allocate() largest-remainder; the last refund takes the exact remainder",
       "declaredTest": "P",
       "userFacing": "Exact to the cent",
-      "specLine": 1078,
-      "status": "todo"
+      "specLine": 1340,
+      "status": "wip",
+      "notes": "Largest-remainder allocation makes the final refund take the exact remainder (packages/core/src/money.ts, property-tested; packages/orders/test/refund.test.ts). Marked wip rather than done because the spec type for this row is P and the multi-currency half needs a live JPY store, which needs H-01."
     },
     {
       "id": "EC-IDEM-1",
@@ -157,7 +165,7 @@
       "handling": "Unique l3_jti → second gets GATE_REPLAY; the same checkout with a new L3 returns the existing attempt/order if one is in flight",
       "declaredTest": "U, P",
       "userFacing": "Agent told \"already purchased: order ord_…\"; no double charge",
-      "specLine": 1084,
+      "specLine": 1346,
       "status": "done",
       "notes": "packages/db (WP-02). packages/db/src/schema.ts checkout_attempts UNIQUE (l3_jti) -> checkout_attempts_l3_jti_key and UNIQUE (idempotency_key); packages/db/src/repos/index.ts toRepoError maps 23505 on that constraint to GATE_REPLAY and on idempotency_key to CS_CONFLICT (AT-M2.4); packages/db/src/repos/attempts.ts findAttemptByL3Jti / findAttemptByCheckoutAndMandate; packages/db/test/schema.test.ts 'EC-IDEM-1: checkout_attempts has UNIQUE (l3_jti) and UNIQUE (idempotency_key)' plus 'AT-M2.4'. STILL OPEN: the live replay race needs a database and belongs to WP-10."
     },
@@ -172,9 +180,9 @@
       "handling": "Retry with the same PayPal-Request-Id [B14]; PayPal returns the earlier result",
       "declaredTest": "I (fake fetch)",
       "userFacing": "Invisible",
-      "specLine": 1085,
+      "specLine": 1347,
       "status": "done",
-      "notes": "packages/paypal/src/client.ts retries a side-effecting call only with the same PayPal-Request-Id, so PayPal returns the earlier result rather than creating a second order. Tests: packages/paypal/test/client.retry.test.ts."
+      "notes": "createOrderFromDecision retries only with the same PayPal-Request-Id cs:{attemptId}:create, and a duplicate call returns the existing order rather than creating a second. Tests: packages/orders/test/create.test.ts, packages/paypal/test/client.retry.test.ts."
     },
     {
       "id": "EC-IDEM-3",
@@ -187,7 +195,7 @@
       "handling": "Re-read state (GET order/capture) before deciding to retry",
       "declaredTest": "I",
       "userFacing": "Invisible",
-      "specLine": 1086,
+      "specLine": 1348,
       "status": "done",
       "notes": "packages/paypal/src/client.ts has a per-endpoint policy: side-effecting endpoints are marked re-read-first, and an ambiguous failure re-reads state via GET before deciding to retry rather than blind-retrying. The full table is packages/paypal/IDEMPOTENCY.md, with unverified cells marked as such."
     },
@@ -202,7 +210,7 @@
       "handling": "The second gets CS_CONFLICT and no-ops",
       "declaredTest": "I",
       "userFacing": "n/a",
-      "specLine": 1087,
+      "specLine": 1349,
       "status": "todo"
     },
     {
@@ -216,8 +224,9 @@
       "handling": "One refund",
       "declaredTest": "E",
       "userFacing": "Spinner, then a single result",
-      "specLine": 1088,
-      "status": "todo"
+      "specLine": 1350,
+      "status": "wip",
+      "notes": "The refund form carries a nonce-derived idempotency key so a double-click produces one refund (packages/orders/test/refund.test.ts). The UI half — button disabling on click — is WP-17d."
     },
     {
       "id": "EC-IDEM-6",
@@ -230,8 +239,9 @@
       "handling": "Allowed if the budget permits; line_items quantity caps apply per checkout",
       "declaredTest": "U",
       "userFacing": "Normal purchase",
-      "specLine": 1089,
-      "status": "todo"
+      "specLine": 1351,
+      "status": "wip",
+      "notes": "Two identical items on two occasions are allowed when the budget permits: a new L3 means a new jti, and the per-checkout line_items quantity caps apply (packages/gate/test/replay.test.ts). Marked wip because the end-to-end path is WP-11 plus WP-13 wired together in Judge Mode."
     },
     {
       "id": "EC-WH-1",
@@ -244,7 +254,7 @@
       "handling": "Upsert from GET; metric reconciler_fixes_total",
       "declaredTest": "I: drop the event, run the reconciler",
       "userFacing": "Status page shows reconciler lag",
-      "specLine": 1095,
+      "specLine": 1357,
       "status": "todo"
     },
     {
@@ -258,7 +268,7 @@
       "handling": "ON CONFLICT DO NOTHING; return 200",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1096,
+      "specLine": 1358,
       "status": "wip",
       "notes": "The dedupe key exists as UNIQUE (paypal_event_id) (packages/db/test/schema.test.ts). The INSERT ... ON CONFLICT DO NOTHING ingest that relies on it is WP-12."
     },
@@ -273,7 +283,7 @@
       "handling": "Always re-fetch the resource; never downgrade the rank",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1097,
+      "specLine": 1359,
       "status": "todo"
     },
     {
@@ -287,7 +297,7 @@
       "handling": "400, audit log, alert after 10/h",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1098,
+      "specLine": 1360,
       "status": "done",
       "notes": "packages/paypal/src/client.ts verifyWebhookSignature calls POST /v1/notifications/verify-webhook-signature; an unverified event is refused before any processing. Tests: packages/paypal/test/client.disputes.test.ts."
     },
@@ -302,7 +312,7 @@
       "handling": "Idempotent processing",
       "declaredTest": "S (stop web 10 min)",
       "userFacing": "n/a",
-      "specLine": 1099,
+      "specLine": 1361,
       "status": "todo"
     },
     {
@@ -316,7 +326,7 @@
       "handling": "Store, mark ignored, no crash",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1100,
+      "specLine": 1362,
       "status": "done",
       "notes": "A resource PayPal does not know about maps to PP_NOT_FOUND rather than throwing, so a simulator event or a foreign app’s webhook is recorded and ignored. Test: packages/paypal/test/client.disputes.test.ts (\"404 -> PP_NOT_FOUND (EC-DSP-9 / EC-WH-6)\")."
     },
@@ -331,7 +341,7 @@
       "handling": "Store the event unverified, don't act; retry verification with backoff; the reconciler still progresses state from GETs (safe because GETs are authenticated)",
       "declaredTest": "I",
       "userFacing": "n/a",
-      "specLine": 1101,
+      "specLine": 1363,
       "status": "todo"
     },
     {
@@ -345,7 +355,7 @@
       "handling": "BLOCK VI_EXPIRED",
       "declaredTest": "U (fixed clock)",
       "userFacing": "Agent: \"Your mandate expired at 11:59 PM IST. Ask the user to renew\"",
-      "specLine": 1107,
+      "specLine": 1369,
       "status": "wip",
       "notes": "withinValidity with the library skew is done (packages/core/test/core.test.ts). Gate check 1, which is what actually refuses an expired mandate, is WP-10."
     },
@@ -360,9 +370,9 @@
       "handling": "Abort; RELEASE the reservation",
       "declaredTest": "U",
       "userFacing": "\"Revoked, nothing was charged\"",
-      "specLine": 1108,
-      "status": "done",
-      "notes": "The Gate re-reads mandate status inside the check-8 transaction, so a revoke that lands between check 1 and check 8 blocks and leaves no reservation. Test: packages/gate/test/replay.test.ts \"EC-MDT-2: a revoke at check 8's boundary …\". The orchestrator half (aborting order creation in the same tx) is WP-11."
+      "specLine": 1370,
+      "status": "wip",
+      "notes": "The orchestrator re-reads mandate status in the same transaction as the order insert and aborts, releasing the reservation (packages/orders/test/create.test.ts). The live PayPal half — no order exists after the abort — needs H-01."
     },
     {
       "id": "EC-MDT-3",
@@ -375,8 +385,9 @@
       "handling": "voidAuthorization for each; RELEASE; the order is CANCELLED",
       "declaredTest": "S",
       "userFacing": "Revoke modal: \"This also cancels 1 pending order ($48.00)\"",
-      "specLine": 1109,
-      "status": "todo"
+      "specLine": 1371,
+      "status": "wip",
+      "notes": "Revoking after an authorization voids it and releases the reservation (packages/orders/test/void-reauthorize.test.ts). The live void against PayPal needs H-01."
     },
     {
       "id": "EC-MDT-4",
@@ -389,8 +400,9 @@
       "handling": "The purchase stands (it was authorised when made); the user can request a refund via a merchant message",
       "declaredTest": "U",
       "userFacing": "\"This order was completed at 14:01 IST, before you revoked at 14:02. You can request a return\"",
-      "specLine": 1110,
-      "status": "todo"
+      "specLine": 1372,
+      "status": "wip",
+      "notes": "Capture time before revoked_at means the purchase stands; the rule is asserted on the comparison, not just documented (packages/orders/test/void-reauthorize.test.ts). The receipt wording is WP-17a."
     },
     {
       "id": "EC-MDT-5",
@@ -403,8 +415,9 @@
       "handling": "Captures against an existing authorization remain valid: the authorization was created under a valid mandate and the amount is already bounded. Documented rule. No new authorizations",
       "declaredTest": "U",
       "userFacing": "Receipt explains",
-      "specLine": 1111,
-      "status": "todo"
+      "specLine": 1373,
+      "status": "wip",
+      "notes": "Documented rule: a capture against an existing authorization stays valid after mandate expiry, because the authorization was created under a valid mandate and the amount is already bounded. Test: packages/orders/test/capture.test.ts. The live half needs H-01."
     },
     {
       "id": "EC-MDT-6",
@@ -417,7 +430,7 @@
       "handling": "Wallet → DELETED; all mandates → SUSPENDED; the Gate blocks",
       "declaredTest": "I",
       "userFacing": "\"Your PayPal connection was removed. Reconnect to continue\"",
-      "specLine": 1112,
+      "specLine": 1374,
       "status": "wip",
       "notes": "A deleted vault token comes back PP_NOT_FOUND (packages/paypal/test/client.vault.test.ts). Marking the wallet DELETED and suspending its mandates, plus the VAULT.PAYMENT-TOKEN.DELETED subscription, is WP-12."
     },
@@ -432,7 +445,7 @@
       "handling": "Mandates are immutable; editing creates a new mandate and offers to revoke the old one",
       "declaredTest": "E",
       "userFacing": "\"Create updated mandate\" flow",
-      "specLine": 1113,
+      "specLine": 1375,
       "status": "todo"
     },
     {
@@ -446,7 +459,7 @@
       "handling": "Not affected",
       "declaredTest": "E (fake browser clock)",
       "userFacing": "n/a",
-      "specLine": 1119,
+      "specLine": 1381,
       "status": "done",
       "notes": "apps/vi sets iat/exp server-side in l2/prepare; the browser only signs bytes and never supplies a timestamp, so a wrong client clock cannot affect a mandate. Test: apps/vi/tests/test_verify.py."
     },
@@ -461,7 +474,7 @@
       "handling": "Library skew of 300 s tolerates it [B2]; Render hosts are NTP-synced [U]",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1120,
+      "specLine": 1382,
       "status": "done",
       "notes": "packages/core/src/clock.ts withinValidity applies VI_CLOCK_SKEW_SECONDS (default 300, the library default), and apps/vi threads clock_skew_seconds into verify_chain. Tests: packages/core/test/core.test.ts, apps/vi/tests/test_verify.py."
     },
@@ -476,10 +489,10 @@
       "handling": "Defender verifies with at_time = capture time and now; the evidence states both",
       "declaredTest": "U",
       "userFacing": "Packet: \"Valid at time of purchase (14:01 IST, 5 Oct); expired 12 Oct as designed\"",
-      "specLine": 1121,
+      "specLine": 1383,
       "status": "blocked",
-      "notes": "apps/vi/tests/test_verify.py::test_EC_TIME_3_at_time_is_flagged_as_not_honoured and ::test_EC_TIME_3_at_time_within_the_window_is_reported_as_such. PARTIAL: the pinned verify_chain (commit 356c296) reads time.time() internally and takes no clock override, so /v1/verify CANNOT produce a real as-of verdict. It returns the verification it did perform at now, plus at_time_not_honoured=true, the reason, and an advisory within_validity_at window check computed by vi-service. A real as-of verification needs a now parameter in the library (docs/HUMAN_TODO.md). Defender-side EC-TIME-3 (verify twice, at capture time and now, and state both in the packet) is WP-15.",
-      "blockedReason": "verify_chain at the pinned VI commit has no clock override (chain.py:166 hardcodes now = int(time.time())), so as-of-capture-time verification is impossible, not merely unimplemented. apps/vi returns the real verdict at now plus at_time_not_honoured:true. Upstream request raised as HUMAN_TODO H-08; see DECISIONS D-009."
+      "blockedReason": "verify_chain at the pinned VI commit has no clock override (chain.py:166 hardcodes now = int(time.time())), so as-of-capture-time verification is impossible, not merely unimplemented. apps/vi returns the real verdict at now plus at_time_not_honoured:true. Upstream request raised as HUMAN_TODO H-08; see DECISIONS D-009.",
+      "notes": "apps/vi/tests/test_verify.py::test_EC_TIME_3_at_time_is_flagged_as_not_honoured and ::test_EC_TIME_3_at_time_within_the_window_is_reported_as_such. PARTIAL: the pinned verify_chain (commit 356c296) reads time.time() internally and takes no clock override, so /v1/verify CANNOT produce a real as-of verdict. It returns the verification it did perform at now, plus at_time_not_honoured=true, the reason, and an advisory within_validity_at window check computed by vi-service. A real as-of verification needs a now parameter in the library (docs/HUMAN_TODO.md). Defender-side EC-TIME-3 (verify twice, at capture time and now, and state both in the packet) is WP-15."
     },
     {
       "id": "EC-TIME-4",
@@ -492,7 +505,7 @@
       "handling": "Deterministic",
       "declaredTest": "U",
       "userFacing": "\"Prices refreshed. Agent will re-quote\"",
-      "specLine": 1122,
+      "specLine": 1384,
       "status": "done",
       "notes": "One clock.nowSec() is captured at Gate start and every expiry comparison in the decision uses it, so a lock cannot expire between two checks and produce a verdict true at no single instant. Test: packages/gate/test/checks.test.ts \"ALLOWs on the last second of the price lock, BLOCKs on the first second past it\"."
     },
@@ -507,7 +520,7 @@
       "handling": "Day 3: reauthorize if unshipped and within mandate validity; day 28: alert; on expiry: state AUTH_EXPIRED, RELEASE",
       "declaredTest": "U, I",
       "userFacing": "Merchant countdown; buyer \"Order cancelled: not shipped in time\"",
-      "specLine": 1123,
+      "specLine": 1385,
       "status": "wip",
       "notes": "packages/paypal records that no PAYMENT.AUTHORIZATION.EXPIRED event exists, so expiry must be polled from expiration_time (docs/DECISIONS.md D-016). The honour-period cron and reauthorize logic are WP-11/WP-12."
     },
@@ -522,7 +535,7 @@
       "handling": "Stored UTC; displayed IST with label; the Bryntum timeline uses UTC internally",
       "declaredTest": "U",
       "userFacing": "\"Respond by Tue 20 Oct, 5:29 AM IST\"",
-      "specLine": 1124,
+      "specLine": 1386,
       "status": "done",
       "notes": "packages/core/src/clock.ts formatIst/formatIstHuman render IST explicitly with a fixed +05:30 offset (no tz database needed, and exact since 1945). Test: packages/core/test/core.test.ts."
     },
@@ -537,7 +550,7 @@
       "handling": "BLOCK CS_CURRENCY_MISMATCH. We never convert inside the Gate: FX rates are not signed by the user",
       "declaredTest": "U",
       "userFacing": "\"Your limit is in ₹. This store charges in $. Create a $ mandate\"",
-      "specLine": 1130,
+      "specLine": 1392,
       "status": "done",
       "notes": "packages/compiler/src/compile.ts validates the compiled currency against the mandate's currency and never converts. A request naming two currencies raises a blocking ambiguity (src/ambiguity.ts::currencyAmbiguity) rather than picking one, because picking would be choosing a currency AND a number the user never wrote. Tests: packages/compiler/test/compile.test.ts, test/ambiguity.test.ts."
     },
@@ -552,7 +565,7 @@
       "handling": "Out of our control. The mandate binds the merchant charge currency and amount; the receipt notes that PayPal may convert",
       "declaredTest": "I (fixture)",
       "userFacing": "\"Charged $48.00. PayPal may show this in ₹ at its rate\"",
-      "specLine": 1131,
+      "specLine": 1393,
       "status": "todo"
     },
     {
@@ -566,7 +579,7 @@
       "handling": "toPayPalValue emits no decimals",
       "declaredTest": "P",
       "userFacing": "Correct display",
-      "specLine": 1132,
+      "specLine": 1394,
       "status": "done",
       "notes": "Handled in packages/core (WP-01): MINOR_DIGITS drives toPayPalValue/formatMoney/ppAmountSchema"
     },
@@ -581,7 +594,7 @@
       "handling": "Largest-remainder; Σ captures == total exactly; property test",
       "declaredTest": "P",
       "userFacing": "Exact",
-      "specLine": 1133,
+      "specLine": 1395,
       "status": "done",
       "notes": "Handled in packages/core (WP-01): allocate() largest-remainder, property-tested to sum exactly"
     },
@@ -596,7 +609,7 @@
       "handling": "Reject floats at boundaries",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1134,
+      "specLine": 1396,
       "status": "done",
       "notes": "Every amount the compiler produces goes through fromPayPalValue, so a model emitting \"129.995\" is refused with CS_ROUNDING rather than rounded. packages/compiler/src/literal.ts and src/constraints.ts; test/literal.test.ts asserts the model-supplied string is parsed, never coerced."
     },
@@ -611,7 +624,7 @@
       "handling": "Our checkout JWT uses integer minor units (§8.3)",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1135,
+      "specLine": 1397,
       "status": "done",
       "notes": "Compiled amounts are integer minor units end to end; the read-back renderer uses core.formatMoney, and the JPY (zero minor digit) case is pinned in a snapshot. Test: packages/compiler/test/readback.test.ts."
     },
@@ -626,7 +639,7 @@
       "handling": "The locked price holds until price_lock_exp; after that a new checkout is needed, the agent re-quotes, and the Gate re-checks the mandate",
       "declaredTest": "U",
       "userFacing": "\"Price changed from $120 to $128. Still within your $130 limit, so the agent continued\" or \"Now $135, above your limit. Blocked\"",
-      "specLine": 1141,
+      "specLine": 1403,
       "status": "done",
       "notes": "A lock past price_lock_exp blocks with GATE_PRICE_LOCK_EXPIRED rather than re-pricing, and create_checkout never re-signs an expired JWT — a new price produces a new checkout. Tests: packages/gate/test/checks.test.ts and packages/gate/test/merchant.test.ts."
     },
@@ -641,7 +654,7 @@
       "handling": "PayPal rejects; we reject first (EC-CAP-3)",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1142,
+      "specLine": 1404,
       "status": "wip",
       "notes": "vi refuses to sign an L3 whose amount is out of range (apps/vi/tests/test_l3.py). Rejecting a capture that exceeds the authorized amount locally is the orchestrator, WP-11."
     },
@@ -656,7 +669,7 @@
       "handling": "No automatic action (out of scope); a merchant may refund the difference (partial refund)",
       "declaredTest": "n/a",
       "userFacing": "n/a",
-      "specLine": 1143,
+      "specLine": 1405,
       "status": "todo"
     },
     {
@@ -670,9 +683,9 @@
       "handling": "Partial capture of the available lines + void the remainder (final_capture=true on the last capture)",
       "declaredTest": "S",
       "userFacing": "\"1 item unavailable. You were charged only $60. $40 released\"",
-      "specLine": 1144,
+      "specLine": 1406,
       "status": "wip",
-      "notes": "products.stock has a CHECK constraint preventing a negative count (packages/db/test/schema.test.ts). Partial capture plus void of the remainder is WP-11."
+      "notes": "The orchestrator exposes the partial-capture-then-final pattern and the stock restore on void (packages/orders/test/void-reauthorize.test.ts). The live half — PayPal releasing the uncaptured remainder — needs H-01."
     },
     {
       "id": "EC-STOCK-2",
@@ -685,8 +698,9 @@
       "handling": "Partial refund of the OOS lines",
       "declaredTest": "S",
       "userFacing": "Same message, as a refund",
-      "specLine": 1145,
-      "status": "todo"
+      "specLine": 1407,
+      "status": "wip",
+      "notes": "Under the CAPTURE intent, an out-of-stock line becomes a partial refund (packages/orders/test/refund.test.ts). The live half needs H-01."
     },
     {
       "id": "EC-STOCK-3",
@@ -699,7 +713,7 @@
       "handling": "One wins; the other gets BLOCK GATE_OUT_OF_STOCK and the reservation is released",
       "declaredTest": "P",
       "userFacing": "\"Sold out just now\"",
-      "specLine": 1146,
+      "specLine": 1408,
       "status": "wip",
       "notes": "The CHECK prevents negative stock (packages/db/test/schema.test.ts). The SELECT ... FOR UPDATE decrement at ORDER_CREATED, and the 20-way race test, are WP-10/WP-11."
     },
@@ -714,9 +728,9 @@
       "handling": "One capture + one tracker per shipment; evidence lists both",
       "declaredTest": "S",
       "userFacing": "Two tracking numbers on the receipt",
-      "specLine": 1147,
-      "status": "wip",
-      "notes": "The PayPal client supports one tracker per capture (packages/paypal/test/client.orders.test.ts). The per-shipment capture loop is WP-11."
+      "specLine": 1409,
+      "status": "done",
+      "notes": "One capture and one tracker per shipment, with the evidence listing both. Tests: packages/orders/test/capture.test.ts, packages/orders/test/tracking.test.ts."
     },
     {
       "id": "EC-SPLIT-2",
@@ -729,9 +743,9 @@
       "handling": "Track twice against the same capture; OOS → partial refund",
       "declaredTest": "S",
       "userFacing": "n/a",
-      "specLine": 1148,
-      "status": "wip",
-      "notes": "Tracking twice against one capture is supported by the client (packages/paypal/test/client.orders.test.ts). The CAPTURE-intent fulfilment path is WP-11."
+      "specLine": 1410,
+      "status": "done",
+      "notes": "Under the CAPTURE intent, tracking is added twice against the same capture and an out-of-stock line becomes a partial refund. Test: packages/orders/test/tracking.test.ts."
     },
     {
       "id": "EC-SPLIT-3",
@@ -744,8 +758,9 @@
       "handling": "The router evaluates only the disputed capture/lines",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1149,
-      "status": "todo"
+      "specLine": 1411,
+      "status": "done",
+      "notes": "The allocation is computed from the disputed shipment lines only, so a dispute on one shipment does not implicate the order total. Test: packages/orders/test/capture.test.ts."
     },
     {
       "id": "EC-BUY-1",
@@ -758,7 +773,7 @@
       "handling": "Router R-SNAD-OK → CONTEST. The UI suggests that the merchant offer a return (make-offer with REFUND_WITH_RETURN) instead of fighting, since that's cheaper than the $82 handling cost [V13]",
       "declaredTest": "U, S",
       "userFacing": "Buyer: \"This matched your signed limits. The merchant offers a return\"",
-      "specLine": 1155,
+      "specLine": 1417,
       "status": "wip",
       "notes": "makeOffer with REFUND_WITH_RETURN is implemented and tested (packages/paypal/test/client.disputes.test.ts). The router decision that prefers an offer over contesting is WP-15a."
     },
@@ -773,7 +788,7 @@
       "handling": "ACCEPT/manual. Countersign proves nothing it didn't sign",
       "declaredTest": "U",
       "userFacing": "Merchant: \"No mandate on this payment. Countersign can't help here\"",
-      "specLine": 1156,
+      "specLine": 1418,
       "status": "todo"
     },
     {
@@ -787,7 +802,7 @@
       "handling": "If webauthn UV was absent → R-UNAUTH weak → the router recommends ACCEPT above $50 (merchant setting). If UV was present → CONTEST, but notify the user to secure their device",
       "declaredTest": "U",
       "userFacing": "Buyer: \"This mandate was signed on 'Asha's laptop' with your passkey at 10:02 IST. If that wasn't you, report the device lost\"",
-      "specLine": 1157,
+      "specLine": 1419,
       "status": "todo"
     },
     {
@@ -801,7 +816,7 @@
       "handling": "R-UNAUTH-1 → CONTEST with the mandate packet + tracking + read-back text the user saw",
       "declaredTest": "S (J3)",
       "userFacing": "The packet shows the signed read-back verbatim",
-      "specLine": 1158,
+      "specLine": 1420,
       "status": "todo"
     },
     {
@@ -815,7 +830,7 @@
       "handling": "R-SNAD-AGENT → honest refund. The user did authorise the limits, but the agent clearly missed the stated preference; fighting it would be bad faith",
       "declaredTest": "U, S (J4)",
       "userFacing": "\"Your agent bought size 9; you asked for 10. The merchant refunded you\"",
-      "specLine": 1159,
+      "specLine": 1421,
       "status": "todo"
     },
     {
@@ -829,7 +844,7 @@
       "handling": "Flag on S-17; no automatic action (avoids unfair profiling); merchant decides",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1160,
+      "specLine": 1422,
       "status": "todo"
     },
     {
@@ -843,7 +858,7 @@
       "handling": "Listings are wrapped as untrusted; the Gate blocks out-of-mandate L3s; velocity guard → SUSPEND after 3 consecutive BLOCKs",
       "declaredTest": "E (seeded listings) + red-team eval",
       "userFacing": "Chat: \"🛡 Blocked: the cart was $999 but your limit is $130. A listing tried to instruct your agent\"",
-      "specLine": 1166,
+      "specLine": 1428,
       "status": "wip",
       "notes": "The three injection payloads are seeded from one exported constant so the corpus and the seed cannot drift (packages/db/test/seed.test.ts). The agent-side defences and the Gate verdict are WP-13."
     },
@@ -858,7 +873,7 @@
       "handling": "It can only sign L3s within L2 limits (the agent key is bound by the L2). Worst case = the full budget at allowed merchants. The user can revoke the agent (all of its mandates are suspended)",
       "declaredTest": "P (random L3s)",
       "userFacing": "Push/email (stub) \"Your agent was suspended after 3 blocked attempts\"",
-      "specLine": 1167,
+      "specLine": 1429,
       "status": "wip",
       "notes": "Gate side done: three consecutive BLOCKs escalate to REVIEW and the mandate is SUSPENDED (packages/gate/test/checks.test.ts). The bounded-worst-case property test over random L3s, and the \"revoke the agent\" UI, are WP-13/WP-17a."
     },
@@ -873,7 +888,7 @@
       "handling": "jwks_keys.status=COMPROMISED; all mandates bound to it → REVOKED; the Gate refuses its L3s; past L3s are flagged \"signed before compromise at T\" in evidence",
       "declaredTest": "U",
       "userFacing": "\"Agent key rotated; please re-approve mandates (1 tap each)\"",
-      "specLine": 1168,
+      "specLine": 1430,
       "status": "wip",
       "notes": "Partly done: retired merchant keys stay verifiable (packages/gate/test/record.test.ts), which is the EC-KEY-3 half. Marking jwks_keys.status=COMPROMISED and revoking every mandate bound to the key is WP-19/WP-17a."
     },
@@ -888,7 +903,7 @@
       "handling": "New key → user re-signs new L2s (the L2 binds the agent key); old mandates keep the old key until expiry",
       "declaredTest": "E",
       "userFacing": "\"Re-approve 2 mandates for the new agent key\"",
-      "specLine": 1169,
+      "specLine": 1431,
       "status": "todo"
     },
     {
@@ -902,7 +917,7 @@
       "handling": "Device → LOST; enrol a new device (PayPal re-auth via a new setup token or a session check) → new L1; old mandates keep working until expiry (the agent key, not the device key, signs purchases) unless the user chooses \"revoke all\"",
       "declaredTest": "E",
       "userFacing": "\"This device is new. Reconnect PayPal to create a key. Your existing mandates still work; revoke them?\"",
-      "specLine": 1170,
+      "specLine": 1432,
       "status": "wip",
       "notes": "Client half done: packages/vi-client maps a finalize failure to VI_SIGNATURE_MISMATCH rather than a generic error, which is the branch the re-enrolment UI hangs on (test/client.test.ts). The browser side — IndexedDB empty -> Device LOST -> new enrolment -> old mandates keep working until expiry — is WP-05."
     },
@@ -917,7 +932,7 @@
       "handling": "New kid in JWKS; old kept as RETIRED (verify-only) until the retention end; on compromise: mark COMPROMISED, re-issue all L1s, mandates need re-signing",
       "declaredTest": "U",
       "userFacing": "Compromise → \"Security update: re-approve mandates\"",
-      "specLine": 1171,
+      "specLine": 1433,
       "status": "done",
       "notes": "apps/vi/src/vi_service/keys.py: POST /v1/keys/rotate retires the current key and GET /v1/jwks returns retired public keys with a status field, so evidence signed by an old kid still verifies. Test: apps/vi/tests/test_keys.py (AT-M3.9)."
     },
@@ -932,7 +947,7 @@
       "handling": "The Gate accepts checkout JWTs from ACTIVE or RETIRED (within not_after) kids",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1172,
+      "specLine": 1434,
       "status": "done",
       "notes": "apps/vi/src/vi_service/verify.py accepts a checkout JWT from an ACTIVE or RETIRED-but-not-after merchant kid, per Gate check 5 in spec 8.10. Test: apps/vi/tests/test_checkout_jwt.py."
     },
@@ -947,7 +962,7 @@
       "handling": "Agent keys are re-created → users re-sign L2s. Issuer/merchant keys are re-created → JWKS keeps the public halves, so historical evidence stays verifiable. Doc: back the KEK up in Render env + 1Password",
       "declaredTest": "Drill (manual, documented)",
       "userFacing": "Banner: \"Re-approve mandates\"",
-      "specLine": 1173,
+      "specLine": 1435,
       "status": "done",
       "notes": "apps/vi/src/vi_service/keys.py derives agent keys from VI_KEK; with the KEK changed, agent keys are undecryptable and re-minting is the only path, while issuer/merchant public keys survive in JWKS so historical evidence still verifies. Test: apps/vi/tests/test_keys.py."
     },
@@ -962,7 +977,7 @@
       "handling": "The agent can still only spend within existing mandates. New mandates need the device key plus a WebAuthn UV (passkey biometric/PIN; D4)",
       "declaredTest": "E",
       "userFacing": "Signing prompts the passkey; the family member can't pass it",
-      "specLine": 1174,
+      "specLine": 1436,
       "status": "todo"
     },
     {
@@ -976,7 +991,7 @@
       "handling": "Legally/operationally it's the account holder's authorisation. The evidence shows a UV-backed signature. The dispute is resolved as friendly fraud / household use",
       "declaredTest": "n/a",
       "userFacing": "Settings tip: \"Use a passkey only you can unlock\"",
-      "specLine": 1175,
+      "specLine": 1437,
       "status": "todo"
     },
     {
@@ -990,7 +1005,7 @@
       "handling": "P2: per-member agents with lower caps under one wallet cap",
       "declaredTest": "n/a",
       "userFacing": "n/a",
-      "specLine": 1176,
+      "specLine": 1438,
       "status": "todo"
     },
     {
@@ -1004,7 +1019,7 @@
       "handling": "Each mandate has its own budget; the wallet cap is serialised via FOR UPDATE on wallet_caps",
       "declaredTest": "P (race)",
       "userFacing": "Mandate cards show the per-agent spend; the wallet cap bar sits on the wallet page",
-      "specLine": 1177,
+      "specLine": 1439,
       "status": "done",
       "notes": "packages/db (WP-02). packages/db/src/schema.ts wallet_caps (wallet_id PK, cap_minor, currency, period DAY|MONTH); packages/db/src/repos/budget.ts walletCapCheckIn/lockWalletCap (SELECT ... FROM wallet_caps WHERE wallet_id = $1 FOR UPDATE) and sumWalletSpend (SUM RESERVE - SUM RELEASE across every mandate on the wallet); packages/db/test/seed.test.ts 'EC-MA-1: multiple agents on one wallet' asserts the lock target is the wallet row and that spend is summed across two mandates. STILL OPEN: the 20-way concurrent race needs Postgres and belongs to WP-10 AT-M10.2."
     },
@@ -1019,7 +1034,7 @@
       "handling": "verify_chain fails (L3 must be signed by the L2-bound key)",
       "declaredTest": "U",
       "userFacing": "Gate log: \"Agent key not bound to this mandate\"",
-      "specLine": 1178,
+      "specLine": 1440,
       "status": "done",
       "notes": "Check 2 compares the L3a signing kid against the key bound in the L2, so agent A cannot spend under agent B's mandate. Test: packages/gate/test/checks.test.ts \"BLOCKs when the L3a kid is not the one the L2 bound\"."
     },
@@ -1034,7 +1049,7 @@
       "handling": "The agent picks the mandate per checkout; the Gate verifies the one presented",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1179,
+      "specLine": 1441,
       "status": "todo"
     },
     {
@@ -1048,7 +1063,7 @@
       "handling": "Verification fails publicly",
       "declaredTest": "P",
       "userFacing": "The verifier shows \"signature invalid\"",
-      "specLine": 1185,
+      "specLine": 1447,
       "status": "todo"
     },
     {
@@ -1062,7 +1077,7 @@
       "handling": "Gate replay block; for disputes, the router flags duplicate captures (R-AMT-2)",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1186,
+      "specLine": 1448,
       "status": "todo"
     },
     {
@@ -1073,10 +1088,10 @@
       "module": "M15/M18",
       "scenario": "Merchant ships something different from the signed checkout",
       "detection": "Shipment lines ≠ checkout lines",
-      "handling": "R-SNAD-MERCH → REFUND. Our packet would *hurt* the merchant, so the Defender never files it as a contest",
+      "handling": "R-SNAD-MERCH → REFUND. Our packet would hurt the merchant, so the Defender never files it as a contest",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1187,
+      "specLine": 1449,
       "status": "todo"
     },
     {
@@ -1090,7 +1105,7 @@
       "handling": "The packet labels tracking \"merchant-asserted via PayPal /track\" and makes no carrier-verification claim",
       "declaredTest": "U (label present)",
       "userFacing": "Verifier wording",
-      "specLine": 1188,
+      "specLine": 1450,
       "status": "todo"
     },
     {
@@ -1104,7 +1119,7 @@
       "handling": "Uncited claims → filing blocked; the merchant can only file with checker-clean notes or template notes",
       "declaredTest": "U",
       "userFacing": "\"2 sentences lack a source. Fix or use the template\"",
-      "specLine": 1189,
+      "specLine": 1451,
       "status": "todo"
     },
     {
@@ -1118,7 +1133,7 @@
       "handling": "The PDF renderer fails without them; the public verifier recomputes the L2 hash, so omissions are visible",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1190,
+      "specLine": 1452,
       "status": "todo"
     },
     {
@@ -1132,7 +1147,7 @@
       "handling": "Allowed (it's their account) but the packet shows the router's result + rule ID; it can't be hidden",
       "declaredTest": "U",
       "userFacing": "Merchant confirm dialog: \"Router says agent fault. Contest anyway?\"",
-      "specLine": 1191,
+      "specLine": 1453,
       "status": "todo"
     },
     {
@@ -1146,7 +1161,7 @@
       "handling": "R-REF-1 → provide-evidence with PROOF_OF_REFUND [B16] + refund ID/date; budget ledger REVERSE entry for the audit",
       "declaredTest": "S (refund then process-chargeback)",
       "userFacing": "Merchant: \"Already refunded on 7 Oct. Filed proof of refund\"",
-      "specLine": 1197,
+      "specLine": 1459,
       "status": "todo"
     },
     {
@@ -1160,7 +1175,7 @@
       "handling": "Evidence: proof of partial refund + contest the remainder per its own rule",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1198,
+      "specLine": 1460,
       "status": "todo"
     },
     {
@@ -1174,7 +1189,7 @@
       "handling": "Prefer send-message/make-offer; no filing needed unless status = WAITING_FOR_SELLER_RESPONSE",
       "declaredTest": "S",
       "userFacing": "Timeline shows the stage",
-      "specLine": 1199,
+      "specLine": 1461,
       "status": "todo"
     },
     {
@@ -1188,7 +1203,7 @@
       "handling": "Re-run the router; new packet version; deadline recalculated from the API",
       "declaredTest": "S",
       "userFacing": "Banner \"Escalated. New deadline …\"",
-      "specLine": 1200,
+      "specLine": 1462,
       "status": "todo"
     },
     {
@@ -1202,7 +1217,7 @@
       "handling": "provide-supporting-info with the original packet + new facts; never re-file contradictory notes (packet versions are diffed)",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1201,
+      "specLine": 1463,
       "status": "todo"
     },
     {
@@ -1216,7 +1231,7 @@
       "handling": "Strategist proposes an appeal only if new evidence exists (e.g. a late tracking update)",
       "declaredTest": "S (allowappeal account)",
       "userFacing": "\"Appeal possible until …\"",
-      "specLine": 1202,
+      "specLine": 1464,
       "status": "todo"
     },
     {
@@ -1230,7 +1245,7 @@
       "handling": "Alert; at < 1 h auto-file is disabled (risk of a partial upload) and the merchant is told to file manually in the PayPal UI",
       "declaredTest": "U",
       "userFacing": "Red banner with an IST countdown",
-      "specLine": 1203,
+      "specLine": 1465,
       "status": "todo"
     },
     {
@@ -1244,7 +1259,7 @@
       "handling": "DEF_DEADLINE_PASSED; state → likely loss; post-mortem note",
       "declaredTest": "U",
       "userFacing": "\"Deadline passed at …\"",
-      "specLine": 1204,
+      "specLine": 1466,
       "status": "todo"
     },
     {
@@ -1258,7 +1273,7 @@
       "handling": "R-NOCHAIN-1",
       "declaredTest": "U",
       "userFacing": "\"Not a Countersign order\"",
-      "specLine": 1205,
+      "specLine": 1467,
       "status": "wip",
       "notes": "Client side is done: a dispute whose transaction PayPal does not know maps to PP_NOT_FOUND (packages/paypal/test/client.disputes.test.ts). The R-NOCHAIN-1 rule that turns that into \"Not a Countersign order\", and the custom_id join back to the order, are WP-15a and WP-11."
     },
@@ -1273,7 +1288,7 @@
       "handling": "Link both; one packet per dispute; consistent facts",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1206,
+      "specLine": 1468,
       "status": "todo"
     },
     {
@@ -1287,7 +1302,7 @@
       "handling": "Close CLOSED_WON (cancelled)",
       "declaredTest": "S",
       "userFacing": "n/a",
-      "specLine": 1207,
+      "specLine": 1469,
       "status": "todo"
     },
     {
@@ -1301,7 +1316,7 @@
       "handling": "Validate locally first (jpg/png/gif/pdf, < 10 MB, ≤ 50 MB total [V8]); compress the PDF; retry",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1208,
+      "specLine": 1470,
       "status": "done",
       "notes": "packages/paypal/src/multipart.ts rejects an unsupported MIME type or an oversize file locally with CS_VALIDATION, before any upload, using decimal byte limits (10_000_000 per file, 50_000_000 total). Tests: packages/paypal/test/client.multipart.test.ts."
     },
@@ -1316,7 +1331,7 @@
       "handling": "Fail fast; the Gate still runs; order creation is queued (pg-boss, retried with the same request ID) for up to 15 min while the reservation holds; after that, RELEASE and tell the agent",
       "declaredTest": "I",
       "userFacing": "\"PayPal is having trouble. We'll retry for 15 min; nothing is charged twice\"",
-      "specLine": 1214,
+      "specLine": 1476,
       "status": "done",
       "notes": "packages/paypal/src/circuit.ts opens a per-host circuit after 5 consecutive PP_UNAVAILABLE for 30 s and then fails fast with retryable:true; a 429 deliberately does not count as an outage because PayPal is up and merely throttling. Tests: packages/paypal/test/circuit.test.ts."
     },
@@ -1331,7 +1346,7 @@
       "handling": "Backoff with jitter; honour Retry-After; the reconciler throttles itself to 2 rps; Judge Mode serialises runs",
       "declaredTest": "I",
       "userFacing": "Judge Mode queue position",
-      "specLine": 1215,
+      "specLine": 1477,
       "status": "done",
       "notes": "packages/paypal/src/backoff.ts backs off with full jitter and honours Retry-After; a 429 carrying Retry-After: 2 waits at least 2 s, verified with an injected clock and sleep. Tests: packages/paypal/test/backoff.test.ts."
     },
@@ -1346,7 +1361,7 @@
       "handling": "Refresh once (single-flight), then retry",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1216,
+      "specLine": 1478,
       "status": "done",
       "notes": "packages/paypal/src/client.ts refreshes the OAuth token once on a 401 via a single-flight refresh, then reports PP_AUTH. Tests: packages/paypal/test/client.oauth.test.ts."
     },
@@ -1361,7 +1376,7 @@
       "handling": "The Defender switches to direct REST for the same operations (getDispute, listDisputes); the agent tooling degrades gracefully",
       "declaredTest": "I",
       "userFacing": "Status page shows MCP down",
-      "specLine": 1217,
+      "specLine": 1479,
       "status": "todo"
     },
     {
@@ -1375,7 +1390,7 @@
       "handling": "Respond 200 after storing; verify async (EC-WH-7)",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1218,
+      "specLine": 1480,
       "status": "todo"
     },
     {
@@ -1389,7 +1404,7 @@
       "handling": "Boot refuses",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1219,
+      "specLine": 1481,
       "status": "done",
       "notes": "Handled in packages/core (WP-01): envSchema rejects PAYPAL_ENV=live; assertSandbox enforces it at call time"
     },
@@ -1404,7 +1419,7 @@
       "handling": "The code paths that call sandbox-only APIs live in paypal.sandbox.* and are compiled out when PAYPAL_ENV=live (not supported anyway)",
       "declaredTest": "U",
       "userFacing": "README \"Going live\" section",
-      "specLine": 1220,
+      "specLine": 1482,
       "status": "todo"
     },
     {
@@ -1418,7 +1433,7 @@
       "handling": "Alert Vedant; scripts/sandbox-bootstrap.ts recreates the personas",
       "declaredTest": "S",
       "userFacing": "Status page",
-      "specLine": 1221,
+      "specLine": 1483,
       "status": "todo"
     },
     {
@@ -1432,7 +1447,7 @@
       "handling": "PRIVACY_LEGAL_HOLD; scheduled for after resolution + window; the user is told the date",
       "declaredTest": "U",
       "userFacing": "\"We'll erase on 2 Jun 2027 because a dispute needs this record\"",
-      "specLine": 1244,
+      "specLine": 1507,
       "status": "wip",
       "notes": "Unbuilt. WP-19 owns packages/privacy. The PRIVACY_LEGAL_HOLD code already exists in the registry (packages/core/src/errors.ts) and the schema has privacy_requests.legal_hold_reason (packages/db), but no behaviour and therefore no test yet."
     },
@@ -1447,7 +1462,7 @@
       "handling": "JSON zip of all rows + tokens + PDFs within 24 h (immediate in the demo)",
       "declaredTest": "E",
       "userFacing": "Download link",
-      "specLine": 1245,
+      "specLine": 1508,
       "status": "todo"
     },
     {
@@ -1458,10 +1473,10 @@
       "module": "M19 privacy",
       "scenario": "Public verifier leaks PII",
       "detection": "",
-      "handling": "Redaction: email masked (a*@…), no street address; raw-token download includes selectively disclosed fields only (SD-JWT)",
+      "handling": "Redaction: email masked (a*@…), no street address; raw-token download includes selectively disclosed** fields only (SD-JWT)",
       "declaredTest": "U (snapshot)",
       "userFacing": "n/a",
-      "specLine": 1246,
+      "specLine": 1509,
       "status": "done",
       "notes": "Handled in packages/core (WP-01): three-filter logger redaction + redacted public verifier payload (S-18)"
     },
@@ -1476,7 +1491,7 @@
       "handling": "OpenAI API data-usage settings documented; no PII sent to the compiler beyond the intent text; product data only to the agent",
       "declaredTest": "U (prompt redaction test)",
       "userFacing": "Privacy page statement",
-      "specLine": 1247,
+      "specLine": 1510,
       "status": "todo"
     },
     {
@@ -1490,7 +1505,7 @@
       "handling": "48 h email (stub) before the retention purge, per DPDP Rule 8(2) good practice [B17]",
       "declaredTest": "U",
       "userFacing": "Email preview",
-      "specLine": 1248,
+      "specLine": 1511,
       "status": "todo"
     },
     {
@@ -1504,7 +1519,7 @@
       "handling": "Disclosed in the notice; Render region chosen = Singapore [U: confirm Render region list in WP-00]",
       "declaredTest": "n/a",
       "userFacing": "Notice text",
-      "specLine": 1249,
+      "specLine": 1512,
       "status": "todo"
     },
     {
@@ -1518,7 +1533,7 @@
       "handling": "Compiler → manual constraint form; agent → \"try later\"; Defender → template notes (deterministic)",
       "declaredTest": "I",
       "userFacing": "Clear fallback messages",
-      "specLine": 1255,
+      "specLine": 1518,
       "status": "done",
       "notes": "compile() maps a provider timeout or outage to LLM_UNAVAILABLE with retryable:true, and never returns a partially-filled CompiledMandate, which is what lets the UI fall back to the manual constraint form. Test: packages/compiler/test/compile.test.ts."
     },
@@ -1533,7 +1548,7 @@
       "handling": "One repair retry (repairToolCall / re-ask), then fallback",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1256,
+      "specLine": 1519,
       "status": "done",
       "notes": "One repair retry with the schema issues listed, then a typed failure. A model answer that fails its zod schema never becomes a constraint. Test: packages/compiler/test/compile.test.ts."
     },
@@ -1548,7 +1563,7 @@
       "handling": "Citation checker blocks it",
       "declaredTest": "U",
       "userFacing": "n/a",
-      "specLine": 1257,
+      "specLine": 1520,
       "status": "todo"
     },
     {
@@ -1562,7 +1577,7 @@
       "handling": "isStepCount(12); per-user daily token budget; Judge Mode capped",
       "declaredTest": "U",
       "userFacing": "\"Agent stopped after 12 steps\"",
-      "specLine": 1258,
+      "specLine": 1521,
       "status": "todo"
     },
     {
@@ -1576,7 +1591,7 @@
       "handling": "LLM_MAIN_MODEL env; the eval suite runs on a model switch",
       "declaredTest": "n/a",
       "userFacing": "n/a",
-      "specLine": 1259,
+      "specLine": 1522,
       "status": "todo"
     }
   ]

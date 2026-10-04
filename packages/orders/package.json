@@ -12,7 +12,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:sandbox": "vitest run --config vitest.sandbox.config.ts"
   },
   "dependencies": {
     "@countersign/core": "workspace:*",

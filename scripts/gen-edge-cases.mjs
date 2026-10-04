@@ -60,11 +60,35 @@ const SECTION_WP = {
   12.14: { wp: 'WP-08, WP-13, WP-15', module: 'M8/M13/M15', title: 'LLM failures' },
 }
 
-/** Split a spec table row into trimmed cells, stripping markdown emphasis and inline code. */
+/**
+ * Split a spec table row into trimmed cells, reducing the markdown to plain text.
+ *
+ * The spec is a markdown table full of `**bold**`, `*italic*`, `` `code` `` and `<br>`. The catalogue is
+ * meant to hold readable plain text, so all of it is stripped — and every one of those was a real leak
+ * found the hard way:
+ *
+ *  - `**bold**` stripped by an earlier version;
+ *  - `*italic*` **not** stripped, so R-SNAD-MERCH's "*hurt*" reached the ledger with asterisks;
+ *  - an escaped `\_` (which a markdown formatter introduces) leaked a literal backslash into EC-IDEM-1's
+ *    user-facing copy;
+ *  - `<br>` becomes "; " so a cell with two sentences stays one row.
+ *
+ * Unescaping runs **after** stripping, so `\_` cannot be mistaken for the start of `_italic_`.
+ */
 function cells(line) {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
   const raw = trimmed.split('|').map((c) => c.trim())
-  return raw.map((c) => c.replace(/\*\*/g, '').replace(/<br>/g, '; ').replace(/`/g, '').trim())
+  return raw.map((c) =>
+    c
+      .replace(/<br\s*\/?>/g, '; ')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/(^|[^*\w])\*([^*\n]+)\*(?![*\w])/g, '$1$2')
+      .replace(/(^|[^\w_])_([^_\n]+)_(?![\w])/g, '$1$2')
+      .replace(/\\([_*[\]{}#`|>~])/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  )
 }
 
 function parse() {
@@ -197,8 +221,16 @@ function main() {
       'handling',
       'declaredTest',
       'userFacing',
-      'specLine',
     ]
+    /**
+     * `specLine` is recorded but **not** compared.
+     *
+     * It is a navigation hint, not content: "find this row in the spec". Prettier realigning the spec's
+     * table padding moved every one of the 109 line numbers by a couple of lines and failed the gate for
+     * no real reason — a gate that cries wolf over whitespace gets ignored, which is the whole failure
+     * mode DECISIONS D-017 is about. The line numbers are still written, so a human can jump to the row;
+     * only *what the row says* is gated.
+     */
     const project = (c) => Object.fromEntries(GENERATED_KEYS.map((k) => [k, c[k]]))
 
     const drift = []
