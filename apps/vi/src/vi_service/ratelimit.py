@@ -106,7 +106,12 @@ def enforce(client_id: str, *, limiter: RateLimiter | None = None) -> None:
     allowed, retry_after = limiter.check(client_id)
     if not allowed:
         raise errors.http_error(
-            "CS_CONFLICT",
+            # `CS_RATE_LIMITED`, not `CS_CONFLICT` (docs/DECISIONS.md D-007). This used to borrow
+            # CS_CONFLICT because the registry had no rate-limit code, which meant the error said
+            # "that conflicts with something we already saved, refresh and try again" — advice that
+            # is actively wrong when the cause is that we asked for too many things too quickly. A
+            # code that says the wrong thing sends a developer to debug the wrong problem.
+            "CS_RATE_LIMITED",
             f"Rate limit exceeded: {limiter.limit} requests per {limiter.window_seconds}s per IP. "
             f"Try again in {retry_after}s.",
             {
@@ -114,7 +119,6 @@ def enforce(client_id: str, *, limiter: RateLimiter | None = None) -> None:
                 "window_seconds": limiter.window_seconds,
                 "retry_after_seconds": retry_after,
             },
-            user_message="Too many requests. Please wait a moment and try again.",
             retryable=True,
             status_code=429,
             headers={"Retry-After": str(retry_after)},

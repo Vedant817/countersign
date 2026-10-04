@@ -1,0 +1,2280 @@
+{
+  "components": {
+    "schemas": {
+      "AcceptableItem": {
+        "additionalProperties": true,
+        "description": "One acceptable SKU inside a `line_items` constraint.",
+        "properties": {
+          "id": {
+            "description": "SKU",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "Product title. The library rejects an `acceptable_items` entry without one.",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "AcceptableItem",
+        "type": "object"
+      },
+      "AtTimeCheck": {
+        "properties": {
+          "honoured": {
+            "description": "False while the library exposes no clock override.",
+            "title": "Honoured",
+            "type": "boolean"
+          },
+          "l1_exp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "L1 Exp"
+          },
+          "l2_exp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "L2 Exp"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested": {
+            "title": "Requested",
+            "type": "integer"
+          },
+          "within_validity_at": {
+            "description": "Advisory only: our own iat/exp window check at `requested`, with the configured skew.",
+            "title": "Within Validity At",
+            "type": "boolean"
+          },
+          "within_validity_now": {
+            "title": "Within Validity Now",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "requested",
+          "honoured",
+          "reason",
+          "within_validity_at",
+          "within_validity_now"
+        ],
+        "title": "AtTimeCheck",
+        "type": "object"
+      },
+      "CheckoutJwtRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "checkout_id": {
+            "anyOf": [
+              {
+                "description": "`chk_\u2026` recorded against this price lock",
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkout Id"
+          },
+          "currency": {
+            "enum": [
+              "USD",
+              "EUR",
+              "GBP",
+              "INR",
+              "JPY",
+              "AUD",
+              "CAD"
+            ],
+            "title": "Currency",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CheckoutLine"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/MerchantRef"
+          },
+          "shipping_minor": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Shipping Minor",
+            "type": "integer"
+          },
+          "tax_minor": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Tax Minor",
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "default": 900,
+            "maximum": 86400.0,
+            "minimum": 30.0,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "merchant",
+          "lines",
+          "currency"
+        ],
+        "title": "CheckoutJwtRequest",
+        "type": "object"
+      },
+      "CheckoutJwtResponse": {
+        "properties": {
+          "checkout_hash": {
+            "description": "base64url SHA-256 of the ASCII JWT bytes. Byte-identical to what the library recomputes.",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Checkout Hash",
+            "type": "string"
+          },
+          "checkout_jwt": {
+            "title": "Checkout Jwt",
+            "type": "string"
+          },
+          "currency": {
+            "enum": [
+              "USD",
+              "EUR",
+              "GBP",
+              "INR",
+              "JPY",
+              "AUD",
+              "CAD"
+            ],
+            "title": "Currency",
+            "type": "string"
+          },
+          "exp": {
+            "title": "Exp",
+            "type": "integer"
+          },
+          "kid": {
+            "title": "Kid",
+            "type": "string"
+          },
+          "total_minor": {
+            "title": "Total Minor",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "checkout_jwt",
+          "checkout_hash",
+          "exp",
+          "total_minor",
+          "currency",
+          "kid"
+        ],
+        "title": "CheckoutJwtResponse",
+        "type": "object"
+      },
+      "CheckoutLine": {
+        "additionalProperties": false,
+        "properties": {
+          "qty": {
+            "description": "Integer quantity.",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Qty",
+            "type": "integer"
+          },
+          "sku": {
+            "description": "SKU from the seeded catalog",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Sku",
+            "type": "string"
+          },
+          "title": {
+            "description": "Product title, locked into the price lock",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "unit_minor": {
+            "description": "Unit price in minor units. Never a float.",
+            "minimum": 0.0,
+            "title": "Unit Minor",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sku",
+          "title",
+          "qty",
+          "unit_minor"
+        ],
+        "title": "CheckoutLine",
+        "type": "object"
+      },
+      "ConstraintReport": {
+        "properties": {
+          "checked": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checked",
+            "type": "array"
+          },
+          "satisfied": {
+            "title": "Satisfied",
+            "type": "boolean"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped",
+            "type": "array"
+          },
+          "violations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Violations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "satisfied",
+          "violations",
+          "checked",
+          "skipped"
+        ],
+        "title": "ConstraintReport",
+        "type": "object"
+      },
+      "DisclosedReport": {
+        "properties": {
+          "l1": {
+            "additionalProperties": true,
+            "title": "L1",
+            "type": "object"
+          },
+          "l2": {
+            "additionalProperties": true,
+            "title": "L2",
+            "type": "object"
+          },
+          "l3a": {
+            "additionalProperties": true,
+            "title": "L3A",
+            "type": "object"
+          },
+          "l3b": {
+            "additionalProperties": true,
+            "title": "L3B",
+            "type": "object"
+          }
+        },
+        "title": "DisclosedReport",
+        "type": "object"
+      },
+      "EvidenceBundle": {
+        "additionalProperties": true,
+        "description": "The evidence packet's chain material (spec \u00a77.3). Only the chain fields are verified here.",
+        "properties": {
+          "checkout_jwt": {
+            "anyOf": [
+              {
+                "maxLength": 32768,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkout Jwt"
+          },
+          "gate_decision": {
+            "anyOf": [
+              {
+                "maxLength": 32768,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gate Decision"
+          },
+          "l1": {
+            "description": "L1 SD-JWT",
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "L1",
+            "type": "string"
+          },
+          "l2": {
+            "description": "L2 SD-JWT",
+            "maxLength": 131072,
+            "minLength": 1,
+            "title": "L2",
+            "type": "string"
+          },
+          "l3a": {
+            "anyOf": [
+              {
+                "maxLength": 65536,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "L3A"
+          },
+          "l3b": {
+            "anyOf": [
+              {
+                "maxLength": 65536,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "L3B"
+          },
+          "v": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "V"
+          },
+          "vi_lib_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vi Lib Commit"
+          }
+        },
+        "required": [
+          "l1",
+          "l2"
+        ],
+        "title": "EvidenceBundle",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JwksResponse": {
+        "properties": {
+          "keys": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keys"
+        ],
+        "title": "JwksResponse",
+        "type": "object"
+      },
+      "KeyReport": {
+        "properties": {
+          "agent_kid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Kid"
+          },
+          "device_jkt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Jkt"
+          },
+          "device_kid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Kid"
+          },
+          "issuer_kid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer Kid"
+          },
+          "merchant_kid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merchant Kid"
+          }
+        },
+        "title": "KeyReport",
+        "type": "object"
+      },
+      "L1IssueRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "device_kid": {
+            "default": "device-key-1",
+            "description": "`kid` the browser will put in the L2 header",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Device Kid",
+            "type": "string"
+          },
+          "device_public_jwk": {
+            "$ref": "#/components/schemas/PublicJwk"
+          },
+          "pan_last_four": {
+            "default": "0000",
+            "pattern": "^\\d{4}$",
+            "title": "Pan Last Four",
+            "type": "string"
+          },
+          "scheme": {
+            "default": "PayPal",
+            "description": "Card scheme or wallet brand",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Scheme",
+            "type": "string"
+          },
+          "ttl_days": {
+            "default": 365,
+            "description": "Lifetime in days. \u2264 365 per spec \u00a78.3.",
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Ttl Days",
+            "type": "integer"
+          },
+          "user_id": {
+            "description": "`usr_\u2026`",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/WalletRef"
+          }
+        },
+        "required": [
+          "user_id",
+          "wallet",
+          "device_public_jwk"
+        ],
+        "title": "L1IssueRequest",
+        "type": "object"
+      },
+      "L1IssueResponse": {
+        "properties": {
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "device_jkt": {
+            "title": "Device Jkt",
+            "type": "string"
+          },
+          "exp": {
+            "title": "Exp",
+            "type": "integer"
+          },
+          "iat": {
+            "title": "Iat",
+            "type": "integer"
+          },
+          "issuer_kid": {
+            "title": "Issuer Kid",
+            "type": "string"
+          },
+          "l1": {
+            "title": "L1",
+            "type": "string"
+          }
+        },
+        "required": [
+          "l1",
+          "iat",
+          "exp",
+          "issuer_kid",
+          "card_id",
+          "device_jkt"
+        ],
+        "title": "L1IssueResponse",
+        "type": "object"
+      },
+      "L2FinalizeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "prepare_id": {
+            "description": "From `l2/prepare`",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Prepare Id",
+            "type": "string"
+          },
+          "signature_b64url": {
+            "description": "Raw 64-byte ES256 r\u2016s (P1363), base64url. Not DER: WebCrypto emits P1363 and the library's `es256_verify` rejects anything that is not exactly 64 bytes.",
+            "pattern": "^[A-Za-z0-9_-]+={0,2}$",
+            "title": "Signature B64Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prepare_id",
+          "signature_b64url"
+        ],
+        "title": "L2FinalizeRequest",
+        "type": "object"
+      },
+      "L2FinalizeResponse": {
+        "properties": {
+          "agent_kid": {
+            "title": "Agent Kid",
+            "type": "string"
+          },
+          "exp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exp"
+          },
+          "iat": {
+            "title": "Iat",
+            "type": "integer"
+          },
+          "l2": {
+            "description": "`signing_input.signature_b64url~d1~d2~\u2026~` \u2014 the finished L2, disclosures included.",
+            "maxLength": 131072,
+            "minLength": 1,
+            "title": "L2",
+            "type": "string"
+          }
+        },
+        "required": [
+          "l2",
+          "iat",
+          "agent_kid"
+        ],
+        "title": "L2FinalizeResponse",
+        "type": "object"
+      },
+      "L2PrepareRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptable_items": {
+            "items": {
+              "$ref": "#/components/schemas/AcceptableItem"
+            },
+            "title": "Acceptable Items",
+            "type": "array"
+          },
+          "agent_kid": {
+            "description": "`kid` for the agent key this mandate delegates to",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Agent Kid",
+            "type": "string"
+          },
+          "agent_public_jwk": {
+            "$ref": "#/components/schemas/PublicJwk"
+          },
+          "aud": {
+            "description": "Agent URL this mandate is delegated to",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Aud",
+            "type": "string"
+          },
+          "checkout_constraints": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Checkout Constraints",
+            "type": "array"
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "description": "`dev_\u2026`, recorded in L2 `risk_data`",
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "device_kid": {
+            "description": "kid for the L2 header; must be the key bound in the L1's `cnf.jwk`",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Device Kid",
+            "type": "string"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip Address"
+          },
+          "iss": {
+            "anyOf": [
+              {
+                "description": "Wallet/issuer URL",
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iss"
+          },
+          "l1": {
+            "description": "The L1 SD-JWT the browser will bind its L2 to",
+            "maxLength": 32768,
+            "minLength": 1,
+            "title": "L1",
+            "type": "string"
+          },
+          "merchants": {
+            "description": "Selectively-disclosable merchant entries referenced by id from the constraints above.",
+            "items": {
+              "$ref": "#/components/schemas/MerchantRef"
+            },
+            "title": "Merchants",
+            "type": "array"
+          },
+          "nonce": {
+            "description": "Replay nonce. Must match the L3 nonce if the Gate will cross-check it.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Nonce",
+            "type": "string"
+          },
+          "payment_constraints": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Payment Constraints",
+            "type": "array"
+          },
+          "payment_instrument": {
+            "$ref": "#/components/schemas/PaymentInstrument"
+          },
+          "prompt_summary": {
+            "default": "",
+            "description": "What the user asked for. NOT covered by the signature: `UserMandate` has this field but `create_layer2_autonomous` at the pinned commit never serialises it into the L2 payload, so it cannot be shown as signed content (spec \u00a78.3 names it in the request). Advisory only.",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Prompt Summary",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 604800,
+            "description": "\u2264 2592000 (30 days) per spec \u00a78.3.",
+            "maximum": 2592000.0,
+            "minimum": 60.0,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "l1",
+          "device_kid",
+          "agent_public_jwk",
+          "agent_kid",
+          "merchants",
+          "payment_instrument",
+          "nonce",
+          "aud"
+        ],
+        "title": "L2PrepareRequest",
+        "type": "object"
+      },
+      "L2PrepareResponse": {
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "header": {
+            "additionalProperties": true,
+            "title": "Header",
+            "type": "object"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "The decoded L2 payload. The UI MUST render this, not its own copy (spec \u00a78.5).",
+            "title": "Payload",
+            "type": "object"
+          },
+          "prepare_id": {
+            "title": "Prepare Id",
+            "type": "string"
+          },
+          "prepare_ttl_seconds": {
+            "title": "Prepare Ttl Seconds",
+            "type": "integer"
+          },
+          "signing_input": {
+            "description": "`header.payload` \u2014 the ASCII bytes the browser signs. Not a token; it has no signature yet.",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Signing Input",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prepare_id",
+          "signing_input",
+          "header",
+          "payload",
+          "expires_at",
+          "prepare_ttl_seconds"
+        ],
+        "title": "L2PrepareResponse",
+        "type": "object"
+      },
+      "L3CreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "description": "`agt_\u2026`; used as AEAD associated data",
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "agent_kid": {
+            "description": "The `agt_\u2026` key this L3 must be signed with",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Agent Kid",
+            "type": "string"
+          },
+          "aud": {
+            "description": "Payment network URL for L3a",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Aud",
+            "type": "string"
+          },
+          "checkout_jwt": {
+            "description": "The merchant-signed, price-locked checkout JWT",
+            "maxLength": 32768,
+            "minLength": 1,
+            "title": "Checkout Jwt",
+            "type": "string"
+          },
+          "enc_private_key_b64": {
+            "description": "AES-256-GCM ciphertext from `POST /v1/keys/agent`",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Enc Private Key B64",
+            "type": "string"
+          },
+          "iss": {
+            "anyOf": [
+              {
+                "description": "Agent URL",
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iss"
+          },
+          "l2": {
+            "description": "The full L2 SD-JWT as stored on the mandate",
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "L2",
+            "type": "string"
+          },
+          "nonce": {
+            "description": "Replay nonce; must match the L2 nonce",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Nonce",
+            "type": "string"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/L3Payment"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "maximum": 3600.0,
+            "minimum": 30.0,
+            "title": "Ttl Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent_kid",
+          "enc_private_key_b64",
+          "l2",
+          "checkout_jwt",
+          "payment",
+          "aud",
+          "nonce"
+        ],
+        "title": "L3CreateRequest",
+        "type": "object"
+      },
+      "L3CreateResponse": {
+        "properties": {
+          "checkout_hash": {
+            "title": "Checkout Hash",
+            "type": "string"
+          },
+          "checkout_presentation": {
+            "description": "`l2_base~checkout_disclosure~item_disclosure~` \u2014 the L2 slice the merchant sees.",
+            "title": "Checkout Presentation",
+            "type": "string"
+          },
+          "exp": {
+            "title": "Exp",
+            "type": "integer"
+          },
+          "iat": {
+            "title": "Iat",
+            "type": "integer"
+          },
+          "jti": {
+            "description": "Deterministic replay id: base64url SHA-256 of the L3a issuer JWT. Identical on every retry of the same request.",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Jti",
+            "type": "string"
+          },
+          "l3a": {
+            "title": "L3A",
+            "type": "string"
+          },
+          "l3b": {
+            "title": "L3B",
+            "type": "string"
+          },
+          "payment_presentation": {
+            "description": "`l2_base~payment_disclosure~merchant_disclosure~` \u2014 the L2 slice the network sees.",
+            "title": "Payment Presentation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "l3a",
+          "l3b",
+          "jti",
+          "iat",
+          "exp",
+          "checkout_hash",
+          "payment_presentation",
+          "checkout_presentation"
+        ],
+        "title": "L3CreateResponse",
+        "type": "object"
+      },
+      "L3Payment": {
+        "additionalProperties": false,
+        "properties": {
+          "amount_minor": {
+            "description": "Integer minor units. Refused out of range at l3/create.",
+            "minimum": 0.0,
+            "title": "Amount Minor",
+            "type": "integer"
+          },
+          "currency": {
+            "enum": [
+              "USD",
+              "EUR",
+              "GBP",
+              "INR",
+              "JPY",
+              "AUD",
+              "CAD"
+            ],
+            "title": "Currency",
+            "type": "string"
+          },
+          "payee_id": {
+            "description": "Must be in the L2's `allowed_payees`",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Payee Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount_minor",
+          "currency",
+          "payee_id"
+        ],
+        "title": "L3Payment",
+        "type": "object"
+      },
+      "MerchantRef": {
+        "additionalProperties": true,
+        "description": "One merchant/payee entry. Inner shapes are copied from `examples/autonomous_flow.py`, not invented.",
+        "properties": {
+          "id": {
+            "description": "Stable merchant id, e.g. the seeded `products`-side merchant id",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "website": {
+            "description": "Merchant URL; also the `payee.website` the library requires on L3a",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Website",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "website"
+        ],
+        "title": "MerchantRef",
+        "type": "object"
+      },
+      "MintAgentKeyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "description": "`agt_\u2026` id of the agent this key belongs to",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Agent Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "title": "MintAgentKeyRequest",
+        "type": "object"
+      },
+      "MintAgentKeyResponse": {
+        "properties": {
+          "enc_private_key_b64": {
+            "description": "AES-256-GCM under VI_KEK, base64. Layout nonce(12)||ciphertext||tag(16). The plaintext private key is never returned or stored here.",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Enc Private Key B64",
+            "type": "string"
+          },
+          "kid": {
+            "title": "Kid",
+            "type": "string"
+          },
+          "public_jwk": {
+            "additionalProperties": true,
+            "title": "Public Jwk",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kid",
+          "public_jwk",
+          "enc_private_key_b64"
+        ],
+        "title": "MintAgentKeyResponse",
+        "type": "object"
+      },
+      "PaymentInstrument": {
+        "additionalProperties": false,
+        "description": "`{type, id, description}` \u2014 required by the library on both the open payment mandate and\nthe closed L3a one, and cross-checked between them.",
+        "properties": {
+          "description": {
+            "description": "Buyer-facing label, e.g. 'PayPal \u00b7\u00b7\u00b7\u00b7'",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "description": "Instrument id. Per spec \u00a78.3 this is sha256(payment_token_id).",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "description": "`paypal_vault` in Countersign",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "description"
+        ],
+        "title": "PaymentInstrument",
+        "type": "object"
+      },
+      "PublicJwk": {
+        "additionalProperties": true,
+        "description": "A P-256 public JWK. Private members are refused outright.",
+        "properties": {
+          "crv": {
+            "const": "P-256",
+            "title": "Crv",
+            "type": "string"
+          },
+          "kty": {
+            "const": "EC",
+            "title": "Kty",
+            "type": "string"
+          },
+          "x": {
+            "description": "base64url of the public x coordinate",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "X",
+            "type": "string"
+          },
+          "y": {
+            "description": "base64url of the public y coordinate",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Y",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kty",
+          "crv",
+          "x",
+          "y"
+        ],
+        "title": "PublicJwk",
+        "type": "object"
+      },
+      "PublicVerifyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "at_time": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Time"
+          },
+          "bundle": {
+            "$ref": "#/components/schemas/EvidenceBundle"
+          },
+          "expected_aud": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Aud"
+          },
+          "expected_nonce": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Nonce"
+          }
+        },
+        "required": [
+          "bundle"
+        ],
+        "title": "PublicVerifyRequest",
+        "type": "object"
+      },
+      "PublicVerifyResponse": {
+        "properties": {
+          "at_time_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtTimeCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "at_time_not_honoured": {
+            "default": false,
+            "title": "At Time Not Honoured",
+            "type": "boolean"
+          },
+          "at_time_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Time Reason"
+          },
+          "bundle_hash": {
+            "description": "base64url SHA-256 over the RFC 8785 (JCS) canonical form of the bundle, exactly as spec \u00a77.3 hashes `custom_id`.",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Bundle Hash",
+            "type": "string"
+          },
+          "chain_valid": {
+            "title": "Chain Valid",
+            "type": "boolean"
+          },
+          "checks_performed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checks Performed",
+            "type": "array"
+          },
+          "checks_skipped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checks Skipped",
+            "type": "array"
+          },
+          "clock_skew_seconds": {
+            "title": "Clock Skew Seconds",
+            "type": "integer"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/ConstraintReport"
+          },
+          "disclosed": {
+            "$ref": "#/components/schemas/DisclosedReport"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/KeyReport"
+          },
+          "verified_at": {
+            "title": "Verified At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chain_valid",
+          "errors",
+          "constraints",
+          "disclosed",
+          "keys",
+          "verified_at",
+          "clock_skew_seconds",
+          "bundle_hash"
+        ],
+        "title": "PublicVerifyResponse",
+        "type": "object"
+      },
+      "RotateKeyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "enum": [
+              "ISSUER",
+              "MERCHANT"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "RotateKeyRequest",
+        "type": "object"
+      },
+      "RotateKeyResponse": {
+        "properties": {
+          "new_kid": {
+            "title": "New Kid",
+            "type": "string"
+          },
+          "retired_kid": {
+            "title": "Retired Kid",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_kid",
+          "role",
+          "retired_kid"
+        ],
+        "title": "RotateKeyResponse",
+        "type": "object"
+      },
+      "StatusResponse": {
+        "properties": {
+          "app_env": {
+            "title": "App Env",
+            "type": "string"
+          },
+          "clock_skew_seconds": {
+            "title": "Clock Skew Seconds",
+            "type": "integer"
+          },
+          "issuer_kid": {
+            "title": "Issuer Kid",
+            "type": "string"
+          },
+          "merchant_kid": {
+            "title": "Merchant Kid",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "app_env",
+          "issuer_kid",
+          "merchant_kid",
+          "clock_skew_seconds"
+        ],
+        "title": "StatusResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VerifyRequest": {
+        "additionalProperties": false,
+        "description": "`POST /v1/verify`. Deliberately *not* `extra=\"forbid\"`-strict: an invalid chain must still\nbe a 200 with reasons, and an unrecognised field is not a reason to 422 the whole request.",
+        "properties": {
+          "at_time": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "EC-TIME-3: verify 'as of capture time'. The pinned library has no time override (see `at_time_not_honoured`), so this is reported as an advisory window check.",
+            "title": "At Time"
+          },
+          "checkout_jwt": {
+            "anyOf": [
+              {
+                "maxLength": 32768,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkout Jwt"
+          },
+          "expected_aud": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Aud"
+          },
+          "expected_nonce": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Nonce"
+          },
+          "l1": {
+            "description": "L1 SD-JWT",
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "L1",
+            "type": "string"
+          },
+          "l2": {
+            "description": "L2 SD-JWT with disclosures",
+            "maxLength": 131072,
+            "minLength": 1,
+            "title": "L2",
+            "type": "string"
+          },
+          "l3a": {
+            "anyOf": [
+              {
+                "maxLength": 65536,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "L3A"
+          },
+          "l3b": {
+            "anyOf": [
+              {
+                "maxLength": 65536,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "L3B"
+          },
+          "strict": {
+            "default": true,
+            "title": "Strict",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "l1",
+          "l2"
+        ],
+        "title": "VerifyRequest",
+        "type": "object"
+      },
+      "VerifyResponse": {
+        "properties": {
+          "at_time_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AtTimeCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "at_time_not_honoured": {
+            "default": false,
+            "title": "At Time Not Honoured",
+            "type": "boolean"
+          },
+          "at_time_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At Time Reason"
+          },
+          "chain_valid": {
+            "title": "Chain Valid",
+            "type": "boolean"
+          },
+          "checks_performed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checks Performed",
+            "type": "array"
+          },
+          "checks_skipped": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checks Skipped",
+            "type": "array"
+          },
+          "clock_skew_seconds": {
+            "title": "Clock Skew Seconds",
+            "type": "integer"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/ConstraintReport"
+          },
+          "disclosed": {
+            "$ref": "#/components/schemas/DisclosedReport"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/KeyReport"
+          },
+          "verified_at": {
+            "title": "Verified At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chain_valid",
+          "errors",
+          "constraints",
+          "disclosed",
+          "keys",
+          "verified_at",
+          "clock_skew_seconds"
+        ],
+        "title": "VerifyResponse",
+        "type": "object"
+      },
+      "WalletRef": {
+        "additionalProperties": false,
+        "properties": {
+          "payer_email": {
+            "description": "Buyer's PayPal email",
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Payer Email",
+            "type": "string"
+          },
+          "payer_id": {
+            "description": "PayPal payer id",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Payer Id",
+            "type": "string"
+          },
+          "payment_token_id": {
+            "description": "PayPal vault payment-token id (spec V9/V10). Hashed to derive `card_id`; never echoed back.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Payment Token Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payer_id",
+          "payer_email",
+          "payment_token_id"
+        ],
+        "title": "WalletRef",
+        "type": "object"
+      }
+    }
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/checkout-jwt": {
+      "post": {
+        "description": "Merchant signs the price lock. Integer minor units throughout (spec EC-FX-6).",
+        "operationId": "checkout_jwt_v1_checkout_jwt_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutJwtRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutJwtResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Checkout Jwt",
+        "tags": [
+          "checkout"
+        ]
+      }
+    },
+    "/v1/checkout-jwt/verify": {
+      "get": {
+        "description": "Does this price lock verify against a merchant key we know?\n\nA diagnostic for WP-09's checkout work, on the private authenticated surface so it cannot be used\nas a free signing oracle by the public. Always answers `{valid, reason}` \u2014 a price lock that does\nnot even parse is a `valid: false` answer here, not a 4xx, because the whole point of the endpoint\nis to be asked \"is this thing good?\" and get told.",
+        "operationId": "checkout_jwt_verify_v1_checkout_jwt_verify_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "checkout_jwt",
+            "required": true,
+            "schema": {
+              "title": "Checkout Jwt",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Checkout Jwt Verify V1 Checkout Jwt Verify Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Checkout Jwt Verify",
+        "tags": [
+          "checkout"
+        ]
+      }
+    },
+    "/v1/jwks": {
+      "get": {
+        "description": "Issuer, merchant and every agent key \u2014 **including retired ones**, each with a `status`.\n\nPublic and rate-limited (spec \u00a78.3): a verifier needs the retired keys to check old evidence,\nand a public key set is not a secret.",
+        "operationId": "jwks_v1_jwks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JwksResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Jwks",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/v1/keys/agent": {
+      "post": {
+        "description": "Mint one P-256 key per agent instance. The plaintext private key never leaves this process.",
+        "operationId": "mint_agent_key_v1_keys_agent_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MintAgentKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintAgentKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mint Agent Key",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/v1/keys/rotate": {
+      "post": {
+        "description": "Retire the current key for a role and mint a replacement.\n\nNothing is deleted: the retired public key stays resolvable by `kid` and stays in JWKS, so\nevidence signed before the rotation still verifies (spec EC-KEY-2, EC-KEY-3).",
+        "operationId": "rotate_key_v1_keys_rotate_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotateKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotateKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rotate Key",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/v1/l1/issue": {
+      "post": {
+        "description": "Issuer signs an L1 binding `sub`, the device public key (`cnf.jwk`) and `card_id`.",
+        "operationId": "l1_issue_v1_l1_issue_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/L1IssueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/L1IssueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "L1 Issue",
+        "tags": [
+          "l1"
+        ]
+      }
+    },
+    "/v1/l2/finalize": {
+      "post": {
+        "description": "Verify the browser's signature against the L1 device key, then return the L2.\n\nA signature that does not verify yields `VI_SIGNATURE_MISMATCH` and **no token**. That check is\nwhat makes two-phase signing safe instead of a way to attach an arbitrary signature.",
+        "operationId": "l2_finalize_v1_l2_finalize_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/L2FinalizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/L2FinalizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "L2 Finalize",
+        "tags": [
+          "l2"
+        ]
+      }
+    },
+    "/v1/l2/prepare": {
+      "post": {
+        "description": "Build the L2 body and return `header.payload` for the browser to sign (spec D3).",
+        "operationId": "l2_prepare_v1_l2_prepare_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/L2PrepareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/L2PrepareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "L2 Prepare",
+        "tags": [
+          "l2"
+        ]
+      }
+    },
+    "/v1/l3/create": {
+      "post": {
+        "description": "Pre-check against the L2's constraints, then sign L3a (payment) and L3b (checkout).\n\n`VI_CONSTRAINT_VIOLATION` when the request is out of mandate: the service refuses to sign\nrather than signing and letting the Gate catch it later.",
+        "operationId": "l3_create_v1_l3_create_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/L3CreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/L3CreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "L3 Create",
+        "tags": [
+          "l3"
+        ]
+      }
+    },
+    "/v1/public/verify": {
+      "post": {
+        "description": "Public, rate-limited, for `/v/{packetId}`. Same checks, plus `bundle_hash` (spec \u00a77.3).",
+        "operationId": "public_verify_route_v1_public_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicVerifyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Public Verify Route",
+        "tags": [
+          "verify"
+        ]
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "description": "Liveness, the kids in force, and the skew `VI_CLOCK_SKEW_SECONDS` is actually using.\n\nEC-TIME-2 asks for a clock comparison between web and vi. This reports what vi believes; the\ncaller compares it with its own `Date` header. The bounded skew is what makes a 5 s drift\nharmless (spec \u00a712.5).",
+        "operationId": "status_v1_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/verify": {
+      "post": {
+        "description": "`verify_chain` + `check_constraints(mode=STRICT)`.\n\nAn invalid chain is `200 {chain_valid: false, errors: [...]}` \u2014 never a 4xx. Only a malformed\nrequest is a 4xx.",
+        "operationId": "verify_chain_route_v1_verify_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Chain Route",
+        "tags": [
+          "verify"
+        ]
+      }
+    }
+  }
+}

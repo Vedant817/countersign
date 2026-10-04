@@ -431,9 +431,12 @@ def test_an_unhandled_exception_becomes_a_cs_error_without_a_traceback(
 ) -> None:
     """A bug in a handler is a 500 with a `CsErrorBody` and no internals.
 
-    Matching core's `toCsError` default of `CS_VALIDATION` for an unknown throw, and asserting the
-    absence of the exception text — a stack trace in an HTTP body is an information leak with a
-    production-only failure mode.
+    Reported as `CS_INTERNAL`, matching `packages/core`'s `toCsError` default (D-007). It was
+    `CS_VALIDATION`, which told the caller their request was invalid — sending whoever was debugging
+    it to look at the wrong thing, and counting every server fault as a user error.
+
+    The absence of the exception text is asserted too: a stack trace in an HTTP body is an
+    information leak with a production-only failure mode.
 
     `raise_server_exceptions=False` because the default `TestClient` re-raises after the handler has
     run, which is a property of the test client rather than of the service. The point here is the
@@ -460,10 +463,11 @@ def test_an_unhandled_exception_becomes_a_cs_error_without_a_traceback(
 
     assert response.status_code == 500
     error = error_body(response)
-    assert error["code"] == "CS_VALIDATION"
+    assert error["code"] == "CS_INTERNAL"
     assert "SECRET_INTERNAL_DETAIL" not in response.text
     assert "hunter2" not in response.text
     assert "Traceback" not in response.text
+    # Not retryable: a blind retry of a 500 usually reproduces it.
     assert error["retryable"] is False
 
 

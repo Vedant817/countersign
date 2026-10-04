@@ -34,6 +34,12 @@ CsErrorCode = Literal[
     "CS_FORBIDDEN",
     "CS_CURRENCY_MISMATCH",
     "CS_ROUNDING",
+    # Added in docs/DECISIONS.md D-007. These were missing here while present in
+    # packages/core, which meant vi could never emit them: the rate limiter had to borrow
+    # PP_RATE_LIMITED (whose user-facing copy blames PayPal for our own limit) and an unhandled 500
+    # was reported as CS_VALIDATION, i.e. told to a user as "check your input" for a server fault.
+    "CS_RATE_LIMITED",
+    "CS_INTERNAL",
     "VI_CHAIN_INVALID",
     "VI_SIGNATURE_MISMATCH",
     "VI_EXPIRED",
@@ -73,7 +79,9 @@ CsErrorCode = Literal[
 CS_ERROR_CODES: frozenset[str] = frozenset(get_args(CsErrorCode))
 
 #: Codes a retry can fix. Everything else needs a human or a different request.
-_RETRYABLE: frozenset[str] = frozenset({"PP_RATE_LIMITED", "PP_UNAVAILABLE", "LLM_UNAVAILABLE"})
+_RETRYABLE: frozenset[str] = frozenset(
+    {"PP_RATE_LIMITED", "PP_UNAVAILABLE", "LLM_UNAVAILABLE", "CS_RATE_LIMITED"}
+)
 
 #: Buyer-facing copy. Mirrors `USER_MESSAGES` in core; a code with no entry falls back to the
 #: generic sentence so a new code can never leak an internal message to a user.
@@ -88,6 +96,10 @@ _USER_MESSAGES: dict[str, str] = {
         "Create a mandate in the store currency."
     ),
     "CS_ROUNDING": "That amount has more decimal places than its currency allows, so we refused to round it.",
+    "CS_RATE_LIMITED": "Too many requests just now. Please wait a moment and try again.",
+    "CS_INTERNAL": (
+        "Something went wrong on our side. Nothing was charged. We have the details and will fix it."
+    ),
     "VI_CHAIN_INVALID": "The signed mandate could not be verified, so we stopped.",
     "VI_SIGNATURE_MISMATCH": "The signature did not match the key in the mandate, so we stopped.",
     "VI_EXPIRED": "Your mandate expired. Ask for a new one and we will continue.",
@@ -125,18 +137,24 @@ _DEFAULT_USER_MESSAGE = "Something went wrong. Nothing was charged. Please try a
 
 #: Unanchored on purpose: `access_token` and `x-api-key` must be caught, not just the bare words.
 #:
-#: Deliberately a *stricter superset* of core's `NEVER_SERIALISE`: this adds `api_key` and a
-#: `_key`/`-key` suffix, which core's pattern would let through. Being stricter cannot break a client
-#: — a hidden `details` key is invisible to a caller, whereas a leaked one is in a support screenshot
-#: forever. Worth adopting upstream; noted in docs/DECISIONS.md.
+#: This list was supposed to be a strict superset of `NEVER_SERIALISE` in packages/core, and now
+#: actually is. It previously missed `kid`, `client_id` and `session_id`, which core strips — so a
+#: `details.kid` would have been redacted by the TypeScript side and leaked by this one. The two
+#: regexes are asserted to agree by `tests/test_errors.py::test_never_serialise_is_a_superset_of_core`.
 _NEVER_SERIALISE = re.compile(
-    r"(cause|stack|secret|password|token|authorization|cookie|credential|private|api_key|[_-]key)",
+    r"(cause|stack|secret|password|token|authorization|cookie|credential|private"
+    r"|key|kid|client_id|session_id|clientid)",
     re.IGNORECASE,
 )
 
-#: HTTP status per code. The registry has no rate-limit code, so `CS_CONFLICT` carries 429 for the
-#: public routes' 30/min budget (see `ratelimit.py`); flagged for a registry addition.
+#: HTTP status per code.
+#:
+#: `CS_RATE_LIMITED` carries 429 (docs/DECISIONS.md D-007). It previously had to borrow
+#: `CS_CONFLICT`, whose user-facing copy tells the user to refresh — advice that is actively wrong
+#: when the cause is that we asked for too many things too quickly.
 _STATUS: dict[str, int] = {
+    "CS_RATE_LIMITED": 429,
+    "CS_INTERNAL": 500,
     "CS_VALIDATION": 400,
     "CS_ROUNDING": 400,
     "CS_CURRENCY_MISMATCH": 400,

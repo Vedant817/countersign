@@ -6,15 +6,15 @@
      tree by scripts/ec-coverage.mjs. Edit `status`, `blockedReason` and `notes` in
      docs/edge-cases.json, then run `pnpm test:ec`. -->
 
-_Generated 2026-10-04 11:20Z._
+_Generated 2026-10-04 13:06Z._
 
 | Metric | Value |
 |---|---|
 | Edge cases in spec §12 | **109** |
-| Cases with at least one referencing test | **38** |
+| Cases with at least one referencing test | **39** |
 | Cases fully `done` (test present + status done) | **23** |
 | Cases `blocked` (needs live sandbox / human step) | **1** |
-| Total test references | **91** |
+| Total test references | **97** |
 
 A test claims a case by naming it in the test title or in a comment on the line above,
 e.g. `it('EC-CAP-1 …')` or `// EC-WH-4 forged webhook`.
@@ -98,7 +98,7 @@ Owning work package(s): `WP-03, WP-10` · module: `M3/M10` · spec line 1119
 | | _note:_ apps/vi sets iat/exp server-side in l2/prepare; the browser only signs bytes and never supplies a timestamp, so a wrong client clock cannot affect a mandate. Test: apps/vi/tests/test_verify.py. | | | | |
 | **EC-TIME-2** | Server clocks drift between web and vi | Library skew of 300 s tolerates it [B2]; Render hosts are NTP-synced [U] | U | `apps/vi/tests/test_verify.py:306`<br>`apps/vi/tests/test_verify.py:319`<br>`apps/vi/tests/test_verify.py:400`<br>`packages/core/test/core.test.ts:516` — EC-TIME-2 a token is valid up to the skew past exp and invalid beyond it | done |
 | | _note:_ packages/core/src/clock.ts withinValidity applies VI_CLOCK_SKEW_SECONDS (default 300, the library default), and apps/vi threads clock_skew_seconds into verify_chain. Tests: packages/core/test/core.test.ts, apps/vi/tests/test_verify.py. | | | | |
-| **EC-TIME-3** | Dispute arrives after the mandate expired | Defender verifies with at_time = capture time and now; the evidence states both | U | `apps/vi/tests/test_verify.py:341`<br>`apps/vi/tests/test_verify.py:349` | blocked (tested) |
+| **EC-TIME-3** | Dispute arrives after the mandate expired | Defender verifies with at_time = capture time and now; the evidence states both | U | `apps/vi/tests/test_verify.py:341`<br>`apps/vi/tests/test_verify.py:349`<br>`packages/vi-client/test/types.test.ts:546` — carries the EC-TIME-3 honesty fields | blocked (tested) |
 | | _note:_ apps/vi/tests/test_verify.py::test_EC_TIME_3_at_time_is_flagged_as_not_honoured and ::test_EC_TIME_3_at_time_within_the_window_is_reported_as_such. PARTIAL: the pinned verify_chain (commit 356c296) reads time.time() internally and takes no clock override, so /v1/verify CANNOT produce a real as-of verdict. It returns the verification it did perform at now, plus at_time_not_honoured=true, the reason, and an advisory within_validity_at window check computed by vi-service. A real as-of verification needs a now parameter in the library (docs/HUMAN_TODO.md). Defender-side EC-TIME-3 (verify twice, at capture time and now, and state both in the packet) is WP-15. | | | | |
 | | _blocked:_ verify_chain at the pinned VI commit has no clock override (chain.py:166 hardcodes now = int(time.time())), so as-of-capture-time verification is impossible, not merely unimplemented. apps/vi returns the real verdict at now plus at_time_not_honoured:true. Upstream request raised as HUMAN_TODO H-08; see DECISIONS D-009. | | | | |
 | **EC-TIME-4** | Price-lock boundary race (lock expires mid-Gate) | Deterministic | U | — | todo — no test |
@@ -122,7 +122,7 @@ Owning work package(s): `WP-01, WP-09, WP-11` · module: `M1/M9/M11` · spec lin
 | | _note:_ Handled in packages/core (WP-01): allocate() largest-remainder, property-tested to sum exactly | | | | |
 | **EC-FX-5** | Float creeping in from the LLM ("129.99") | Reject floats at boundaries | U | `packages/core/test/core.test.ts:105` — EC-FX-5 fromPayPalValue("1.005","USD") -> CS_ROUNDING<br>`packages/core/test/core.test.ts:567` — EC-FX-5 a model that emits sub-cent precision is refused, not rounded<br>`packages/core/test/core.test.ts:574` — EC-FX-5 the float round-trip that motivates all of this<br>`packages/core/test/env.test.ts:250` — EC-FX-5 minorSchema rejects a JS float outright<br>`packages/core/test/env.test.ts:259` — EC-FX-5 the schema itself accepts bigint, integer string and safe integer — nothing else<br>`packages/core/test/env.test.ts:270` — EC-FX-5 minorSchema rejects a decimal string and a negative<br>`packages/paypal/test/client.orders.test.ts:93` — converts a returned amount into integer minor units without a float<br>`packages/paypal/test/client.orders.test.ts:146` — refuses a float amount in a request body (spec §0 / EC-FX-5) | done |
 | | _note:_ Handled in packages/core (WP-01): fromPayPalValue refuses sub-minor precision; boundary schemas refuse JS numbers | | | | |
-| **EC-FX-6** | VI example helper uses float dollars | Our checkout JWT uses integer minor units (§8.3) | U | `apps/vi/tests/test_checkout_jwt.py:57` | done |
+| **EC-FX-6** | VI example helper uses float dollars | Our checkout JWT uses integer minor units (§8.3) | U | `apps/vi/tests/test_checkout_jwt.py:57`<br>`packages/vi-client/test/client.test.ts:460` — validates the request before the first fetch, so a float never reaches the wire<br>`packages/vi-client/test/types.test.ts:53` — accepts an integer and returns bigint<br>`packages/vi-client/test/types.test.ts:95` — explains a non-integral amount in a message a human can act on<br>`packages/vi-client/test/types.test.ts:612` — refuses a float amount_minor before it reaches the wire (EC-FX-6) | done |
 | | _note:_ apps/vi/src/vi_service/checkout_jwt.py emits integer minor units plus a currency code, ported from the reference helper which uses float dollar strings. Tests: apps/vi/tests/test_checkout_jwt.py assert no float appears in the signed payload. | | | | |
 
 ## §12.7 Price, stock and fulfilment
@@ -171,7 +171,7 @@ Owning work package(s): `WP-05, WP-10, WP-13` · module: `M5/M10/M13` · spec li
 | **EC-AGT-2** | Compromised agent (attacker controls the LLM loop or its server) | It can only sign L3s within L2 limits (the agent key is bound by the L2). Worst case = the full budget at allowed merchants. The user can revoke the agent (all of its mandates are suspended) | P | — | todo — no test |
 | **EC-AGT-3** | Agent private key leaked | jwks_keys.status=COMPROMISED; all mandates bound to it → REVOKED; the Gate refuses its L3s; past L3s are flagged "signed before compromise at T" in evidence | U | — | todo — no test |
 | **EC-AGT-4** | Agent key rotation (scheduled) | New key → user re-signs new L2s (the L2 binds the agent key); old mandates keep the old key until expiry | E | — | todo — no test |
-| **EC-KEY-1** | User device key lost (browser data cleared, new laptop) | Device → LOST; enrol a new device (PayPal re-auth via a new setup token or a session check) → new L1; old mandates keep working until expiry (the agent key, not the device key, signs purchases) unless the user chooses "revoke all" | E | — | todo — no test |
+| **EC-KEY-1** | User device key lost (browser data cleared, new laptop) | Device → LOST; enrol a new device (PayPal re-auth via a new setup token or a session check) → new L1; old mandates keep working until expiry (the agent key, not the device key, signs purchases) unless the user chooses "revoke all" | E | `packages/vi-client/test/client.test.ts:156` — error-body mapping | todo — 1 test |
 | **EC-KEY-2** | Issuer key rotation | New kid in JWKS; old kept as RETIRED (verify-only) until the retention end; on compromise: mark COMPROMISED, re-issue all L1s, mandates need re-signing | U | `apps/vi/tests/test_keys.py:63`<br>`apps/vi/tests/test_keys.py:101`<br>`apps/vi/tests/test_keys.py:107`<br>`apps/vi/tests/test_keys.py:378` | done |
 | | _note:_ apps/vi/src/vi_service/keys.py: POST /v1/keys/rotate retires the current key and GET /v1/jwks returns retired public keys with a status field, so evidence signed by an old kid still verifies. Test: apps/vi/tests/test_keys.py (AT-M3.9). | | | | |
 | **EC-KEY-3** | Merchant checkout key rotation | The Gate accepts checkout JWTs from ACTIVE or RETIRED (within not_after) kids | U | `apps/vi/tests/test_keys.py:181`<br>`apps/vi/tests/test_keys.py:187` | done |

@@ -718,11 +718,32 @@ class AtTimeCheck(BaseModel):
     l2_exp: int | None = None
 
 
+class SkippedConstraint(BaseModel):
+    """One constraint the library did not evaluate, and why.
+
+    Structured rather than a bare annotated string on purpose. `skipped` used to be `list[str]` where
+    each entry was either a bare constraint type (from the library) or `"<type> - Network-enforced
+    constraints. Not evaluated by…"`, mixed together. A Gate asking
+    `skipped.includes('mandate.payment.budget')` then gets `false` **while a signed budget cap sits
+    unevaluated**, so the Gate concludes it owes nothing — precisely the failure spec D19 exists to
+    prevent. Splitting `type` from `reason` makes membership a `skipped.some(s => s.type === …)` and
+    removes the trap.
+
+    `type` is a synthetic name for a whole evaluation that did not run at all (for example
+    `"checkout_constraint_evaluation"`), because sometimes nothing was skipped individually; the
+    category itself could not be evaluated.
+    """
+
+    type: str
+    reason: str
+
+
 class ConstraintReport(BaseModel):
     satisfied: bool
     violations: list[str]
+    #: Constraint types the library actually evaluated. Bare types, so membership is exact.
     checked: list[str]
-    skipped: list[str]
+    skipped: list[SkippedConstraint]
 
 
 class DisclosedReport(BaseModel):

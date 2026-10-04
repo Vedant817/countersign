@@ -50,6 +50,7 @@ from .models import (
     KeyReport,
     PublicVerifyRequest,
     PublicVerifyResponse,
+    SkippedConstraint,
     VerifyRequest,
     VerifyResponse,
 )
@@ -66,19 +67,38 @@ _AT_TIME_REASON = (
 AT_TIME_NOT_HONOURED_REASON = _AT_TIME_REASON
 
 
-def classify_constraint_report(checked: list[str], skipped: list[str]) -> list[str]:
+def classify_constraint_report(
+    checked: list[str], skipped: list[str]
+) -> list[SkippedConstraint]:
     """Move the three network-enforced constraint types out of `checked` into `skipped`.
 
     Returns the corrected `skipped` list.
+
+    Every entry is a `SkippedConstraint`, including the ones the library already produced. The
+    library emits bare type strings in `skipped`; wrapping them here means the wire shape has exactly
+    one form, so a consumer never has to handle a bare string and an annotated string in the same
+    array. See `SkippedConstraint` in models.py for why that matters.
     """
-    moved: list[str] = list(skipped)
+    moved: list[SkippedConstraint] = [
+        SkippedConstraint(type=name, reason="Not evaluated by the verification request.") for name in skipped
+    ]
     for name in checked:
         if name in NETWORK_ENFORCED_CONSTRAINTS:
             moved.append(
-                f"{name} — Network-enforced constraints. Not evaluated by verifiable_intent; "
-                "Countersign's Gate enforces it (spec D19). NOT satisfied by this response."
+                SkippedConstraint(
+                    type=name,
+                    reason=(
+                        "Network-enforced constraint. Not evaluated by verifiable_intent; "
+                        "Countersign's Gate enforces it (spec D19). NOT satisfied by this response."
+                    ),
+                )
             )
     return moved
+
+
+def _skip(category: str, reason: str) -> list[SkippedConstraint]:
+    """One skipped evaluation category, in the only shape the wire uses."""
+    return [SkippedConstraint(type=category, reason=reason)]
 
 
 def _constraint_report(
@@ -94,7 +114,7 @@ def _constraint_report(
             satisfied=False,
             violations=[f"No {side} constraints were disclosed, so none could be enforced"],
             checked=[],
-            skipped=[f"{side} constraint evaluation (no disclosed constraints)"],
+            skipped=_skip(f"{side}_constraints", "No disclosed constraints, so none could be enforced"),
         )
     result = check_constraints(constraints, fulfilment, mode=StrictnessMode.STRICT)
     return ConstraintReport(
@@ -243,7 +263,7 @@ def verify(req: VerifyRequest, settings: Settings | None = None) -> VerifyRespon
                 satisfied=False,
                 violations=["The chain did not parse, so no constraint could be enforced"],
                 checked=[],
-                skipped=["all checks (the chain did not decode)"],
+                skipped=_skip("all_checks", "The chain did not decode, so nothing could be verified"),
             ),
             disclosed=DisclosedReport(),
             keys=KeyReport(),
@@ -399,7 +419,7 @@ def _constraints(
                 satisfied=False,
                 violations=["No payment mandate disclosure was found in the L2"],
                 checked=[],
-                skipped=["payment constraint evaluation (no L2 payment mandate)"],
+                skipped=_skip("payment_constraints", "No L2 payment mandate was disclosed"),
             )
         )
     else:
@@ -422,7 +442,7 @@ def _constraints(
                 satisfied=False,
                 violations=["No checkout mandate disclosure was found in the L2"],
                 checked=[],
-                skipped=["checkout constraint evaluation (no L2 checkout mandate)"],
+                skipped=_skip("checkout_constraints", "No L2 checkout mandate was disclosed"),
             )
         )
     elif req.checkout_jwt is None:
@@ -431,7 +451,7 @@ def _constraints(
                 satisfied=False,
                 violations=["Checkout constraints could not be enforced: no checkout_jwt was supplied"],
                 checked=[],
-                skipped=["checkout constraint evaluation (needs the checkout_jwt cart)"],
+                skipped=_skip("checkout_constraints", "Needs the checkout_jwt cart, which was not supplied"),
             )
         )
     elif cart is None:
@@ -440,7 +460,7 @@ def _constraints(
                 satisfied=False,
                 violations=["Checkout constraints could not be enforced: the checkout JWT does not decode"],
                 checked=[],
-                skipped=["checkout constraint evaluation (the checkout JWT does not decode)"],
+                skipped=_skip("checkout_constraints", "The checkout JWT does not decode"),
             )
         )
     else:

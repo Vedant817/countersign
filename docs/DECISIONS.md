@@ -348,3 +348,46 @@ runtime dependency that could pull in a model client.
 **Evidence:** `eslint.config.mjs` `GATE_LLM_BAN`. The rule is active in `pnpm lint` today; the Gate
 package is still a stub, so the ban gets its first real exercise in WP-10 — which is exactly why the
 WP-10 reviewer should check it rather than assume it.
+## D-019 — `constraints.skipped` is `{type, reason}[]`, because a string array silently disarms spec D19
+
+**Date:** 2026-10-04 · **Raised by:** WP-04 building the vi-client · **Spec item:** D19, §8.10 check 8
+**Decision:** `/v1/verify` returns `constraints.skipped` as a list of `{type, reason}` objects rather
+than a list of strings. `packages/vi-client` accepts either wire shape but **transforms to the
+object**.
+
+**Reason — this is the most dangerous shape bug found so far, and it was found by the consumer
+rather than the producer.** The library appends `budget`, `recurrence` and `agent_recurrence` to
+`checked` while evaluating none of them (its own source comment calls them "Network-enforced"), so
+vi-service moved them into `skipped`. But it appended a *reason* to each entry:
+
+```
+"mandate.payment.budget — Network-enforced constraints. Not evaluated by verifiable_intent; …"
+```
+
+A Gate implementing check 8 naturally writes:
+
+```ts
+if (!verify.constraints.skipped.includes('mandate.payment.budget')) { /* nothing to enforce */ }
+```
+
+That expression is **`false` while a user-signed budget cap sits unevaluated**, so the Gate concludes
+it owes nothing and allows the purchase. Spec **D19** exists precisely because the reference library
+does not check budgets; that one array shape would have undone the single most important
+deterministic check in the product, and it would have failed **open** — in favour of spending.
+
+**Why the fix is split across wire and type.** The schema accepts both shapes so that parsing a
+vi-service which has not been redeployed does not *throw* — a throw there fails the Gate's verify
+step, which is worse than a missing field. But the schema ends in `.transform()`, and that is the
+load-bearing part: a plain `z.union` types the element as `string | {…}`, and `(string | Obj)[]
+.includes(string)` **still compiles**. The transform makes the output type `{type, reason}`, so the
+mistaken `includes` becomes a **type error**. The claim that a union alone would prevent the bug was
+wrong, was written into a comment, and was caught by making the test actually exercise it — the test
+now carries `@ts-expect-error`, which fails to compile if the transform is ever removed.
+
+**Evidence:** `apps/vi/src/vi_service/models.py::SkippedConstraint`,
+`apps/vi/tests/test_verify.py::test_skipped_entries_are_objects_not_strings`,
+`packages/vi-client/test/types.test.ts` → "makes `includes` a compile error".
+
+**Consequence for WP-10:** the Gate must call `pendingNetworkEnforcement(skipped)` from
+`@countersign/vi-client` and treat a non-empty result as an obligation, not as information. It must
+never read `constraints.satisfied` as covering a network-enforced constraint.

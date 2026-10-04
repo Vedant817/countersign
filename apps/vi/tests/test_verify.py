@@ -651,8 +651,56 @@ def test_network_enforced_constraints_are_reported_as_skipped_not_checked(
     assert report.satisfied is True
     for name in ("mandate.payment.budget", "mandate.payment.recurrence"):
         assert name not in report.checked, f"{name} must not be reported as checked"
-        assert any(s.startswith(name) and "Network-enforced" in s for s in report.skipped)
+        skipped = [s for s in report.skipped if s.type == name]
+        assert len(skipped) == 1, f"{name} must appear exactly once in skipped"
+        assert "Network-enforced" in skipped[0].reason
+
     assert "mandate.payment.amount_range" in report.checked
+
+
+def test_skipped_entries_are_objects_not_strings(
+    client, auth: dict[str, str], full_chain
+) -> None:
+    """`skipped` must be `{type, reason}[]`, never a mix of strings and annotated strings.
+
+    The failure this prevents is quiet and expensive: a Gate asking
+    `skipped.includes('mandate.payment.budget')` against the old `list[str]` got `false` **while a
+    signed budget cap sat unevaluated**, so it concluded it owed nothing. Membership has to be exact,
+    so the type is its own field (docs/DECISIONS.md D-019).
+    """
+    from vi_service.verify import _constraint_report
+
+    report = _constraint_report(
+        payment_constraints(20_000),
+        {"payee": MERCHANT, "payment_amount": {"currency": CURRENCY, "amount": TOTAL_MINOR}},
+        side="payment",
+    )
+
+    assert report.skipped, "the fixture constraints include network-enforced ones"
+    for entry in report.skipped:
+        assert isinstance(entry.type, str) and entry.type, "every skipped entry needs a type"
+        assert isinstance(entry.reason, str) and entry.reason, "every skipped entry needs a reason"
+        # The exact membership test a Gate would write, asserted to work.
+        assert "mandate.payment.budget" in [s.type for s in report.skipped]
+
+    # And over the wire, so the shape is not just a Python-side detail.
+    body = client.post("/v1/verify", headers=auth, json=full_chain.verify_body()).json()
+    assert body["constraints"]["skipped"], "a full chain with network-enforced constraints"
+    for entry in body["constraints"]["skipped"]:
+        assert set(entry) == {"type", "reason"}, f"unexpected skipped shape: {entry}"
+    types = [e["type"] for e in body["constraints"]["skipped"]]
+    assert "mandate.payment.budget" in types, f"budget must be machine-findable, got {types}"
+
+
+def test_no_disclosed_constraints_is_a_skip_not_a_pass(client, auth: dict[str, str]) -> None:
+    """An empty constraint list is "nothing to check", never "satisfied"."""
+    from vi_service.verify import _constraint_report
+
+    report = _constraint_report([], {}, side="payment")
+    assert report.satisfied is False
+    assert report.checked == []
+    assert [s.type for s in report.skipped] == ["payment_constraints"]
+    assert "none could be enforced" in report.skipped[0].reason
 
 
 # --- helpers -----------------------------------------------------------------------------------------

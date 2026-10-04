@@ -176,11 +176,13 @@ async def _validation_error(_request: Request, exc: RequestValidationError) -> J
 async def _unhandled(_request: Request, exc: Exception) -> JSONResponse:
     """Last resort. No traceback, no exception text, nothing from the environment.
 
-    `packages/core`'s own `toCsError` defaults to `CS_VALIDATION`, so we match it — and note that
-    the registry has no `CS_INTERNAL` code, which is a gap worth closing (see HUMAN_TODO).
+    Reported as `CS_INTERNAL`, not `CS_VALIDATION` (docs/DECISIONS.md D-007). An exception reaching
+    this handler is our bug, and telling the caller their request was invalid sends whoever is
+    debugging it to look at the wrong thing — while counting every server fault as a user error in
+    the metrics. Nothing was signed, and the response says so.
     """
     err = errors.cs_error(
-        "CS_VALIDATION",
+        "CS_INTERNAL",
         f"The service failed to handle this request ({type(exc).__name__}). Nothing was signed.",
     )
     return JSONResponse(status_code=500, content=err.to_body())
