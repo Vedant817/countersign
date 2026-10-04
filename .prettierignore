@@ -20,6 +20,8 @@ docs/EDGE_CASES.md
 # line number, and risk mangling a table that the whole project parses. It is also not our prose.
 docs/spec/countersign-blueprint.md
 
-# Markdown tables in the decision log are hand-aligned for readability; Prettier reflows them and the
-# result is harder to diff-review, which is the opposite of what a decision log is for.
+# Markdown tables in the decision log and the status table are hand-aligned for readability; Prettier
+# reflows them and the result is a whole-file diff on every one-line status change, which is the
+# opposite of what a log that gets read on every work package is for.
 docs/DECISIONS.md
+docs/PROGRESS.md
