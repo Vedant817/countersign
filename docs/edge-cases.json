@@ -255,7 +255,8 @@
       "declaredTest": "I: drop the event, run the reconciler",
       "userFacing": "Status page shows reconciler lag",
       "specLine": 1357,
-      "status": "todo"
+      "status": "done",
+      "notes": "A lost webhook is recovered because state is re-fetched, never taken from the payload: the reconciler sweeps non-terminal orders/authorizations/captures every 5 minutes and the nightly full sweep covers 30 days (spec 8.12). Tests: packages/webhooks/test/reconcile.test.ts, including reconcileOne for the case where there is no job row at all."
     },
     {
       "id": "EC-WH-2",
@@ -284,7 +285,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1359,
-      "status": "todo"
+      "status": "done",
+      "notes": "Monotonic ranks, never downgrades: capture_status PENDING<COMPLETED<PARTIALLY_REFUNDED<REFUNDED with REVERSED/DECLINED terminal, and disputes rank by (stage, status, update_time) with a stale update_time skipped. compareRankedState is exported and table-driven over every ordering. Tests: packages/webhooks/test/status-rank.test.ts."
     },
     {
       "id": "EC-WH-4",
@@ -313,7 +315,8 @@
       "declaredTest": "S (stop web 10 min)",
       "userFacing": "n/a",
       "specLine": 1361,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The ack path touches no PayPal endpoint on the happy path, and pg-boss backs off with a bounded retry rather than losing work, so a multi-hour outage queues rather than drops (packages/webhooks/test/reconcile.test.ts). Marked wip because the live proof — a real outage against a real webhook registration — needs H-01."
     },
     {
       "id": "EC-WH-6",
@@ -342,7 +345,8 @@
       "declaredTest": "I",
       "userFacing": "n/a",
       "specLine": 1363,
-      "status": "todo"
+      "status": "done",
+      "notes": "If POST /v1/notifications/verify-webhook-signature is unavailable the event is stored with verified=false and NOT acted on; verification is retried with backoff by retryPendingVerifications, and the reconciler still makes progress from authenticated GETs, which are safe regardless. Test: packages/webhooks/test/ingest.test.ts."
     },
     {
       "id": "EC-MDT-1",
@@ -1246,7 +1250,8 @@
       "declaredTest": "U",
       "userFacing": "Red banner with an IST countdown",
       "specLine": 1465,
-      "status": "todo"
+      "status": "wip",
+      "notes": "Deadline handling belongs to WP-15e/WP-16 (the Defender and Strategist). The field exists on the disputes row and the sweeper surfaces disputes whose seller_response_due_date is near, which is the input the Defender needs; the decision and the alert are not built yet."
     },
     {
       "id": "EC-DSP-8",
@@ -1391,7 +1396,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1480,
-      "status": "todo"
+      "status": "wip",
+      "notes": "verifyWebhookSignature is called with an injected client, so a slow verify endpoint cannot exceed the 2 s ack budget: it is awaited before the ack, and a timeout surfaces as an unverified store rather than a hang. Test: packages/webhooks/test/ingest.test.ts. The real endpoint latency needs H-01."
     },
     {
       "id": "EC-ENV-1",
