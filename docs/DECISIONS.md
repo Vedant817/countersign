@@ -201,3 +201,106 @@ replay id) and it is **deterministic** (a retried request produces the same id, 
 retry cannot consume its own replay protection). A random `jti` per attempt would have the opposite
 behaviour.
 **Evidence:** `apps/vi/src/vi_service/l3.py`.
+
+---
+
+## PayPal API verification (WP-06) — D-012 … D-016
+
+Everything below was found by auditing `packages/paypal` against PayPal's **published OpenAPI
+specs** and `developer.paypal.com`, not against prose memory. The audit is 33 questions with 31
+concrete corrections, kept verbatim at `docs/verification/paypal-api-2026-10-04.md`.
+
+### D-012 — Four sandbox-simulator request bodies were fabricated; corrected from the test-go-live page
+
+**Date:** 2026-10-04
+**Decision:** Rewrite the simulator bodies to match PayPal's documented forms. Specifically:
+- `POST /v1/customer/disputes` is **not in the OpenAPI at all**. Per the test-go-live page it is
+  `multipart/form-data` with one `input` JSON part holding
+  `disputed_transactions[{buyer_transaction_id}]`, `reason`, `dispute_amount`, `extensions`. The code
+  sent `transaction_id` / `dispute_reason` as JSON — **neither field exists**.
+- `POST /v2/customer-support/process-chargeback` needs `adjacency:"PAYPAL"`, `file_layout:"ATCK_CB"`,
+  `merchant_id`, `financial_institution.processor:"FDMS"`, `transaction.{id_enc,amount}`,
+  `instrument.instrument_type:"CARD"`, `dispute{}`. It returns **201 with a body**.
+- `accept-offer` takes `{note}`, not `{payer_note}` — and **202 Accepted is a success**, because the
+  refund's money movement is deliberately delayed.
+- `change-reason` is `multipart/related` with an `input` part `{reason, note, item_info[]}`.
+
+**Reason:** These calls only run in sandbox during a judge's demo. A fabricated field name there
+produces a bare 400 in the middle of Judge Mode scenario J3, which is the single most important
+moment of the submission. This is precisely the failure the brief's "never invent a PayPal endpoint,
+package name, or API field" rule exists to prevent, and it happened anyway because the first pass
+trusted a secondary source. The audit read the machine-readable specs from
+`raw.githubusercontent.com/paypal/paypal-rest-api-specifications` (Disputes 1.12, Payments 2.12,
+Orders 2.32, Vault 3.4, Notifications 1.11) rather than the rendered docs.
+
+**Where PayPal's own documentation is incomplete, the choice made was the conservative one:**
+- `change-reason` is sent as `multipart/form-data`, not `multipart/related`, because `fetch` +
+  `FormData` cannot produce `multipart/related` without hand-writing the boundary — and a guessed
+  boundary is a bare 400. Identical part name and payload. Recorded as an open probe item.
+- `accept_claim_type` is described in prose but **absent from the OpenAPI request body**. Kept, marked
+  as the one item only a sandbox probe can settle.
+**Evidence:** `docs/verification/paypal-api-2026-10-04.md` items 1, 27, 30, 12.
+
+### D-013 — The dispute→capture join key is `disputed_transactions[].seller_transaction_id`
+
+**Date:** 2026-10-04
+**Decision:** `packages/paypal` exposes `disputeCaptureId(d)`, reading
+`disputed_transactions[0].seller_transaction_id`. The Defender's ingest must use it.
+**Reason:** The code read `seller_transaction_id` from the **top level** of the dispute resource.
+PayPal sends it only inside `disputed_transactions[]`. This is not cosmetic: that id is the join key
+from a dispute back to the capture we authorized (spec §7.2, R-REF-1 / R-DSP-*). Reading the wrong
+path returns `undefined`, and a Defender that maps a dispute to no capture lands on R-NOCHAIN-1 and
+tells the merchant "No mandate on this payment. Countersign can't help here" — a **false and
+business-damaging** answer, on exactly the case the product exists to win.
+Also renamed in the response schema: `dispute_reason` → `reason`, `disputed_amount` →
+`dispute_amount`, `messages[].sender` → `messages[].posted_by`.
+**Evidence:** audit item 5; test `joins a dispute to our capture through disputed_transactions[0].seller_transaction_id`.
+
+### D-014 — Appeal eligibility is gated on a HATEOAS link, not on `dispute_state`
+
+**Date:** 2026-10-04
+**Decision:** `isAppealable(d)` checks for the **`appeal` link** in the dispute's HATEOAS `links`,
+with `dispute_state === 'APPEALABLE'` kept as a secondary signal only.
+**Reason:** Spec §8.16 / §12.11 EC-DSP-6 gate the appeal on `dispute_state = APPEALABLE`. The value
+is real, but PayPal states twice, in both the API reference and the disputes guide, that *eligibility
+is signalled by the presence of the `appeal` link*: "If this link does not appear, you cannot appeal
+the dispute." So `APPEALABLE` alone can be true while an appeal would be rejected. Gating on the
+authoritative signal costs one extra `GET` and prevents filing an appeal PayPal refuses.
+**Evidence:** audit item 17; `https://developer.paypal.com/platforms/disputes/handle-disputes/use-disputes-api`.
+
+### D-015 — Two §8.6 sandbox method signatures changed to options objects
+
+**Date:** 2026-10-04 · **Deviation from the spec's §8.6 class listing**
+**Decision:**
+```
+sandbox.processChargeback(sellerTxnId, reason)  ->  sandbox.processChargeback(opts: ProcessChargebackOpts)
+sandbox.changeReason(id, reason)                 ->  sandbox.changeReason(id, body: ChangeReasonBody)
+```
+**Reason:** PayPal's documented bodies require facts that do not fit two positional arguments:
+`merchant_id` (our Business account), `transaction.amount`, `financial_institution.processor`, and
+`item_info[]`. Neither value can be inferred by the client, and inventing defaults for them would be
+the same fabrication D-012 is about. The old signatures cannot express the real contract, so the
+contract wins and the deviation is recorded here.
+Also: `usage_pattern: 'SUBSCRIPTIONS'` was an invented value — the real values are
+`SUBSCRIPTION_PREPAID` / `SUBSCRIPTION_POSTPAID`. The code now sends `IMMEDIATE`, which is what
+PayPal's own one-shot vault example uses for spec D17's capture.
+
+### D-016 — Two webhook events do not exist, which changes the reconciler's design
+
+**Date:** 2026-10-04 · **Spec item:** §8.12 subscribed events, EC-WH-1, EC-TIME-5
+**Decision:**
+1. **`PAYMENT.REFUND.COMPLETED` does not exist.** Refund completion is `PAYMENT.CAPTURE.REFUNDED`.
+   Removed from the event list; `PAYMENT.CAPTURE.DENIED` (documented, and PayPal-recommended for the
+   checkout flow) added.
+2. **There is no `PAYMENT.AUTHORIZATION.EXPIRED` event.** Therefore EC-TIME-5's authorisation-expiry
+   alerting **cannot be webhook-driven** and must poll `GET /v2/payments/authorizations/{id}` and
+   compare `expiration_time`.
+
+**Reason:** Spec §8.12 lists `PAYMENT.REFUND.PENDING/FAILED` and `CHECKOUT.PAYMENT-APPROVAL.REVERSED`
+among the subscribed events; neither exists under those names. A subscription to a non-existent event
+silently never fires, and spec §8.12's own doctrine is that **state comes from re-fetching PayPal,
+never from the payload** — so the reconciler is the real safety net and the event list is only a
+latency optimisation. Knowing which events are fictional changes what the reconciler must cover, and
+a cron that assumes a webhook will tell an expired authorisation to a buyer is a wrong statement
+about money.
+**Evidence:** audit items 14 and 26; `components/event_names` in the PayPal OpenAPI specs.

@@ -14,6 +14,13 @@ registry in `@countersign/core`.
 > [`test/fixtures/README.md`](test/fixtures/README.md)) and annotated with the URL each one came from.
 > The sandbox suites (`*.sandbox.test.ts`) **skip with their reason** until credentials land. The list
 > of things that must be verified before a judge sees this is at the bottom of this file.
+>
+> **Field names are no longer guesses.** On 2026-10-04 every request body, response shape and enum in
+> this package was re-checked against PayPal's published OpenAPI and `developer.paypal.com`. The
+> report is [`docs/verification/paypal-api-2026-10-04.md`](../../docs/verification/paypal-api-2026-10-04.md);
+> it found four fabricated bodies (the sandbox simulators) and a dozen wrong field names, **all now
+> fixed**. What remains unverified is *behaviour* — whether a request id deduplicates, whether a header
+> is honoured, whether the sandbox accepts our unsigned assertion — and that needs H-01.
 
 ---
 
@@ -80,7 +87,7 @@ if (!order.ok) {
 | `src/backoff.ts` | Exponential backoff with **full jitter**, `Retry-After` parsing, and the injectable `Sleep`. |
 | `src/circuit.ts` | Per-host circuit breaker (5 consecutive `PP_UNAVAILABLE` → open 30 s). |
 | `src/errors.ts` | PayPal `name` / `details[].issue` → `CsErrorCode`. |
-| `src/multipart.ts` | `multipart/form-data` for evidence, with the EC-DSP-12 limits enforced locally. |
+| `src/multipart.ts` | `multipart/form-data` for evidence, with the EC-DSP-12 limits enforced locally (decimal, as PayPal words them). |
 | `src/sandbox.ts` | The sandbox-only simulator calls and the unsigned `PayPal-Auth-Assertion`. |
 | `IDEMPOTENCY.md` | Per-endpoint table. **The input to EC-IDEM-3.** Mostly UNVERIFIED — see the warning at the top of that file. |
 
@@ -154,12 +161,21 @@ Localhost is allowed for offline work.
 ## The sandbox-only surface (EC-ENV-2)
 
 ```ts
-client.sandbox.createBuyerDispute(buyerEmail, { transaction_id: captureId, dispute_reason: 'UNAUTHORISED' })
-client.sandbox.processChargeback(captureId, 'UNAUTHORISED')
+client.sandbox.createBuyerDispute(buyerEmail, {
+  disputed_transactions: [{ buyer_transaction_id: buyerViewOfTheTransactionId }],
+  reason: 'UNAUTHORISED',
+  dispute_amount: ppMoney('20.00'),
+})
+client.sandbox.processChargeback({
+  sellerTransactionId: captureId,
+  merchantId: paypalMerchantId,
+  amount: ppMoney('20.00'),
+  reason: 'UNAUTHORISED',
+})
 client.sandbox.requireEvidence(disputeId, 'SELLER_EVIDENCE')
 client.sandbox.adjudicate(disputeId, 'SELLER_FAVOR')
-client.sandbox.changeReason(disputeId, 'UNAUTHORISED')
-client.sandbox.acceptOffer(disputeId, 'Accepted')
+client.sandbox.changeReason(disputeId, { reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED', note: '…' })
+client.sandbox.acceptOffer(disputeId, 'Accepted, thanks.')
 client.sandbox.denyOffer(disputeId)
 ```
 
@@ -168,19 +184,37 @@ These are sandbox-only ([S29], §10.2 #18) and the object is built in the `PayPa
 object and the methods below are unreachable, not merely unused. Every method re-asserts too, so
 flipping `PAYPAL_ENV` after construction is caught.
 
+**Four of these bodies were wrong before the 2026-10-04 audit, in ways that only a live call would
+have exposed.** `createBuyerDispute` is `multipart/form-data` with an `input` part carrying
+`disputed_transactions[].buyer_transaction_id` (not a JSON `{transaction_id}`);
+`processChargeback` carries PayPal's eight documented fields (not `{transaction_id, reason}`) and reads
+its `201` body instead of discarding it; `changeReason` sends the documented `{reason, note,
+item_info[]}`; and `acceptOffer` sends `{note}`, not `{payer_note}`, and treats PayPal's documented
+**`202 Accepted`** (money movement delayed) as success. `test/simulators.test.ts` pins every one of
+those field names.
+
 `createBuyerDispute` is the one that needs the unsigned `PayPal-Auth-Assertion`
-(`base64url({"alg":"none"}) . base64url({"iss":CLIENT_ID,"email":BUYER_EMAIL}) .` — note the trailing
-dot, which is what `alg: none` means). Spec **U12** marks its exact construction unverified; it has
-never been executed. The other simulator endpoints are merchant-side and use the ordinary bearer
-token; if a sandbox run shows otherwise, this paragraph is the thing to fix.
+(`base64url({"alg":"none","typ":"JWT"}) . base64url({"iss":CLIENT_ID,"email":BUYER_EMAIL}) .` — note the
+trailing dot, which is what `alg: none` means, and `typ: JWT` from PayPal's own snippet). It is now
+verbatim from <https://developer.paypal.com/disputes/set-up>, but it has never been executed: the REST
+app needs the `DISPUTE_CREATE` and `UPDATE_BUYER` scopes and the buyer has to complete an interactive
+consent flow first. The other simulator endpoints are merchant-side and use the ordinary bearer token.
 
 ## Multipart evidence (EC-DSP-12)
 
 `provideEvidence`, `appeal` and `provideSupportingInfo` send a JSON `input` part plus files.
 `Content-Type` is **never** set by hand: the runtime derives `multipart/form-data; boundary=…` from
 the `FormData`, and a hand-drawn boundary makes the body unparseable at PayPal with a bare 400 as the
-only clue. Locally, before anything is sent: single file **< 10 MiB**, total **≤ 50 MiB**, and only
-jpg/png/gif/pdf. A rejected file costs no HTTP request at all.
+only clue.
+
+The `input` part is PayPal's documented shape — `{"evidences": [{"evidence_type", "evidence_info",
+"notes", "documents"}]}`, at most **100** items, and **`notes` is a single string** of ≤ 2000
+characters, not an array. Files default to `file1`, `file2`, …, which is the form PayPal's own cURL
+uses.
+
+Locally, before anything is sent: single file **< 10 MB**, total **≤ 50 MB** — both decimal, both
+**inclusive/exclusive exactly as PayPal words them** ("less than 10 MB per file", "up to 50 MB per API
+call") — and only jpg/png/gif/pdf. A rejected file costs no HTTP request at all.
 
 ---
 
@@ -189,7 +223,7 @@ jpg/png/gif/pdf. A rejected file costs no HTTP request at all.
 ```bash
 pnpm --filter @countersign/paypal typecheck
 pnpm --filter @countersign/paypal lint
-pnpm --filter @countersign/paypal test          # 224 tests, no network, no credentials
+pnpm --filter @countersign/paypal test          # 270 tests, no network, no credentials
 node scripts/check-money-discipline.mjs
 ```
 
@@ -215,49 +249,77 @@ pass without having called PayPal.
 
 ## Verify these before a judge does
 
-Each item is a `TODO(verify against docs)` in the source. Nothing here is asserted as fact.
+Every field name and enum in this package was re-checked against PayPal's published OpenAPI and
+`developer.paypal.com` on **2026-10-04**; the findings are in
+[`docs/verification/paypal-api-2026-10-04.md`](../../docs/verification/paypal-api-2026-10-04.md) and
+every fix from it is applied here. What follows is what is **still** not settled — because it needs a
+sandbox (H-01), a human, or a PayPal answer.
 
-**Endpoints and paths**
+**Blocked on a human, not on us**
 
-1. `POST /v1/customer/disputes` (buyer simulator) — and what it actually returns. The spec types it
-   `Result<Links>`; §10.3 step 3 says the new dispute is found by polling `list_disputes`, which
-   suggests the response is not a dispute resource. We implement the spec signature and do not guess.
-2. `POST /v2/customer-support/process-chargeback` — body field names. We send
-   `{ transaction_id, reason }`.
-3. `POST /v1/customer/disputes/{id}/change-reason` — body. We send `{ reason }`.
-4. `POST /v1/customer/disputes/{id}/accept-offer` / `deny-offer` — body fields. We send
-   `{ payer_note }` and `{ note }`.
-5. `…/escalate` — whether the body is `{ note }` JSON, a bare `note` form field, or multipart.
-6. `…/provide-supporting-info` — whether the JSON `input` part is `{ notes }` or `{ message }`.
-7. `…/acknowledge-return-item` — whether `return_shipping_address` is required or optional.
-8. `POST /v3/vault/setup-tokens` — the `payment_source.paypal` fields (`usage_type`, `usage_pattern`).
-   Spec **U6** says copy them from the doc at build time; we send `MERCHANT` / `SUBSCRIPTIONS`.
-9. Vault v3 doc URL used for the citations above (the path segment is the least certain string here).
-10. The dispute list's pagination: `page`/`page_size`/`total_pages` are documented, but the spec passes
-    `next_page_token`. We forward both and default `items` to `[]`.
+1. **The buyer-dispute simulator needs two REST-app scopes and a consent flow.** `DISPUTE_CREATE`
+   (`…/services/disputes/create`) and `UPDATE_BUYER` (`…/services/disputes/update-buyer`) have to come
+   from the account manager, and the sandbox buyer must complete an interactive "Log in with PayPal"
+   consent **before** the simulator will accept an unsigned `PayPal-Auth-Assertion`. A sandbox probe
+   cannot skip that step. Also: `PAYPAL_BUYER_EMAIL` and the PayPal-side transaction id are needed —
+   `POST /v1/customer/disputes` takes `buyer_transaction_id`, which is the id from the **buyer's** view
+   of the transaction, not the merchant's capture id.
+2. **`changeReason` sends `multipart/form-data`; PayPal documents `multipart/related`** (report §30/#13).
+   The part name, field names and JSON payload are identical; only the outer media type differs, and
+   `fetch` + `FormData` cannot produce `multipart/related` without hand-writing the boundary, which this
+   package refuses to do anywhere. The sandbox settles it.
+3. **`accept_claim_type` as a *request* field** is described in prose and absent from the OpenAPI
+   request body — the one place in disputes where the machine-readable spec is visibly incomplete
+   (report §3/#29). We keep sending it; only a probe can confirm.
+4. **Which of `dispute_id` / `id` the chargeback simulator returns.** The endpoint has no OpenAPI at
+   all, only "Test go live" (report §27). The response schema accepts both.
+5. **Whether a bare `input` field is accepted** (PayPal's cURL posts a bare field; we send a named file
+   part with `application/json`). A superset, and `FormData` builds the boundary, so the open question is
+   only whether PayPal's parser minds the `filename` (report §23).
 
-**Field names and shapes**
+**Blocked on a sandbox measurement**
 
-11. `simDisputeReq`: `transaction_id` vs `buyer_transaction_id` as the field naming the capture
-    (`§10.3` says `buyer_transaction_id`; we send `transaction_id`).
-12. `accept_claim_type` values (`REFUND`, `REFUND_NO_RETURN`).
-13. `make-offer`'s `offer_type` values (`REFUND_WITH_RETURN`, `REFUND_NO_RETURN`).
-14. Whether the dispute action endpoints answer `204 No Content` or a HATEOAS links array. The client
-    accepts both and returns `{ links: [] }` for a body-less 2xx.
-15. The default multipart field names for files (`file1`, `file2`, …) and the `input` part's filename
-    (`input.json`).
-16. Whether "10 MB / 50 MB" for evidence is 10^6 or 2^20 bytes. We enforce 2^20.
-17. `processChargeback` requires a **card-funded** transaction (§10.1 step 5) — a vault capture with no
-    card behind it cannot be charged back.
+6. **The maximum `PayPal-Request-Id` length.** PayPal's two sources contradict each other — the OpenAPI
+   declares `maxLength: 10000`, the prose recommends a UUID "because it meets the **38 single-byte
+   character limit**". Our worst case is **55**, and four of our five formats already exceed 38;
+   `captureRequestId` (`cs:{authId}:cap:{shipmentId}`) is the one whose long slots are PayPal's own ids
+   and so cannot be shortened. `REQUEST_ID_MAX_CHARS = 255` is *our* budget, not PayPal's figure. Full
+   statement in [`IDEMPOTENCY.md`](IDEMPOTENCY.md) → "Header length".
+7. **Which endpoints actually deduplicate.** Documented support is now known per endpoint (see
+   `IDEMPOTENCY.md`); whether a replay *behaves* that way is still `UNVERIFIED` everywhere.
+8. **Whether `10 MB` means 10⁶ or 2²⁰.** We enforce the decimal reading for both limits — the
+   conservative choice, since the old 50 MiB cap was *looser* than PayPal's "up to 50 MB per API call"
+   and would have let a 51 MB upload fail remotely. PayPal does not say (report §30).
+9. **The unsigned `PayPal-Auth-Assertion`.** Its construction is now verbatim from PayPal's set-up page
+   (`{"alg":"none","typ":"JWT"}.{iss,email}.`, empty signature) but has never been executed.
 
-**Headers and limits**
+**Carried forward from the spec**
 
-18. The maximum `PayPal-Request-Id` length PayPal enforces — **unknown, to be measured in C-probe**
-    (spec U5). `REQUEST_ID_MAX_CHARS = 255` is *our* budget, not a PayPal figure.
-19. Which endpoints actually honour the header. Only Orders v2 / Payments v2 are `DOC-CITED [B14]`;
-    everything else is `UNVERIFIED` and gets `RE-READ FIRST`.
-20. The `PayPal-Auth-Assertion` header/payload shape for the buyer simulator (spec **U12**).
-21. Whether a 429's `Retry-After` is delta-seconds or an HTTP-date in practice. Both are parsed.
+10. `POST /v3/vault/setup-tokens`: `usage_type` (`MERCHANT`), `usage_pattern` (`IMMEDIATE` for the
+    one-shot D17 charge) and `customer_type` are now typed and asserted against `SPEC-V`; U6's "copy them
+    from the doc at build time" is satisfied, and they live under `payment_source.paypal`.
+11. Whether a 429's `Retry-After` is delta-seconds or an HTTP-date in practice. Both are parsed.
+12. **PayPal's MCP tool names** cannot be checked without credentials (report §33). Best available
+    evidence is the `@paypal/agent-toolkit` README tool list, which is a *different artefact* and not
+    the MCP contract. Note the gap: even taking that list at face value it offers `list_disputes`,
+    `get_dispute` and `accept_dispute_claim` only — **no evidence-offering tool at all**, so check
+    C3(b) cannot currently prove that filing evidence is reachable over MCP.
+
+## Consequences outside this package
+
+The audit's findings are not all contained here:
+
+- **There is no `PAYMENT.AUTHORIZATION.EXPIRED` webhook.** Spec **EC-TIME-5**'s 29-day authorization
+  expiry cannot be webhook-driven; it has to poll `GET /v2/payments/authorizations/{id}` and compare
+  `expiration_time`. That is a design change for whoever owns the clock.
+- **`PAYMENT.REFUND.COMPLETED` was not a real event.** Anything that subscribed to it has never fired;
+  refund completion is `PAYMENT.CAPTURE.REFUNDED`. `PAYMENT.CAPTURE.DENIED` is now included.
+- **A dispute's capture join moved** to `disputed_transactions[].seller_transaction_id`. The Defender
+  (M15/M16) and the ingest path must read it there; `disputeCaptureId()` does it in one line.
+- **Appeal eligibility is the `appeal` HATEOAS link**, not `dispute_state === 'APPEALABLE'`
+  (`isAppealable()`).
+- **`ProcessChargeback`, `SimDisputeReq`, `ProvideEvidenceInput`, `MakeOfferReq`, `AckReturnReq`,
+  `DisputeList` and `PaymentToken` all changed shape.** Anything constructing them needs updating.
 
 ## Differences from the spec's §8.6 class listing
 
@@ -269,7 +331,22 @@ Each item is a `TODO(verify against docs)` in the source. Nothing here is assert
   because the spec's retry bullet says "max 4" and AT-M6.2 needs three attempts to succeed.
 - **`sandbox` gains `acceptOffer` / `denyOffer`**, which §10.2 #18 and §8.16 AT list but the §8.6 class
   listing omits.
+- **`sandbox.processChargeback` takes an options object, not `(sellerTxnId, reason)`.** The spec's
+  two-argument form cannot express the documented body, which needs `merchant_id`, the transaction
+  amount and `instrument.instrument_type` — facts about *our* PayPal account and *our* capture that the
+  client cannot know. Sending `{transaction_id, reason}` (what the two-argument form implied) would have
+  failed at PayPal, so the signature follows the API rather than the listing.
+- **`sandbox.changeReason` takes `(id, body)` rather than `(id, reason)`.** Same reason: the documented
+  body also carries `note` and `item_info[]`.
+- **`appeal` re-reads the dispute before posting.** Gating on the `appeal` HATEOAS link requires observing
+  the link, which costs one extra `GET`. The signature is unchanged, and local validation still happens
+  first, so a malformed packet costs no request at all.
+- **`Dispute.offers` is left as an array** even though PayPal's field is `offer` (singular object). M15/M16
+  and `IDEMPOTENCY.md` read `offers`; renaming a field other work packages depend on is not this
+  package's call, and the mismatch is recorded in `types.ts` so the next reader is not misled.
 - **The seven bodies with `o: CallOpts` keep it**, including `provideEvidence`, so a caller *can* omit
   `requestId`. §8.15 requires one for the filing call, and WP-15 is expected to pass
   `disputeActionRequestId(id, 'file', packetVersion)`. A dispute action with no id is still sent; the
   client does not require it, because the spec's signature does not.
+- **`WEBHOOK_EVENT_NAMES` is a documentation list, not an enum.** It is asserted in tests and used for
+  the reconciler's coverage check, never to reject an event (EC-WH-6).

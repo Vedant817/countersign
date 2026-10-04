@@ -283,6 +283,29 @@ describe('addTracking (§10.2 #8, EC-SPLIT-1/2)', () => {
     })
   })
 
+  it('sends no PayPal-Request-Id, because Orders v2 `track` declares none (report §32/#19)', async () => {
+    // `SPEC-O` does not declare `paypal_request_id` on this operation and states "Idempotency for
+    // trackers is based on the `capture_id` and `tracking_number` combination sent in the request
+    // body" — so the header would be noise. `addTracking` still *requires* a requestId locally,
+    // because spec §8.6's signature does; the client drops it and logs that it did.
+    const { client, fetchImpl } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : orderResponse({ status: 'COMPLETED' }),
+    )
+    const result = await client.addTracking(
+      ORDER_ID,
+      { capture_id: '3C679366HH908993F', tracking_number: '1Z999AA10123456784' },
+      { requestId: 'cs:att_01JC0Z9P7YQ8V2N3M4K5K6R7ST9:create' },
+    )
+    expect(result.ok).toBe(true)
+    const call = fetchImpl.calls.find((c) => c.url.includes('/track')) as RecordedCall
+    expect(headerOf(call, 'paypal-request-id')).toBeUndefined()
+    // The dedup key PayPal actually uses is the body pair, so it must still be there.
+    expect(jsonBody<Record<string, unknown>>(call)).toMatchObject({
+      capture_id: '3C679366HH908993F',
+      tracking_number: '1Z999AA10123456784',
+    })
+  })
+
   it('supports tracking twice against the same capture (EC-SPLIT-2)', async () => {
     const { client, fetchImpl } = makeClient((call) =>
       isToken(call) ? tokenResponse() : orderResponse({ status: 'COMPLETED' }),

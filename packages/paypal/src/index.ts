@@ -38,6 +38,8 @@ export type { PayPalSandboxDeps, UnsignedAuthAssertion } from './sandbox'
 
 export {
   DISPUTE_ACTIONS,
+  PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS,
+  PAYPAL_OPENAPI_REQUEST_ID_MAX_CHARS,
   REQUEST_ID_MAX_CHARS,
   REQUEST_ID_PREFIX,
   captureRequestId,

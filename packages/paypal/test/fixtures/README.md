@@ -47,10 +47,20 @@ The distinction matters, so it is worth being precise:
   | `DOC.vault` | https://developer.paypal.com/docs/api/vault/v3/ |
   | `DOC.disputes` | https://developer.paypal.com/docs/api/customer-disputes/v1/ |
   | `DOC.provideEvidence` | https://developer.paypal.com/api/customer-disputes/v1/disputes-provide-evidence |
+  | `DOC.disputesGuide` | https://developer.paypal.com/platforms/disputes/handle-disputes/use-disputes-api |
+  | `DOC.evidenceFiles` | https://developer.paypal.com/disputes/supported-file-sizes-types |
+  | `DOC.disputesSetup` | https://developer.paypal.com/disputes/set-up |
   | `DOC.webhooks` | https://developer.paypal.com/api/rest/webhooks/event-names/ |
   | `DOC.idempotency` | https://developer.paypal.com/api/rest/reference/idempotency/ |
   | `DOC.rateLimiting` | https://developer.paypal.com/api/rest/reference/rate-limiting/ |
   | `DOC.sandboxDisputes` | https://developer.paypal.com/disputes/test-go-live |
+
+- **The shapes here were audited on 2026-10-04** against the OpenAPI and `developer.paypal.com`
+  ([`../../../docs/verification/paypal-api-2026-10-04.md`](../../../docs/verification/paypal-api-2026-10-04.md)).
+  That audit found this file was **wrong** about `reason` vs `dispute_reason`, `evidences` vs
+  `evidence`, the top-level `payer` on a payment token, and `total_pages`/`total_items` on the dispute
+  list — so "written from the docs" was previously a claim without a check behind it. It is now a
+  checked claim, and `docs/verification/…md` is the receipt.
 
 - **It also carries the time and logging doubles** (`fixedClock`-based `testClock`, `recordingSleep`,
   `capturingLogger`). Those are not PayPal fakes at all: `Date.now()` is banned in this codebase
@@ -63,7 +73,10 @@ The distinction matters, so it is worth being precise:
    the error is `CS_INTERNAL` with the issue list, not a silent `undefined`.
 2. **It never invents a PayPal *limit*.** No maximum header length, no rate-limit threshold, no
    maximum file size. Where a real limit is needed it is written `UNVERIFIED` in code and in
-   `IDEMPOTENCY.md`.
+   `IDEMPOTENCY.md`. The one exception is the evidence file sizes, which PayPal *does* document
+   ("less than 10 MB per file", "up to 50 MB per API call") and which are enforced as decimal —
+   `MAX_EVIDENCE_FILE_BYTES` / `MAX_EVIDENCE_TOTAL_BYTES` in `src/multipart.ts` are that page's numbers,
+   not this file's.
 3. **It never asserts idempotency.** The 503 → 503 → 200 sequence in `client.retry.test.ts` proves the
    *client* re-sends the same request id. It cannot prove PayPal deduplicates it. The probe that can is
    `client.sandbox.test.ts`, gated behind real credentials.

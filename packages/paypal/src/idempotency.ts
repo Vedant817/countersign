@@ -21,12 +21,27 @@
  *
  * ## On the length limit — read this before "fixing" the constant
  *
- * Spec U5 leaves the maximum `PayPal-Request-Id` length **unmeasured**: "[U: max header length;
- * WP-06 asserts it against sandbox]". We have no PayPal credentials yet (`docs/HUMAN_TODO.md` H-01),
- * so this module does **not** claim to know PayPal's limit. {@link REQUEST_ID_MAX_CHARS} is *our own*
- * conservative budget, not a statement about PayPal's API, and `IDEMPOTENCY.md` records it as
- * UNVERIFIED with the probe that will replace it. Changing it to a number "from the docs" without a
- * measurement would be inventing a fact.
+ * **PayPal's own two sources contradict each other** (report §32/#21), and we record the conflict
+ * rather than picking one silently:
+ *
+ * | Source | What it says |
+ * |---|---|
+ * | `SPEC-P` / `SPEC-V` `components.parameters.paypal_request_id` | `minLength: 1`, **`maxLength: 10000`**, `pattern: ^.*$` |
+ * | https://developer.paypal.com/api/rest/reference/idempotency, "Usage notes" | "PayPal recommends that you use the **UUID standard**… because it meets the **38 single-byte character limit**" |
+ *
+ * These cannot both be the enforced limit. **Which one is real is NOT DOCUMENTED.** The safe
+ * engineering position is the smaller one: 38 is the only number PayPal states as a *limit* rather
+ * than as a schema maximum, and a schema maximum is not a promise.
+ *
+ * **Our worst case is 55 characters** — `cs:{17-char PayPal auth id}:cap:{shp_ + 26 ULID}`, measured by
+ * {@link observedRequestIdLengths} and asserted in `test/idempotency.test.ts`. If the 38-character
+ * figure is enforced anywhere, **`captureRequestId` is the format that breaks first**, because it is
+ * the only one whose slot is PayPal's own 17-character id on both sides. The two others that reach
+ * 55 do so with our own 30-character ids, which are compressible.
+ *
+ * {@link REQUEST_ID_MAX_CHARS} therefore stays at 255: it is *our own* budget, not a claim about
+ * PayPal, and lowering it to 38 today would reject ids we know we emit. `IDEMPOTENCY.md` records the
+ * conflict, and the C-probe settles it.
  */
 import { csError, ok, err } from '@countersign/core'
 import type { AttemptId, CsError, DisputeId, RefundRowId, Result, ShipmentId } from '@countersign/core'
@@ -34,14 +49,36 @@ import type { AttemptId, CsError, DisputeId, RefundRowId, Result, ShipmentId } f
 /**
  * Our local budget for a `PayPal-Request-Id` value, in characters.
  *
- * **UNVERIFIED (spec U5).** PayPal publishes idempotency behaviour but the maximum header length is
- * not something we have measured. 255 is an HTTP header-value ceiling we impose on ourselves so that
- * the id can never be the thing that breaks a request; it is deliberately permissive because a
- * too-small budget would reject legitimate ids while a too-large one is caught by the HTTP layer.
+ * **This is our number, not PayPal's.** It is an HTTP header-value ceiling we impose so the id can
+ * never be the thing that breaks a request; deliberately permissive, because a too-small budget
+ * rejects legitimate ids while a too-large one is caught by the HTTP layer.
  *
- * Replace with the value measured by the sandbox probe (see `IDEMPOTENCY.md`, C-probe).
+ * PayPal's two documented figures conflict — the OpenAPI declares `maxLength: 10000` while the
+ * idempotency prose recommends a UUID "because it meets the 38 single-byte character limit". The
+ * module comment above has the full statement. **Our worst case is 55 chars**, so this budget does not
+ * currently protect us against the 38 reading; `captureRequestId` (`cs:{authId}:cap:{shipmentId}`) is
+ * the format that would fail first. The sandbox probe (C-probe, `IDEMPOTENCY.md`) replaces this
+ * comment with a measurement.
  */
 export const REQUEST_ID_MAX_CHARS = 255
+
+/**
+ * PayPal's prose figure, kept as a named constant so the conflict is a value in the code and not only
+ * a paragraph in a comment — and so the sandbox probe has something to measure against.
+ *
+ * NOT enforced. `cs:{authId}:cap:{shipmentId}` is 55 characters in our worst case, so enforcing this
+ * today would reject ids we genuinely emit on every partial capture (EC-SPLIT-1). It is recorded so
+ * that if the probe shows 38 is real, the fix is one comparison in
+ * {@link validateRequestId} rather than an archaeology exercise.
+ */
+export const PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS = 38
+
+/**
+ * The OpenAPI figure for the same header (`SPEC-P` / `SPEC-V`
+ * `components.parameters.paypal_request_id`, `maxLength: 10000`) — which cannot be reconciled with
+ * {@link PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS}. Recorded, not enforced; see the module comment.
+ */
+export const PAYPAL_OPENAPI_REQUEST_ID_MAX_CHARS = 10_000
 
 /**
  * Every character a `PayPal-Request-Id` may contain here.
@@ -89,6 +126,12 @@ export function orderCreateRequestId(attemptId: AttemptId): string {
  *
  * `authId` is PayPal's own authorization id (e.g. `8AB12345AB6789123`), not one of ours, because
  * the capture must be deduplicated against the *PayPal* authorization it targets.
+ *
+ * **This is the format that breaks first if PayPal's 38-character limit is real** (report §32/#21):
+ * 55 characters in our worst case, and the 17-character `authId` slot is not compressible the way our
+ * own ULID slots are. Do not shorten it by dropping the `cap:` marker or the `cs:` prefix — the prefix
+ * is what makes a PayPal-side log greppable, and the marker is what stops two captures against the
+ * same authorization from colliding.
  */
 export function captureRequestId(authId: string, shipmentId: ShipmentId): string {
   return `${REQUEST_ID_PREFIX}${authId}:cap:${shipmentId}`
@@ -180,7 +223,8 @@ export function validateRequestId(value: unknown): Result<string, CsError> {
       csError(
         'CS_VALIDATION',
         `PayPal-Request-Id is ${value.length} characters, over our ${REQUEST_ID_MAX_CHARS}-character budget ` +
-          '(the limit PayPal actually enforces is UNVERIFIED — see IDEMPOTENCY.md, spec U5)',
+          '(the limit PayPal actually enforces is UNVERIFIED — see IDEMPOTENCY.md, spec U5; PayPal documents ' +
+          'both maxLength 10000 in the OpenAPI and a "38 single-byte character limit" in prose)',
         { length: value.length, budget: REQUEST_ID_MAX_CHARS },
       ),
     )
@@ -202,9 +246,14 @@ export function measureRequestId(value: unknown): Result<RequestIdLengthReport, 
 /**
  * Build every format from one representative set of ids and report the longest.
  *
- * This is the measurement the sandbox probe will replace with a *measured* PayPal limit. Until then
- * it is the honest answer to "how long can these get?": a number computed from the actual formats,
+ * This is the measurement the sandbox probe will place next to PayPal's two conflicting figures. Until
+ * then it is the honest answer to "how long can these get?": a number computed from the actual formats,
  * not an assumed maximum.
+ *
+ * The number to compare against PayPal's prose is {@link PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS} (38).
+ * `cs:{authId}:cap:{shipmentId}` and `cs:{captureId}:ref:{refundId}` are 55, so both exceed it today —
+ * which is exactly why the C-probe matters and why `test/idempotency.test.ts` pins these numbers
+ * rather than assuming them.
  */
 export function observedRequestIdLengths(): Record<string, RequestIdLengthReport> {
   // Worst realistic case: every ULID slot at its full 26 chars, a 17-char PayPal authorization id,

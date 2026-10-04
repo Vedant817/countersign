@@ -16,23 +16,47 @@
  *
  * ## Local validation, before the bytes move (EC-DSP-12)
  *
- * PayPal's documented limits are "10 MB per file, 50 MB total" [V8] and the accepted types for
- * evidence are jpg/png/gif/pdf. A 40 MB PDF therefore fails locally with `CS_VALIDATION` — before a
- * single byte is uploaded and before the merchant's approval flow has been spent — instead of coming
- * back as a 4xx an hour later when the deadline has moved.
+ * PayPal's documented limits (https://developer.paypal.com/disputes/supported-file-sizes-types) are,
+ * verbatim:
  *
- * TODO(verify against docs): whether "10 MB" is 10^6 or 2^20 bytes, and the exact list of accepted
- * content types. We enforce 2^20 (the stricter of the two in the per-file case) and the four types
- * the spec names; both are recorded in README's unverified list for the sandbox probe.
+ * > - **Supported file types**: `.jpg`, `.jpeg`, `.gif`, `.png`, and `.pdf`
+ * > - **Individual file size**: Less than 10 MB per file
+ * > - **Total file size**: Up to 50 MB per API call
+ *
+ * The five types are exactly what {@link ALLOWED_EVIDENCE_CONTENT_TYPES} encodes — verified. The two
+ * byte counts are **decimal, not binary**, and deliberately so (report §12/#18/#30):
+ *
+ *  - The per-file limit is exclusive ("less than 10 MB") and `resolveFile` rejects at
+ *    `size >= MAX_EVIDENCE_FILE_BYTES`, so an exactly-10 MB file is refused — which is what the
+ *    wording says.
+ *  - The total limit is inclusive ("up to 50 MB") and `buildEvidenceForm` rejects at
+ *    `total > MAX_EVIDENCE_TOTAL_BYTES`.
+ *
+ * **Why decimal and not 2^20.** PayPal never says which "MB" means, and `SPEC-D` carries no size
+ * constraint at all — no `maxLength` on `document.name`, no byte limits anywhere. The old
+ * `50 * 1024 * 1024` was *more permissive* than the documented figure, so a 51 MB upload passed local
+ * validation and came back as a remote rejection: the worst moment to learn a limit, after the
+ * merchant's approval flow has been spent and with a live deadline (EC-DSP-12). Decimal is the
+ * conservative reading — it fails locally, where the error can name the file.
+ *
+ * ASSUMPTION (report §30): the decimal reading is a conservative choice, **not** a documented fact.
  */
 import { csError, ok, err } from '@countersign/core'
 import type { CsError, Result } from '@countersign/core'
 
-/** Single-file ceiling, EC-DSP-12 / [V8]. Strictly less than, so an exactly-10-MiB file is refused. */
-export const MAX_EVIDENCE_FILE_BYTES = 10 * 1024 * 1024
+/**
+ * Single-file ceiling, EC-DSP-12: PayPal's "less than 10 MB per file" as **10 MB decimal**. The check
+ * is exclusive, so a file of exactly this size is already refused.
+ */
+export const MAX_EVIDENCE_FILE_BYTES = 10_000_000
 
-/** Whole-request ceiling [V8]: ≤ 50 MiB across every part. */
-export const MAX_EVIDENCE_TOTAL_BYTES = 50 * 1024 * 1024
+/**
+ * Whole-request ceiling: PayPal's "up to 50 MB per API call" as **50 MB decimal**. The check is
+ * inclusive, so exactly 50 000 000 bytes is accepted.
+ *
+ * Was `50 * 1024 * 1024` (52 428 800), which is *looser* than PayPal's documented limit.
+ */
+export const MAX_EVIDENCE_TOTAL_BYTES = 50_000_000
 
 /** The part name carrying the JSON evidence description [V3]. */
 export const EVIDENCE_INPUT_FIELD = 'input'
@@ -40,12 +64,19 @@ export const EVIDENCE_INPUT_FIELD = 'input'
 /**
  * Filename we give the `input` part.
  *
- * PayPal's own cURL examples post `-F 'input={"evidence_type":…}'`, i.e. a bare field. Sending it as
- * a named file part with `application/json` is the form PayPal's multipart parser documents for
- * `input`, and it is also what makes the part's type explicit.
+ * PayPal's documented form is a **bare field**: the "Use Disputes API" guide and the "Test go live"
+ * page both write `-F 'input={"evidences":[…]};type=application/json'`, with no `filename` in the
+ * part's content-disposition. We send it as a named file part with an explicit `application/json`
+ * type instead, which is a superset — same field name, same part name, same media type, plus
+ * `filename="input.json"`.
  *
- * TODO(verify against docs): whether a bare `input` field is accepted. The sandbox probe
- * (`client.sandbox.test.ts`, AT-M6.6) settles it and this constant changes with the answer.
+ * (The OpenAPI names the file part `evidence-file`, singular and hyphenated; that is a third spelling
+ * and not what the guide's example uses. The guide is the better evidence for the *file* field names
+ * `file1`, `file2`, …, which this package's default matches.)
+ *
+ * KEPT as-is, to be settled by the sandbox probe (report §23): `FormData` computes both the boundary
+ * and the content-disposition, so the extra `filename` cannot corrupt the encoding. The open question
+ * is only whether PayPal's parser minds it.
  */
 export const EVIDENCE_INPUT_FILENAME = 'input.json'
 
@@ -255,7 +286,7 @@ export async function buildEvidenceForm(
     return err(
       csError(
         'CS_VALIDATION',
-        `Evidence upload is ${total} bytes; the total limit is ${MAX_EVIDENCE_TOTAL_BYTES} bytes (50 MB)`,
+        `Evidence upload is ${total} bytes; PayPal's limit is "up to 50 MB per API call" = ${MAX_EVIDENCE_TOTAL_BYTES} bytes (EC-DSP-12)`,
         { size: total, max_bytes: MAX_EVIDENCE_TOTAL_BYTES, files: resolved.length },
       ),
     )

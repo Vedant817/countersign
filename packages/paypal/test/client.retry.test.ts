@@ -292,7 +292,7 @@ describe('EC-PP-1: repeated unavailability opens the breaker, then calls fail fa
 })
 
 describe('EC-IDEM-3: an ambiguous failure on an unverified endpoint is not blind-retried', () => {
-  const evidence = { evidence_type: 'PROOF_OF_FULFILLMENT', notes: ['Tracked on 1 Oct.'] }
+  const evidence = { evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT', notes: 'Tracked on 1 Oct.' }] }
 
   it('returns a retryable-but-ambiguous error and makes exactly one attempt', async () => {
     // Disputes v1 idempotency support is UNVERIFIED (spec U5), so a 5xx there might have created a

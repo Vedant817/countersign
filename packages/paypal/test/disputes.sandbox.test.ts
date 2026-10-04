@@ -20,13 +20,15 @@
 import { describe, expect, it } from 'vitest'
 
 import { disputeActionRequestId } from '../src/idempotency'
-import type { EvidenceFile } from '../src/multipart'
+import { MAX_EVIDENCE_FILE_BYTES, type EvidenceFile } from '../src/multipart'
+import { disputeCaptureId } from '../src/types'
 import {
   BUYER_EMAIL,
   HAS_CREDENTIALS,
   SKIP_REASON,
   liveClient,
   pollUntil,
+  ppMoney,
 } from './fixtures/sandbox-env'
 
 const NEEDS_BUYER = 'PAYPAL_BUYER_EMAIL is absent (§6): the buyer-dispute simulator asserts the buyer identity.'
@@ -96,23 +98,30 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
     const client = liveClient()
 
     // --- 1. raise the dispute as the sandbox buyer ([S29], §10.3 step 1-2) ---
+    // `multipart/form-data` with one `input` part: `disputed_transactions[].buyer_transaction_id`
+    // and `reason`. Neither `transaction_id` nor `dispute_reason` exists on this endpoint
+    // (report §1/#1), and it is not in `SPEC-D` at all — `TGL` is the only source.
     const raised = await client.sandbox.createBuyerDispute(BUYER_EMAIL, {
-      transaction_id: CAPTURE_ID,
-      dispute_reason: 'UNAUTHORISED',
+      disputed_transactions: [{ buyer_transaction_id: CAPTURE_ID }],
+      reason: 'UNAUTHORISED',
+      dispute_amount: ppMoney('20.00'),
+      extensions: { merchant_contacted: true, merchant_contacted_outcome: 'NO_RESPONSE' },
     })
     expect(raised.ok, raised.ok ? '' : `${raised.error.code}: ${raised.error.message}`).toBe(true)
 
     // --- 2. poll until PayPal shows it (§10.3 step 3) ---
     const dispute = await pollUntil(
       async () => {
-        const list = await client.listDisputes({ dispute_state: 'WAITING_FOR_SELLER_RESPONSE' })
+        const list = await client.listDisputes({ dispute_state: 'REQUIRED_ACTION' })
         if (!list.ok) return undefined
-        return list.value.items.find((d) => d.seller_transaction_id === CAPTURE_ID)
+        // The capture join goes through `disputed_transactions[]` (report §5/#5) — PayPal never sends
+        // `seller_transaction_id` at the top level of a dispute.
+        return list.value.items.find((d) => disputeCaptureId(d) === CAPTURE_ID)
       },
       { label: 'the simulated dispute to appear' },
     )
     expect(dispute.dispute_id).toBeTruthy()
-    expect(dispute.dispute_reason).toBe('UNAUTHORISED')
+    expect(dispute.reason).toBe('UNAUTHORISED')
 
     // --- 3. ask for seller evidence, then file it (multipart) ---
     const required = await client.sandbox.requireEvidence(dispute.dispute_id, 'SELLER_EVIDENCE')
@@ -121,10 +130,15 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
     const filed = await client.provideEvidence(
       dispute.dispute_id,
       {
-        evidence_type: 'PROOF_OF_FULFILLMENT',
-        notes: [
-          'Shipped 1 Oct via UPS, tracking 1Z999AA10123456784.',
-          'The signed read-back the buyer approved is included as the second page of this packet.',
+        evidences: [
+          {
+            evidence_type: 'PROOF_OF_FULFILLMENT',
+            // `notes` is one string, not an array (report §2/#3).
+            notes:
+              'Shipped 1 Oct via UPS, tracking 1Z999AA10123456784. The signed read-back the buyer ' +
+              'approved is included as the second page of this packet.',
+            evidence_info: { tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }] },
+          },
         ],
       },
       [onePagePdf],
@@ -137,7 +151,8 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
     const after = await client.getDispute(dispute.dispute_id)
     expect(after.ok).toBe(true)
     if (!after.ok) return
-    expect(after.value.evidence?.notes?.length ?? 0).toBeGreaterThan(0)
+    // `evidences` is the plural array (report §4/#4).
+    expect(after.value.evidences?.length ?? 0).toBeGreaterThan(0)
 
     // --- 5. adjudicate in our favour and confirm the outcome ([B16]) ---
     const adjudicated = await client.sandbox.adjudicate(dispute.dispute_id, 'SELLER_FAVOR')
@@ -155,8 +170,10 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
       // No live offer to act on. That is a property of the sandbox state, not a failure.
       return
     }
+    // `accept-offer` takes `{note}` — not `{payer_note}` — and answers 200 or **202** when the money
+    // movement is delayed (report §30/#12). Both count as success here.
     const accepted = await client.sandbox.acceptOffer(withOffer.dispute_id, 'Accepted, thanks.')
-    expect(accepted.ok).toBe(true)
+    expect(accepted.ok, accepted.ok ? '' : `${accepted.error.code}: ${accepted.error.message}`).toBe(true)
   })
 
   it('an oversize file is refused locally, so the sandbox is never asked', async () => {
@@ -164,13 +181,11 @@ describe.skipIf(!canRun)('AT-M6.6 simulate → require evidence → upload a 1-p
     const oversize: EvidenceFile = {
       fileName: 'too-big.pdf',
       contentType: 'application/pdf',
-      content: new Uint8Array(10 * 1024 * 1024),
+      content: new Uint8Array(MAX_EVIDENCE_FILE_BYTES),
     }
-    const result = await client.provideEvidence(
-      'PP-D-DOES-NOT-EXIST',
-      { evidence_type: 'PROOF_OF_FULFILLMENT', notes: ['x'] },
-      [oversize],
-    )
+    const result = await client.provideEvidence('PP-D-DOES-NOT-EXIST', {
+      evidences: [{ evidence_type: 'PROOF_OF_FULFILLMENT', notes: 'x' }],
+    }, [oversize])
     // Rejected before any HTTP call, so the bogus dispute id is never used.
     expect(result.ok).toBe(false)
     if (result.ok) return

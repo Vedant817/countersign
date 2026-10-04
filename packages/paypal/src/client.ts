@@ -57,6 +57,7 @@ import {
   reauthorizeRequestSchema,
   setupTokenReqSchema,
   setupTokenSchema,
+  isAppealable,
   trackReqSchema,
   verifyWebhookSignatureResSchema,
 } from './types'
@@ -164,13 +165,26 @@ export interface EndpointPolicy {
  * before a judge asks, this is what the code executes. `client.oauth.test.ts` asserts every path the
  * client can reach appears here.
  *
- * **Provenance.** Orders v2 and Payments v2 idempotency support is cited from [B14]
- * (https://developer.paypal.com/api/rest/reference/idempotency/). Everything else is
- * **UNVERIFIED — needs sandbox probe** (spec U5). PayPal's idempotency reference documents which
- * APIs honour the header; Disputes v1, Vault v3 and the customer-support simulators are not among the
- * ones we have confirmed. Guessing "it probably works" here is a double-charge bug, so the unverified
- * ones get `re-read-required` — while still *sending* the key where the spec mandates one
- * (§8.15 filing guard, §8.16 AT-M16.2).
+ * **Provenance (verification report §32, read from each operation's `parameters` array).**
+ * PayPal's idempotency page says "Not all APIs support this header… see the reference for your API",
+ * but the reference pages do not enumerate it — so the answer has to come from the OpenAPI:
+ *
+ *  - **Declares `PayPal-Request-Id`:** Orders v2 `POST /v2/checkout/orders`, `/authorize`, `/capture`;
+ *    Payments v2 `authorizations.capture`, `authorizations.reauthorize`, `authorizations.void`,
+ *    `captures.refund`; **Vault v3 `POST /v3/vault/setup-tokens` and `POST /v3/vault/payment-tokens`**
+ *    ("The server stores keys for 3 hours").
+ *  - **Does NOT declare it:** Orders v2 **`POST /v2/checkout/orders/{id}/track`** — `SPEC-O` states
+ *    "Idempotency for trackers is based on the `capture_id` and `tracking_number` combination sent in
+ *    the request body"; and Notifications `POST /v1/notifications/verify-webhook-signature`.
+ *  - **Not documented at all:** the whole Disputes v1 family, and
+ *    `POST /v2/customer-support/process-chargeback` — `SPEC-D` has no `paypal_request_id` parameter
+ *    anywhere.
+ *
+ * The two `re-read-required` families are therefore justified for **different reasons**: disputes
+ * because no documentation exists at all, and vault because the header exists but its key store is
+ * **3 hours**, so relying on it for a retry that may come hours later is not safe. Guessing "it
+ * probably works" is a double-charge bug, so both stay `re-read-required` — while still *sending* the
+ * key where the spec mandates one (§8.15 filing guard, §8.16 AT-M16.2).
  */
 export const ENDPOINT_POLICIES: Readonly<Record<string, EndpointPolicy>> = {
   // --- auth ---
@@ -181,7 +195,11 @@ export const ENDPOINT_POLICIES: Readonly<Record<string, EndpointPolicy>> = {
   'GET /v2/checkout/orders/{id}': { retry: 'same-request-id', sendRequestId: false },
   'POST /v2/checkout/orders/{id}/authorize': { retry: 'same-request-id', sendRequestId: true },
   'POST /v2/checkout/orders/{id}/capture': { retry: 'same-request-id', sendRequestId: true },
-  'POST /v2/checkout/orders/{id}/track': { retry: 'same-request-id', sendRequestId: true },
+  // EC-SPLIT-2 dedupes on the `capture_id` + `tracking_number` body pair, which `SPEC-O` names as
+  // this endpoint's idempotency mechanism. It declares no `paypal_request_id` parameter, so no header
+  // is sent (report §32/#19). `addTracking` still *requires* a requestId locally because spec §8.6's
+  // signature says so; the client drops it and logs that it did.
+  'POST /v2/checkout/orders/{id}/track': { retry: 'same-request-id', sendRequestId: false },
 
   // --- payments v2 [B14] ---
   'POST /v2/payments/authorizations/{id}/capture': { retry: 'same-request-id', sendRequestId: true },
@@ -192,14 +210,15 @@ export const ENDPOINT_POLICIES: Readonly<Record<string, EndpointPolicy>> = {
   'POST /v2/payments/captures/{id}/refund': { retry: 'same-request-id', sendRequestId: true },
   'GET /v2/payments/refunds/{id}': { retry: 'same-request-id', sendRequestId: false },
 
-  // --- vault v3: UNVERIFIED idempotency support (spec U5) ---
+  // --- vault v3: the header IS declared, but its key store lives 3 hours (report §32/#20) ---
   'POST /v3/vault/setup-tokens': { retry: 're-read-required', sendRequestId: false },
   'POST /v3/vault/payment-tokens': { retry: 're-read-required', sendRequestId: false },
   'GET /v3/vault/payment-tokens/{id}': { retry: 'same-request-id', sendRequestId: false },
   // DELETE is idempotent by HTTP semantics: a repeat is a 404, never a second deletion.
   'DELETE /v3/vault/payment-tokens/{id}': { retry: 'same-request-id', sendRequestId: false },
 
-  // --- disputes v1: UNVERIFIED idempotency support (spec U5); key still sent (§8.15, §8.16) ---
+  // --- disputes v1: `SPEC-D` declares no `paypal_request_id` at all (report §32); key still sent
+  //     because §8.15/§8.16 mandate one for the filing call. ---
   'GET /v1/customer/disputes': { retry: 'same-request-id', sendRequestId: false },
   'GET /v1/customer/disputes/{id}': { retry: 'same-request-id', sendRequestId: false },
   'POST /v1/customer/disputes/{id}/provide-evidence': { retry: 're-read-required', sendRequestId: true },
@@ -216,7 +235,8 @@ export const ENDPOINT_POLICIES: Readonly<Record<string, EndpointPolicy>> = {
   // webhook hot path where EC-PP-5 (slow verify) says respond 200 and verify afterwards.
   'POST /v1/notifications/verify-webhook-signature': { retry: 'same-request-id', sendRequestId: false },
 
-  // --- sandbox-only simulators [S29]: UNVERIFIED, and unreachable outside a sandbox env ---
+  // --- sandbox-only simulators [S29]: no `paypal_request_id` documented anywhere, and unreachable
+  //     outside a sandbox env ---
   'POST /v1/customer/disputes': { retry: 're-read-required', sendRequestId: false },
   'POST /v2/customer-support/process-chargeback': { retry: 're-read-required', sendRequestId: false },
   'POST /v1/customer/disputes/{id}/require-evidence': { retry: 're-read-required', sendRequestId: false },
@@ -393,6 +413,24 @@ export class PayPalClient {
    * Deliberately **not cached**: a client token is short-lived and single-use, and the point of the
    * call is to hand a fresh one to a page load. Caching would put an expired token in the popup, which
    * fails in a browser and not in our tests.
+   *
+   * ## Why this call exists at all, and the one thing it does not send (report §33/#22)
+   *
+   * **Vault v3 does not need it.** `SPEC-V` declares OAuth2 **clientCredentials** for both vault
+   * operations, and "Save payment methods" says the prerequisites are "your app's client ID and client
+   * secret. Exchange these for an OAuth access token." So every Vault call in this class uses
+   * {@link PayPalClient.getAccessToken}, and none of them need a client token.
+   *
+   * This exists only for the browser-SDK flow of §10.2 #2 — and PayPal's current guidance for *that*
+   * is blunt: "**Option B: client token (for Fastlane only)** — Client token authentication is required
+   * for Fastlane integrations. For all other use cases, use Option A: client ID."
+   *
+   * **Not sent: `domains[]`.** The documented client-token request is `POST /v1/oauth2/token` with
+   * `grant_type=client_credentials`, `response_type=client_token` **and `domains[]`** — the browser
+   * origins the token is for. Those origins are a deployment fact (`render.yaml`'s public URL from
+   * H-03), not something this package can know, and inventing a default would produce a token scoped
+   * to the wrong origin. Left out deliberately and recorded here; the sandbox probe (C-probe) settles
+   * whether the SDK flow needs it.
    */
   async getClientToken(): Promise<string> {
     return this.requestClientCredentialToken('client_token')
@@ -715,7 +753,15 @@ export class PayPalClient {
     })
   }
 
-  /** §10.2 #14. `multipart/form-data`: a JSON `input` part plus evidence files (EC-DSP-12). */
+  /**
+   * §10.2 #14. `multipart/form-data`: a JSON `input` part plus evidence files (EC-DSP-12).
+   *
+   * The `input` part is `{evidences: [{evidence_type, evidence_info, notes, documents}]}` and `notes`
+   * is a **string** of at most 2000 characters — see {@link provideEvidenceInputSchema}. Files default
+   * to `file1`, `file2`, … , which is the form PayPal's own cURL uses.
+   *
+   * Returns `200 OK` with `{links: [...]}` (report §2), not `204 No Content`.
+   */
   async provideEvidence(
     id: string,
     input: ProvideEvidenceInput,
@@ -784,7 +830,25 @@ export class PayPalClient {
     })
   }
 
-  /** §10.2 #16. Same multipart encoding as `provideEvidence`; only the path differs. */
+  /**
+   * §10.2 #16. Same multipart encoding as `provideEvidence`; only the path differs.
+   *
+   * **Gated on the `appeal` HATEOAS link, not on `dispute_state === 'APPEALABLE'`** (report §9/#17).
+   * PayPal states the link is what determines eligibility, in three places:
+   *
+   *  - `SPEC-D`, the `appeal` operation: *"If this link does not appear, you cannot appeal the
+   *    dispute."*
+   *  - "Use Disputes API" → "Appeal dispute": *"check whether the HATEOAS link for appeal is present"*.
+   *  - "Test go live": *"Check if the appeal action is available in the HATEOAS links"*.
+   *
+   * A state-only gate is a guess in both directions — it offers appeals PayPal will refuse and misses
+   * ones it allows. So this re-reads the dispute first (`GET`, a safe method) and refuses with
+   * `CS_VALIDATION` when the link is absent. The extra `GET` is the price of gating on a link we have
+   * to observe; the alternative is trusting a value the docs say is not authoritative.
+   *
+   * The signature is unchanged from spec §8.6. Callers that already hold the dispute can skip the
+   * re-read by branching on {@link isAppealable} themselves.
+   */
   async appeal(
     id: string,
     input: ProvideEvidenceInput,
@@ -793,10 +857,27 @@ export class PayPalClient {
   ): Promise<Result<Links, CsError>> {
     const bad = this.requireId(id, 'appeal')
     if (bad) return err(bad)
+
+    // Local validation FIRST, so an oversize or malformed packet still costs no HTTP request at all
+    // (EC-DSP-12's whole point) even though the eligibility check below needs a round trip.
     const parsed = this.parseBody(provideEvidenceInputSchema, input, 'appeal')
     if (!parsed.ok) return parsed
     const form = await buildEvidenceForm(parsed.value, files)
     if (!form.ok) return form
+
+    const current = await this.getDispute(id)
+    if (!current.ok) return current
+    if (!isAppealable(current.value)) {
+      return err(
+        csError('CS_VALIDATION', `Dispute ${id} cannot be appealed: PayPal did not offer the "appeal" link`, {
+          dispute_id: current.value.dispute_id,
+          dispute_state: current.value.dispute_state,
+          // The caller needs the deadline, not just a refusal: an appealable window is time-limited.
+          seller_response_due_date: current.value.seller_response_due_date,
+        }),
+      )
+    }
+
     return this.execute<Links>({
       method: 'POST',
       path: `/v1/customer/disputes/${encodeURIComponent(id)}/appeal`,
@@ -825,7 +906,15 @@ export class PayPalClient {
   /**
    * §10.2 #16. Multipart: a JSON `input` part carrying the notes, plus supporting files.
    *
-   * TODO(verify against docs): whether `input` here is `{notes}` or `{message}`. See README.
+   * Verified (report §7): the text field is **`notes`, not `message`**, and **both** encodings are
+   * documented — JSON (`-d '{"notes": "…"}'`) and multipart (`-F 'input={"notes": "…"};type=
+   * application/json'` plus `-F 'file1=@NewDoc.pdf'`). We send the multipart form, which is the one
+   * that can carry files.
+   *
+   * Constraint from `SPEC-D`: only allowed when `dispute_life_cycle_stage` is `CHARGEBACK`,
+   * `PRE_ARBITRATION` or `ARBITRATION`. We do not pre-check that — it is the same "wrong state" refusal
+   * every dispute action has, and inventing a local state machine would make M6 the arbiter of a
+   * decision §8.15 assigns to M15.
    */
   async provideSupportingInfo(
     id: string,
@@ -853,8 +942,13 @@ export class PayPalClient {
   /**
    * §10.2 #16. Escalate to arbitration.
    *
-   * TODO(verify against docs): whether the body is `{note}` or a bare `note` form field, and whether
-   * this endpoint takes JSON at all. See README.
+   * Verified (report §8): `application/json` with body `{"note": "Escalating to PayPal claim for
+   * resolution."}` — the guide's own cURL. `SPEC-D` agrees the schema is `escalate` with `note`
+   * (1–2000 chars) and an undocumented-in-prose optional `buyer_escalation_reason` whose value set
+   * PayPal has not published. Neither field is in `required`, but the guide always sends `note`, so we
+   * require one rather than escalating into the void.
+   *
+   * Returns `200 OK` with `{links: [...]}`.
    */
   async escalate(id: string, note: string, o: CallOpts = {}): Promise<Result<Links, CsError>> {
     const bad = this.requireId(id, 'escalate')

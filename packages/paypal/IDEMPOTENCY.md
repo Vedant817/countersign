@@ -67,7 +67,7 @@ Dispute action tokens: `file`, `claim`, `offer`, `msg`, `return`, `support`, `ap
 | GET | `/v2/checkout/orders/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
 | POST | `/v2/checkout/orders/{id}/authorize` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}` |
 | POST | `/v2/checkout/orders/{id}/capture` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}` |
-| POST | `/v2/checkout/orders/{id}/track` | yes | `UNVERIFIED (needs sandbox probe)` | **unknown** | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}` |
+| POST | `/v2/checkout/orders/{id}/track` | no | `SPEC-O`: no `paypal_request_id` parameter; idempotency is the `capture_id` + `tracking_number` body pair | **yes, via the body pair** | `AUTO (same request id)` | `GET /v2/checkout/orders/{id}` |
 | POST | `/v2/payments/authorizations/{id}/capture` | yes | `DOC-CITED` [B12], [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
 | POST | `/v2/payments/authorizations/{id}/reauthorize` | yes | `DOC-CITED` [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
 | POST | `/v2/payments/authorizations/{id}/void` | yes | `DOC-CITED` [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
@@ -75,8 +75,8 @@ Dispute action tokens: `file`, `claim`, `offer`, `msg`, `return`, `support`, `ap
 | GET | `/v2/payments/captures/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
 | POST | `/v2/payments/captures/{id}/refund` | yes | `DOC-CITED` [B12], [B14] | **yes, if the id is honoured** | `AUTO (same request id)` | n/a |
 | GET | `/v2/payments/refunds/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
-| POST | `/v3/vault/setup-tokens` | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v3/vault/setup-tokens/{id}` — see caveat below |
-| POST | `/v3/vault/payment-tokens` | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v3/vault/payment-tokens/{id}` — **only reachable with the setup-token id** |
+| POST | `/v3/vault/setup-tokens` | no | `DOC-CITED` — `SPEC-V` declares the header, "server stores keys for 3 hours" | **unknown beyond 3 h** | `RE-READ FIRST` | `GET /v3/vault/setup-tokens/{id}` — see caveat below |
+| POST | `/v3/vault/payment-tokens` | no | `DOC-CITED` — `SPEC-V` declares the header, "server stores keys for 3 hours" | **unknown beyond 3 h** | `RE-READ FIRST` | `GET /v3/vault/payment-tokens/{id}` — **only reachable with the setup-token id** |
 | GET | `/v3/vault/payment-tokens/{id}` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
 | DELETE | `/v3/vault/payment-tokens/{id}` | no | n/a — idempotent by HTTP semantics (a repeat is a 404) | **yes** | `AUTO (same request id)` | n/a |
 | GET | `/v1/customer/disputes` | no | n/a — safe method | **yes** | `AUTO (same request id)` | n/a |
@@ -95,7 +95,7 @@ Dispute action tokens: `file`, `claim`, `offer`, `msg`, `return`, `support`, `ap
 | POST | `/v1/customer/disputes/{id}/require-evidence` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` |
 | POST | `/v1/customer/disputes/{id}/adjudicate` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `adjudication_outcome` |
 | POST | `/v1/customer/disputes/{id}/change-reason` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` then read `dispute_reason` |
-| POST | `/v1/customer/disputes/{id}/accept-offer` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` |
+| POST | `/v1/customer/disputes/{id}/accept-offer` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` — and note the documented **`202 Accepted`**: the buyer may have accepted while we saw a timeout |
 | POST | `/v1/customer/disputes/{id}/deny-offer` *(sandbox)* | no | `UNVERIFIED (needs sandbox probe)` | **unknown** | `RE-READ FIRST` | `GET /v1/customer/disputes/{id}` |
 
 ### Two caveats about the `RE-READ FIRST` rows
@@ -109,34 +109,67 @@ Dispute action tokens: `file`, `claim`, `offer`, `msg`, `return`, `support`, `ap
    AT-M7.3 (*"A re-run with the same setup token is idempotent — returns the same wallet"*) is a claim
    about **our** layer, not about PayPal's.
 
+### And why vault is still `RE-READ FIRST` even though the header is documented (2026-10-04 audit)
+
+`SPEC-V` declares `PayPal-Request-Id` on both vault operations — so "unverified" was wrong, and the
+provenance comment in `ENDPOINT_POLICIES` no longer says so. The remaining objection is narrower and
+still real: PayPal documents that **"the server stores keys for 3 hours"**, which does not cover a
+retry that arrives after a long outage. `RE-READ FIRST` is therefore a deliberate conservatism about
+the *retention window*, not a claim that the header is unsupported. Disputes v1 stay `RE-READ FIRST` for
+the opposite reason: `SPEC-D` declares no `paypal_request_id` parameter anywhere.
+
+Note also what the re-read should look at after the audit's field-name corrections:
+`provide-evidence` and `provide-supporting-info` re-read **`evidences[].notes`** (not `evidence.notes`),
+`make-offer` re-reads `offers` (PayPal's field is `offer`, singular — see the note in `types.ts`),
+`appeal` re-reads **the `appeal` HATEOAS link**, `change-reason` re-reads **`reason`**, and
+`accept-offer` must assume the buyer may have accepted even if we saw a timeout.
+
 ---
 
 ## Header length
 
-**The maximum `PayPal-Request-Id` length PayPal enforces: UNKNOWN — to be measured in C-probe (spec U5).**
+**Which limit PayPal enforces is UNKNOWN, and PayPal's own two sources contradict each other.**
 
-No number is written here because we have not measured one, and a plausible-looking number in a
-judge-facing document is worse than an honest blank. What *is* known is how long our ids can actually
-get, computed from the formats themselves by `observedRequestIdLengths()` in `src/idempotency.ts`:
-
-| Format | Worst realistic length |
+| Source | What it states |
 |---|---|
-| `cs:{attemptId}:create` | 40 |
-| `cs:{authId}:cap:{shipmentId}` | 55 |
-| `cs:{captureId}:ref:{refundId}` | 55 |
-| `cs:{disputeId}:{action}:{packetVersion}` | 52 |
-| `cs:{paypalDisputeId}:file:1` (a PayPal dispute id in the slot) | 27 |
+| `SPEC-P` / `SPEC-V` → `components.parameters.paypal_request_id` | `minLength: 1`, **`maxLength: 10000`**, `pattern: ^.*$`, `required: false` |
+| <https://developer.paypal.com/api/rest/reference/idempotency> → "Usage notes" | *"PayPal recommends that you use the **UUID standard** for the `PayPal-Request-Id` header value because it meets the **38 single-byte character limit**."* |
+
+These cannot both be the enforced limit, and **nothing PayPal publishes says which is real.** 38 is the
+only number stated as a *limit*; 10 000 is a schema maximum, and a schema maximum is not a promise.
+Both are kept as named constants in `src/idempotency.ts` (`PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS`,
+`PAYPAL_OPENAPI_REQUEST_ID_MAX_CHARS`) so the C-probe has something to measure against.
+
+**Our worst case is 55 characters**, computed from the formats themselves by
+`observedRequestIdLengths()` in `src/idempotency.ts`:
+
+| Format | Worst realistic length | Over the 38-char prose figure? |
+|---|---|---|
+| `cs:{attemptId}:create` | 40 | yes |
+| `cs:{authId}:cap:{shipmentId}` | 55 | yes |
+| `cs:{captureId}:ref:{refundId}` | 55 | yes |
+| `cs:{disputeId}:{action}:{packetVersion}` | 52 | yes |
+| `cs:{paypalDisputeId}:file:1` (a PayPal dispute id in the slot) | 27 | no |
 
 (`attemptId` and friends are `att_` + a 26-char ULID; the PayPal auth/capture slot is 17 chars; the
 longest action token is `escalate` at 8; the largest packet version we emit is 9 digits.)
 
+**`captureRequestId` is the format to look at first.** `cs:{authId}:cap:{shipmentId}` is tied for
+longest at 55, and unlike the others its long slots are *PayPal's* ids — the 17-character
+authorization id and the capture id — which is why they cannot be shortened the way our own ULID slots
+could. If the C-probe reports 38 as real, this format has to change shape (for example a hash of the
+authorization id in place of the id itself), and that is a spec-level decision because §8.6 fixes the
+four formats.
+
 These five numbers are asserted by `test/idempotency.test.ts` ("measures the real formats rather than
-assuming a maximum"), so they cannot silently drift away from the code.
+assuming a maximum" and "flags `captureRequestId` as the format that breaks first"), so they cannot
+silently drift away from the code.
 
 Until the probe reports a limit, `REQUEST_ID_MAX_CHARS = 255` in `src/idempotency.ts` is **our own
-conservative budget, not a statement about PayPal's API**. It exists so a malformed id cannot become an
-HTTP header failure; `validateRequestId` returns `CS_VALIDATION` for anything non-alphanumeric, longer
-than the budget, or containing a space, CR or LF.
+budget, not a statement about PayPal's API**. It exists so a malformed id cannot become an HTTP header
+failure. It does **not** currently protect us against the 38-character reading — four of the five
+formats above are already longer than that. `validateRequestId` returns `CS_VALIDATION` for anything
+non-alphanumeric, longer than the budget, or containing a space, CR or LF.
 
 ---
 
@@ -154,6 +187,10 @@ For each row above, in sandbox:
    because "documented" and "deduplicates in practice" are different claims.
 4. Record the date, the sandbox app name and the debug ids in the cell, and move it to
    `MEASURED (YYYY-MM-DD)`.
+5. **New, from the 2026-10-04 audit — settle the length conflict.** Send a header value of **38
+   characters** and one of **39** to an endpoint that declares the header (e.g.
+   `POST /v2/payments/authorizations/{id}/capture`), and one of **10 001**, and record which are
+   accepted. This single experiment replaces both constants above with a measurement.
 
 `test/client.sandbox.test.ts` already performs steps 1–2 for
 `POST /v2/checkout/orders` (the *"re-sending the same create request id"* test) and fails with a message

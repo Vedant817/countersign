@@ -42,6 +42,16 @@ export const DOC = {
   disputes: 'https://developer.paypal.com/docs/api/customer-disputes/v1/',
   /** `provide-evidence` (the multipart upload). Cited by spec §10.2 #14. */
   provideEvidence: 'https://developer.paypal.com/api/customer-disputes/v1/disputes-provide-evidence',
+  /**
+   * "Use Disputes API" — the only PayPal page with worked cURL for every seller dispute action, and
+   * the source for the `{evidences:[…]}` input shape, the `file1` file field names and the
+   * `{note, acknowledgement_type}` acknowledge body (report GUIDE).
+   */
+  disputesGuide: 'https://developer.paypal.com/platforms/disputes/handle-disputes/use-disputes-api',
+  /** Evidence file sizes and types: "Less than 10 MB per file", "Up to 50 MB per API call". */
+  evidenceFiles: 'https://developer.paypal.com/disputes/supported-file-sizes-types',
+  /** The unsigned `PayPal-Auth-Assertion` construction for the buyer simulator. */
+  disputesSetup: 'https://developer.paypal.com/disputes/set-up',
   /** Webhooks, including `verify-webhook-signature`. */
   webhooks: 'https://developer.paypal.com/api/rest/webhooks/event-names/',
   /** Idempotency: `PayPal-Request-Id`. */
@@ -400,8 +410,9 @@ export function refundResponse(
 /**
  * Vault v3 setup token. Doc: {@link DOC.vault}.
  *
- * TODO(verify against docs): the exact `payment_source.paypal` setup-token fields (`usage_type`,
- * `usage_pattern`) — spec U6 says to copy them from the doc at build time.
+ * `usage_type`/`usage_pattern` come back under `payment_source.paypal`, and the documented `201`
+ * includes a `rel: "confirm"` link to `/v3/vault/payment-token` (report §21/#27) — the alternative to
+ * exchanging the setup token with a separate `POST /v3/vault/payment-tokens`.
  */
 export function setupTokenResponse(overrides: { id?: string } = {}): FakeResponseSpec {
   const id = overrides.id ?? '8CM364183LM392832'
@@ -410,7 +421,9 @@ export function setupTokenResponse(overrides: { id?: string } = {}): FakeRespons
     body: {
       id,
       status: 'CREATED',
-      payment_source: { paypal: { usage_type: 'MERCHANT', usage_pattern: 'SUBSCRIPTIONS' } },
+      payment_source: {
+        paypal: { usage_type: 'MERCHANT', usage_pattern: 'IMMEDIATE', experience_context: { return_url: 'x' } },
+      },
       links: [
         {
           href: `https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/${id}/confirm-payment-source`,
@@ -426,19 +439,32 @@ export function setupTokenResponse(overrides: { id?: string } = {}): FakeRespons
 /**
  * Vault v3 payment token (the vault id). Doc: {@link DOC.vault}, [V10].
  *
- * `customer.id`, `payer.email_address` and `payment_source.paypal.account_id` are what §8.7 step 5
- * stores.
+ * `customer.id` and `payment_source.paypal.{email_address,payer_id,account_id}` are what §8.7 step 5
+ * stores. **There is no top-level `payer`** — `payment_token_response` is `{id, customer,
+ * payment_source, links}` (report §16).
+ *
+ * `payerId: false` reproduces PayPal's published example, which carries **only `account_id`**; the
+ * client's `paymentTokenPayerId` falls back to it.
  */
-export function paymentTokenResponse(overrides: { id?: string; email?: string } = {}): FakeResponseSpec {
+export function paymentTokenResponse(
+  overrides: { id?: string; email?: string; payerId?: string | false; accountId?: string } = {},
+): FakeResponseSpec {
   const id = overrides.id ?? '5TY05013RG002845M'
+  const payerId = overrides.payerId === undefined ? 'PAYER9DX42987Y' : overrides.payerId
   return {
     status: 201,
     body: {
       id,
       status: 'ACTIVE',
       customer: { id: 'CUSTOMER-9WB781254L9893217' },
-      payer: { email_address: overrides.email ?? 'buyer-4879@example.com', payer_id: 'PAYER9DX42987Y' },
-      payment_source: { paypal: { account_id: id, account_status: 'VERIFIED' } },
+      payment_source: {
+        paypal: {
+          ...(payerId === false ? {} : { payer_id: payerId }),
+          account_id: overrides.accountId ?? 'VYYFH3WJ4JPJQ',
+          account_status: 'VERIFIED',
+          ...(overrides.email !== undefined ? { email_address: overrides.email } : {}),
+        },
+      },
       create_time: '2026-10-04T12:00:00Z',
       update_time: '2026-10-04T12:00:00Z',
       links: [{ href: `https://api-m.sandbox.paypal.com/v3/vault/payment-tokens/${id}`, rel: 'self', method: 'GET' }],
@@ -447,11 +473,21 @@ export function paymentTokenResponse(overrides: { id?: string; email?: string } 
 }
 
 /**
- * Customer Disputes v1 dispute. Doc: {@link DOC.disputes}, [B16].
+ * Customer Disputes v1 dispute. Doc: {@link DOC.disputes}, [V3], [B16].
  *
- * Field names used: `dispute_id`, `dispute_state`, `dispute_life_cycle_stage`, `status`,
- * `dispute_reason`, `seller_response_due_date`, `seller_transaction_id`, `dispute_amount`,
- * `evidence.notes`, `require_evidence.action`, `adjudication_outcome`.
+ * Field names used, all verified against the OpenAPI (report §11):
+ *
+ *  - `dispute_id`, `dispute_state` (the six-value enum), `status`, `dispute_life_cycle_stage`
+ *  - **`reason`**, not `dispute_reason`
+ *  - `seller_response_due_date` (RFC 3339 — we store UTC, display IST, EC-TIME-6)
+ *  - **`disputed_transactions[]`**, the array that carries `seller_transaction_id` / `buyer_transaction_id`
+ *  - `dispute_amount`
+ *  - **`evidences[]`** (plural), each entry's `notes` a **string**
+ *  - `messages[].posted_by`, not `.sender`
+ *  - `require_evidence.action`, `allowed_response_options`, `adjudication_outcome`
+ *
+ * `links` includes an `appeal` HATEOAS link unless `appealable: false`, because that link — not
+ * `dispute_state` — is what determines whether the dispute may be appealed (report §9/#17).
  */
 export function disputeResponse(overrides: {
   id?: string
@@ -460,16 +496,25 @@ export function disputeResponse(overrides: {
   reason?: string
   stage?: string
   sellerTransactionId?: string
+  buyerTransactionId?: string
   dueDate?: string
-  notes?: string[]
+  /** One entry of `evidences[]`; `notes` is a single string, ≤ 2000 chars. */
+  notes?: string
+  appealable?: boolean
 } = {}): FakeResponseSpec {
   const id = overrides.id ?? 'PP-D-2781AB12CD34'
+  const base = `https://api-m.sandbox.paypal.com/v1/customer/disputes/${id}`
+  const links: Record<string, unknown>[] = [
+    { href: base, rel: 'self', method: 'GET' },
+    { href: `${base}/provide-evidence`, rel: 'provide-evidence', method: 'POST' },
+  ]
+  if (overrides.appealable !== false) links.push({ href: `${base}/appeal`, rel: 'appeal', method: 'POST' })
   return {
     status: 200,
     body: {
       dispute_id: id,
-      dispute_state: overrides.state ?? 'WAITING_FOR_SELLER_RESPONSE',
-      dispute_reason: overrides.reason ?? 'UNAUTHORISED',
+      dispute_state: overrides.state ?? 'REQUIRED_ACTION',
+      reason: overrides.reason ?? 'UNAUTHORISED',
       dispute_life_cycle_stage: overrides.stage ?? 'CHARGEBACK',
       dispute_channel: 'INTERNAL',
       status: overrides.status ?? 'WAITING_FOR_SELLER_RESPONSE',
@@ -478,30 +523,79 @@ export function disputeResponse(overrides: {
       buyer_response_due_date: '2026-10-18T09:59:59Z',
       create_time: '2026-10-04T12:00:00Z',
       update_time: '2026-10-04T12:00:01Z',
-      seller_transaction_id: overrides.sellerTransactionId ?? '3C679366HH908993F',
-      buyer_transaction_id: '7XQ12345AB6789123',
+      // The capture the dispute is against lives in here, not at the top level.
+      disputed_transactions: [
+        {
+          buyer_transaction_id: overrides.buyerTransactionId ?? '7XQ12345AB6789123',
+          seller_transaction_id: overrides.sellerTransactionId ?? '3C679366HH908993F',
+        },
+      ],
       dispute_amount: { currency_code: 'USD', value: '48.00' },
       dispute_currency: 'USD',
       dispute_summary: 'Buyer says they did not authorise this purchase.',
       acceptance_claim_reason: 'UNSUCCESSFUL_OR_UNKNOWN',
       require_evidence: { action: 'SELLER_EVIDENCE', due_date: '2026-10-11T09:59:59Z' },
-      evidence: { evidence_type: 'PROOF_OF_FULFILLMENT', notes: overrides.notes ?? [], date: '2026-10-04T12:00:00Z' },
+      evidences: [
+        {
+          evidence_type: 'PROOF_OF_FULFILLMENT',
+          notes: overrides.notes ?? 'Shipped 1 Oct via UPS.',
+          date: '2026-10-04T12:00:00Z',
+          evidence_info: { tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }] },
+          documents: [{ name: 'label.pdf', size: 1_024, type: 'application/pdf' }],
+        },
+      ],
+      messages: [{ content: 'Please see the attached label.', posted_by: 'SELLER' }],
+      allowed_response_options: {
+        acknowledge_return_item: { acknowledgement_types: ['ITEM_RECEIVED', 'DAMAGED'] },
+        accept_claim: { accept_claim_types: ['REFUND', 'PARTIAL_REFUND'] },
+        make_offer: { offer_types: ['REFUND', 'REFUND_WITH_RETURN', 'REPLACEMENT_WITHOUT_REFUND'] },
+      },
       items: [{ item_name: 'Trail Runner, size 9', purchase_date: '2026-10-01' }],
-      links: [{ href: `https://api-m.sandbox.paypal.com/v1/customer/disputes/${id}`, rel: 'self', method: 'GET' }],
+      links,
     },
   }
 }
 
-/** `GET /v1/customer/disputes` envelope. Doc: {@link DOC.disputes}. */
+/**
+ * `GET /v1/customer/disputes` envelope. Doc: {@link DOC.disputes}.
+ *
+ * The response is `{items, links}` (`SPEC-D` `dispute_search`): **no `total_pages`, no `total_items`** —
+ * those were never PayPal fields (report §10). Forward paging is the `next` HATEOAS link.
+ */
 export function disputeListResponse(count = 1): FakeResponseSpec {
   return {
     status: 200,
     body: {
-      total_pages: 1,
-      total_items: count,
       items: Array.from({ length: count }, (_v, i) =>
         (disputeResponse({ id: `PP-D-2781AB12CD3${i}` }).body as Record<string, unknown>),
       ),
+      links: [{ href: 'https://api-m.sandbox.paypal.com/v1/customer/disputes?page_size=10', rel: 'self', method: 'GET' }],
+    },
+  }
+}
+
+/**
+ * `POST /v2/customer-support/process-chargeback` response. Doc: {@link DOC.sandboxDisputes}
+ * ("Test go live" → Simulate PayPal actions → Create chargeback).
+ *
+ * **201 Created with a body** (report §27/#2) — the previous `schema: null` discarded it. There is no
+ * OpenAPI for this endpoint at all, so which of `dispute_id` / `id` is the real field is the sandbox
+ * probe's answer; the response schema accepts both.
+ */
+export function chargebackResponse(overrides: { disputeId?: string; status?: number } = {}): FakeResponseSpec {
+  const disputeId = overrides.disputeId ?? 'PP-CB-2781AB12CD34'
+  return {
+    status: overrides.status ?? 201,
+    body: {
+      dispute_id: disputeId,
+      status: 'CREATED',
+      links: [
+        {
+          href: `https://api-m.sandbox.paypal.com/v1/customer/disputes/${disputeId}`,
+          rel: 'self',
+          method: 'GET',
+        },
+      ],
     },
   }
 }
@@ -509,8 +603,9 @@ export function disputeListResponse(count = 1): FakeResponseSpec {
 /**
  * The HATEOAS envelope the dispute action endpoints return. Doc: {@link DOC.disputes}.
  *
- * TODO(verify against docs): whether these answer `204 No Content` instead of a links array. The
- * client tolerates both — `linksSchema` defaults to `[]`.
+ * `200 OK` with `{links: […]}`, **not** `204 No Content` (report §2/#24) — every documented seller
+ * dispute action answers this way. The client still tolerates a body-less 2xx because `void` and the
+ * payment-token `DELETE` genuinely answer 204.
  */
 export function linksResponse(rel = 'self'): FakeResponseSpec {
   return {

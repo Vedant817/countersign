@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest'
 import { createLogger } from '@countersign/core'
 
 import { PayPalClient } from '../src/client'
+import { paymentTokenPayer, paymentTokenPayerId, paymentTokenSchema } from '../src/types'
+import { VAULT_CUSTOMER_TYPES, VAULT_USAGE_PATTERNS, VAULT_USAGE_TYPES } from '../src/types'
 import {
   capturingLogger,
   fakeFetch,
@@ -55,11 +57,21 @@ describe('createSetupToken (§8.7 step 3, [V9])', () => {
     const result = await client.createSetupToken({
       // U6: copy these verbatim from the doc at build time. The shape is asserted here so a change is
       // a deliberate diff rather than a silent one.
-      payment_source: { paypal: { usage_type: 'MERCHANT', usage_pattern: 'SUBSCRIPTIONS' } },
-      experience_context: {
-        return_url: 'https://countersign.onrender.com/wallet/onboarding?step=confirm',
-        cancel_url: 'https://countersign.onrender.com/wallet/onboarding?step=cancelled',
-        user_action: 'PAY_NOW',
+      //
+      // They live under `payment_source.paypal` (report §21/#15): `SPEC-V.setup_token_request` has
+      // exactly two top-level properties, `customer` and `payment_source`, so a top-level
+      // `usage_type` / `experience_context` would have been dropped or rejected. `IMMEDIATE` is the
+      // real `usage_pattern` for a one-shot merchant-initiated charge (spec D17).
+      payment_source: {
+        paypal: {
+          usage_type: 'MERCHANT',
+          usage_pattern: 'IMMEDIATE',
+          customer_type: 'CONSUMER',
+          experience_context: {
+            return_url: 'https://countersign.onrender.com/wallet/onboarding?step=confirm',
+            cancel_url: 'https://countersign.onrender.com/wallet/onboarding?step=cancelled',
+          },
+        },
       },
     })
     expect(result.ok).toBe(true)
@@ -70,8 +82,48 @@ describe('createSetupToken (§8.7 step 3, [V9])', () => {
     expect(call.method).toBe('POST')
     expect(headerOf(call, 'content-type')).toBe('application/json')
     const sent = jsonBody<Record<string, unknown>>(call)
-    expect(sent['payment_source']).toEqual({ paypal: { usage_type: 'MERCHANT', usage_pattern: 'SUBSCRIPTIONS' } })
-    expect(sent['experience_context']).toMatchObject({ user_action: 'PAY_NOW' })
+    // Every key except `customer` sits under `payment_source.paypal`.
+    expect(Object.keys(sent).sort()).toEqual(['payment_source'])
+    expect(sent['payment_source']).toEqual({
+      paypal: {
+        usage_type: 'MERCHANT',
+        usage_pattern: 'IMMEDIATE',
+        customer_type: 'CONSUMER',
+        experience_context: {
+          return_url: 'https://countersign.onrender.com/wallet/onboarding?step=confirm',
+          cancel_url: 'https://countersign.onrender.com/wallet/onboarding?step=cancelled',
+        },
+      },
+    })
+  })
+
+  it('documents the three vault enums, and accepts a value outside them at runtime', async () => {
+    // The wire schema is deliberately `z.string()` for every enum in this package: a zod enum would
+    // break onboarding the day PayPal adds a `usage_type`. The documented values are exported so the
+    // compiler suggests them and a test can assert the list has not drifted (report §21/#15).
+    expect([...VAULT_USAGE_TYPES].sort()).toEqual(['MERCHANT', 'PLATFORM'])
+    expect([...VAULT_CUSTOMER_TYPES].sort()).toEqual(['BUSINESS', 'CONSUMER'])
+    expect(VAULT_USAGE_PATTERNS).toContain('IMMEDIATE')
+    expect(VAULT_USAGE_PATTERNS).toHaveLength(12)
+
+    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : setupTokenResponse()))
+    const result = await client.createSetupToken({
+      payment_source: { paypal: { usage_type: 'MERCHANT', usage_pattern: 'IMMEDIATE' } },
+    })
+    expect(result.ok).toBe(true)
+    expect(fetchImpl.calls.filter((c) => c.url.includes('setup-tokens'))).toHaveLength(1)
+  })
+
+  it('refuses a `payment_source.paypal` that is not an object', async () => {
+    const { client, fetchImpl } = makeClient(tokenResponse())
+    const result = await client.createSetupToken({
+      // @ts-expect-error payment_source.paypal is an object; a string must be refused at the boundary.
+      payment_source: { paypal: 'not-an-object' },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CS_VALIDATION')
+    expect(fetchImpl.calls).toHaveLength(0)
   })
 
   it('exposes the approve link the browser JS SDK needs', async () => {
@@ -133,7 +185,33 @@ describe('createPaymentToken (§8.7 step 4, [V9])', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.value.customer?.id).toBeDefined()
-    expect(result.value.payer?.email_address).toBe('buyer-4879@example.com')
+    // The payer lives under `payment_source.paypal`; `payment_token_response` has **no** top-level
+    // `payer` (report §16/#16), so reading one would always return undefined.
+    expect(result.value['payer']).toBeUndefined()
+    expect(paymentTokenPayer(result.value)?.email_address).toBe('buyer-4879@example.com')
+    expect(paymentTokenPayerId(result.value)).toBe('PAYER9DX42987Y')
+  })
+
+  it('falls back to `account_id` for the payer id, because PayPal publishes only that', async () => {
+    // Report §22: `payer_id` is schema-declared but absent from every published example; the
+    // documented `customer_vault_payment_tokens_response` carries `account_id` only. A `payer_id`-only
+    // read would find nothing in production.
+    const { client } = makeClient((call) =>
+      isToken(call) ? tokenResponse() : paymentTokenResponse({ payerId: false, accountId: 'VYYFH3WJ4JPJQ' }),
+    )
+    const result = await client.createPaymentToken(SETUP_TOKEN_ID)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.payment_source?.paypal?.['payer_id']).toBeUndefined()
+    expect(paymentTokenPayerId(result.value)).toBe('VYYFH3WJ4JPJQ')
+  })
+
+  it('reports no payer id when PayPal sent neither', () => {
+    const parsed = paymentTokenSchema.safeParse({ id: PAYMENT_TOKEN_ID })
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+    expect(paymentTokenPayerId(parsed.data)).toBeUndefined()
+    expect(paymentTokenPayer(parsed.data)).toBeUndefined()
   })
 
   it('refuses an empty setup token id', async () => {

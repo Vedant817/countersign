@@ -141,7 +141,77 @@ and say so in the README's honest-limits section. No code change needed — only
 
 ---
 
+## H-09 — PayPal dispute-simulator scopes + buyer consent (blocks WP-06s C1, WP-15e)
+
+**Blocks:** `POST /v1/customer/disputes` (the buyer-dispute simulator) and `change-reason`, i.e.
+week-1 check C1 and the Defender's sandbox demo path. Everything else in `packages/paypal` is verified
+against PayPal's published OpenAPI; only these two need a human at the PayPal dashboard.
+
+From the PayPal account manager, on the `countersign-sandbox` REST app (H-01 step 2):
+
+1. Enable the **Disputes** product and grant two scopes. Both are required and neither is
+   self-served:
+   - `https://uri.paypal.com/services/disputes/create` (`DISPUTE_CREATE`)
+   - `https://uri.paypal.com/services/disputes/update-buyer` (`UPDATE_BUYER`)
+2. Complete one interactive **"Log in with PayPal"** consent flow with the sandbox buyer
+   (`PAYPAL_BUYER_EMAIL`). The simulator asserts the buyer with an *unsigned* `PayPal-Auth-Assertion`,
+   but the consent step still has to happen once by hand — a script cannot skip it.
+3. Note the **merchant id** of the Business account (Dashboard → account details) and the
+   **seller-side transaction id** from the business account's activity. Both are now required inputs
+   to `sandbox.processChargeback` (`merchant_id`, `transaction.id_enc`); the client cannot infer either.
+4. Note the **buyer-side transaction id** for the same capture. `POST /v1/customer/disputes` takes
+   `disputed_transactions[].buyer_transaction_id`, which is the id from the *buyer's* view of the
+   transaction, not the merchant's capture id. A capture id alone cannot simulate a dispute.
+
+**Then give an agent** (in a git-ignored `.env.local`, never a tracked file):
+
+```
+PAYPAL_MERCHANT_ID=<9-…>
+PAYPAL_TEST_BUYER_TRANSACTION_ID=<id from the buyer's activity>
+PAYPAL_DISPUTE_CREATE_SCOPE_CONFIRMED=true
+PAYPAL_DISPUTE_UPDATE_BUYER_SCOPE_CONFIRMED=true
+PAYPAL_BUYER_CONSENT_DONE=true
+```
+
+---
+
+## H-10 — Ask PayPal: which `PayPal-Request-Id` length is actually enforced?
+
+**Blocks:** nothing today. Becomes a double-capture bug the moment PayPal enforces it.
+**Needed by:** before the live demo (spec §19).
+
+PayPal contradicts itself and only a probe or an answer settles it:
+
+- the OpenAPI (`components.parameters.paypal_request_id`) declares **`maxLength: 10000`**;
+- <https://developer.paypal.com/api/rest/reference/idempotency> says *"PayPal recommends that you use
+  the UUID standard … because it meets the **38 single-byte character limit**."*
+
+Our worst case is **55 characters** (`cs:{authId}:cap:{shipmentId}`), and **four of our five** formats
+already exceed 38 — not just the capture one. `captureRequestId` is the one to look at first because
+its long slots are PayPal's own 17-character authorization and capture ids, so it cannot be shortened
+the way our ULID slots could. Spec §8.6 fixes the four formats, so changing one is a spec-level
+decision (record it in `docs/DECISIONS.md`).
+
+**Question to paste** (<https://developer.paypal.com/support> or
+<https://forums.developer.paypal.com/>):
+
+> For the `PayPal-Request-Id` header, is the enforced maximum length **38 characters** (as the
+> idempotency reference page states) or **10 000** (as `maxLength` in the API reference schema)? Do
+> non-UUID values longer than 38 characters get rejected? Is the limit per API or global?
+
+**Interim behaviour if PayPal does not answer:** `REQUEST_ID_MAX_CHARS = 255` remains *our own* budget
+and is labelled as such. The C-probe settles it empirically in one experiment — send 38, 39 and 10 001
+characters to `POST /v2/payments/authorizations/{id}/capture` and record which are accepted.
+`packages/paypal/IDEMPOTENCY.md` → "Header length" has the recipe.
+
+---
+
 ## Not blocked, tracking anyway
+
+- **`domains[]` for `getClientToken`** needs the deployed Render origins, so it depends on H-03.
+- **`RISK.DISPUTE.CREATED`** is a real documented PayPal event worth knowing about: it is the earliest
+  signal that a dispute exists, which would give the Defender lead time instead of waiting for the
+  2-minute dispute reconciler. Not currently subscribed (spec §8.12).
 
 - Vault "Save without purchase" JS SDK v6 needs a real browser popup (Playwright, Chromium) — an
   agent drives it, but the sandbox buyer login may need your 2FA (see H-07).

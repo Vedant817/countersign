@@ -11,6 +11,8 @@ import type { AttemptId, DisputeId, RefundRowId, ShipmentId } from '@countersign
 
 import {
   DISPUTE_ACTIONS,
+  PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS,
+  PAYPAL_OPENAPI_REQUEST_ID_MAX_CHARS,
   REQUEST_ID_MAX_CHARS,
   REQUEST_ID_PREFIX,
   captureRequestId,
@@ -190,6 +192,36 @@ describe('measureRequestId / observedRequestIdLengths', () => {
     // The sandbox simulator and the API both use ids like `PP-D-2781XXXX`, which contain a hyphen.
     const result = measureRequestId(disputeActionRequestId('PP-D-2781AB12CD34' as DisputeId, 'file', 1))
     expect(result.ok).toBe(true)
+  })
+
+  it('records that PayPal\'s two length figures contradict each other', () => {
+    // Report §32/#21: the OpenAPI declares `maxLength: 10000` while the idempotency prose recommends
+    // a UUID "because it meets the 38 single-byte character limit". Both are kept as named values so
+    // the C-probe has something to measure against; neither is enforced.
+    expect(PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS).toBe(38)
+    expect(PAYPAL_OPENAPI_REQUEST_ID_MAX_CHARS).toBe(10_000)
+    expect(REQUEST_ID_MAX_CHARS).toBe(255)
+  })
+
+  it('flags captureRequestId as the format that breaks first if the 38-character limit is real', () => {
+    // Our worst case is 55, so the budget of 255 does not protect us against the prose figure. The
+    // capture format is the one to look at: its 17-char `authId` slot is PayPal's own and is not
+    // compressible the way our ULID slots are.
+    const report = observedRequestIdLengths()
+    const capture = report['cs:{authId}:cap:{shipmentId}']
+    expect(capture?.length).toBe(55)
+    expect(capture?.length ?? 0).toBeGreaterThan(PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS)
+    // It is tied with the refund format for longest, and in fact **four of the five** measured formats
+    // exceed PayPal's prose figure — the only one that fits is the short PayPal-dispute-id form. That
+    // is the size of the exposure, stated as a number.
+    const longest = Math.max(...Object.values(report).map((r) => r.length))
+    expect(longest).toBe(55)
+    expect(Object.values(report).filter((r) => r.length > PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS)).toHaveLength(4)
+    expect(report['cs:{paypalDisputeId}:file:1']?.length).toBeLessThanOrEqual(
+      PAYPAL_DOCUMENTED_REQUEST_ID_MAX_CHARS,
+    )
+    // Still inside our own budget, which is why nothing is rejected today.
+    expect(capture?.withinBudget).toBe(true)
   })
 })
 

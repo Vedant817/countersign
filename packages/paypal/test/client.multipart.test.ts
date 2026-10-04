@@ -5,7 +5,9 @@
  * Everything here is testable without credentials, and everything here is what makes that call
  * correct when it finally runs:
  *
- *  - the `input` part is a JSON part, not a stray string;
+ *  - the `input` part is a JSON part named `input` carrying `{evidences: [ … ]}`, not a stray string;
+ *  - `notes` inside each evidence entry is a **string** (PayPal types it `string`, 1–2000 chars) —
+ *    the old `notes: string[]` would have been rejected;
  *  - `Content-Type` is **never** hand-written, so the runtime supplies the boundary;
  *  - an oversize or wrong-type file is refused locally with `CS_VALIDATION` and no HTTP call at all.
  */
@@ -23,8 +25,10 @@ import {
   evidenceFileSizes,
 } from '../src/multipart'
 import type { EvidenceFile } from '../src/multipart'
+import { MAX_EVIDENCE_ITEMS, type ProvideEvidenceInput } from '../src/types'
 import {
   capturingLogger,
+  disputeResponse,
   fakeFetch,
   formParts,
   headerOf,
@@ -35,13 +39,19 @@ import {
   testClock,
   tokenResponse,
 } from './fixtures/transport-double'
-import type { RecordedCall, Stub } from './fixtures/transport-double'
+import type { FakeResponseSpec, RecordedCall, Stub } from './fixtures/transport-double'
 
 const BASE_URL = 'https://api-m.sandbox.paypal.com'
 const DISPUTE_ID = 'PP-D-2781AB12CD34'
-const EVIDENCE_INPUT = {
-  evidence_type: 'PROOF_OF_FULFILLMENT',
-  notes: ['Shipped 1 Oct via UPS, tracking 1Z999AA10123456784.'],
+/** The documented `input` part: an `evidences` array whose `notes` is one string, not an array. */
+const EVIDENCE_INPUT: ProvideEvidenceInput = {
+  evidences: [
+    {
+      evidence_type: 'PROOF_OF_FULFILLMENT',
+      notes: 'Shipped 1 Oct via UPS, tracking 1Z999AA10123456784.',
+      evidence_info: { tracking_info: [{ carrier_name: 'UPS', tracking_number: '1Z999AA10123456784' }] },
+    },
+  ],
 }
 
 function makeClient(responder: Stub) {
@@ -62,6 +72,16 @@ function makeClient(responder: Stub) {
 const isToken = (c: RecordedCall) => c.url.endsWith('/v1/oauth2/token')
 const callTo = (calls: readonly RecordedCall[], fragment: string) =>
   calls.find((c) => c.url.includes(fragment)) as RecordedCall
+
+/**
+ * Anything that is not the token: a dispute carrying the `appeal` HATEOAS link for an `appeal` call,
+ * and the links envelope for every other dispute action. `appeal` now re-reads the dispute first
+ * (report §9/#17), so the responder has to answer that `GET` too.
+ */
+const disputeOrLinks = (call: RecordedCall): FakeResponseSpec => {
+  if (isToken(call)) return tokenResponse()
+  return call.method === 'GET' ? disputeResponse() : linksResponse()
+}
 
 const pdfFile = (bytes = onePagePdfBytes(), fileName = 'evidence-packet.pdf'): EvidenceFile => ({
   fileName,
@@ -88,6 +108,35 @@ describe('buildEvidenceForm', () => {
     if (!built.ok) return
     const parts = [...built.value.entries()]
     expect(parts.some(([, v]) => v instanceof File && v.name === EVIDENCE_INPUT_FILENAME)).toBe(true)
+  })
+
+  it('serialises the `input` part as {evidences:[…]}, the documented shape', async () => {
+    // Report §2/#3: the part is an ARRAY wrapped in `evidences`, and each entry's `notes` is a
+    // single string. Both of the old assumptions (a bare object, `notes: string[]`) are rejected by
+    // PayPal, so this asserts the exact JSON that goes on the wire.
+    const built = await buildEvidenceForm(EVIDENCE_INPUT, [])
+    expect(built.ok).toBe(true)
+    if (!built.ok) return
+    const input = built.value.get(EVIDENCE_INPUT_FIELD) as Blob
+    const wire = JSON.parse(await input.text()) as Record<string, unknown> & {
+      evidences: { notes?: unknown }[]
+    }
+    expect(Array.isArray(wire.evidences)).toBe(true)
+    expect(typeof wire.evidences[0]?.notes).toBe('string')
+    expect(wire['evidence_type']).toBeUndefined()
+  })
+
+  it('refuses more than the 100 evidence items PayPal caps `evidence_list` at', async () => {
+    // Report §2/#4. Locally refused, so an oversized batch costs no upload at all.
+    const tooMany = {
+      evidences: Array.from({ length: MAX_EVIDENCE_ITEMS + 1 }, () => ({ evidence_type: 'PROOF_OF_FULFILLMENT' })),
+    }
+    const { client, fetchImpl } = makeClient(tokenResponse())
+    const result = await client.provideEvidence(DISPUTE_ID, tooMany, [])
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CS_VALIDATION')
+    expect(fetchImpl.calls).toHaveLength(0)
   })
 
   it('defaults file field names to file1, file2, … and allows an override', async () => {
@@ -175,16 +224,57 @@ describe('EC-DSP-12: local limits, before a single byte is uploaded', () => {
     expect(built.ok).toBe(true)
   })
 
-  it('refuses a total over 50 MB', async () => {
+  it('refuses a total over PayPal\'s 50 MB, using the decimal reading', async () => {
+    // Report §12/#18: the cap was 50 * 1024 * 1024 = 52 428 800, which is *looser* than PayPal's
+    // "up to 50 MB per API call", so a 51 MB upload passed locally and was rejected remotely.
+    expect(MAX_EVIDENCE_TOTAL_BYTES).toBe(50_000_000)
+    expect(MAX_EVIDENCE_FILE_BYTES).toBe(10_000_000)
+
     // Six 9 MB files: each is legal on its own, together they are not one request.
-    expect(MAX_EVIDENCE_TOTAL_BYTES).toBe(50 * 1024 * 1024)
-    const chunk = new Uint8Array(9 * 1024 * 1024)
+    const chunk = new Uint8Array(9 * 1000 * 1000)
     const files = Array.from({ length: 6 }, (_v, i) => pdfFile(chunk, `part-${i}.pdf`))
     const built = await buildEvidenceForm(EVIDENCE_INPUT, files)
     expect(built.ok).toBe(false)
     if (built.ok) return
     expect(built.error.code).toBe('CS_VALIDATION')
+    expect(built.error.details?.['max_bytes']).toBe(50_000_000)
     expect(built.error.message).toContain('50 MB')
+  })
+
+  it('rejects 50 000 001 bytes — one byte over PayPal\'s limit — locally with CS_VALIDATION', async () => {
+    // The precise regression: 50 000 001 bytes used to pass local validation (it is below the old
+    // 52 428 800 ceiling) and only fail at PayPal. Five files of 9 999 999 plus one of 6 bytes is
+    // exactly 50 000 001.
+    const big = new Uint8Array(9_999_999)
+    const files = [
+      ...Array.from({ length: 5 }, (_v, i) => pdfFile(big, `part-${i}.pdf`)),
+      pdfFile(new Uint8Array(6), 'last.pdf'),
+    ]
+    const bytes = files.reduce((sum, f) => sum + (f.content as Uint8Array).byteLength, 0)
+    expect(bytes).toBe(50_000_001)
+
+    const { client, fetchImpl } = makeClient(tokenResponse())
+    const result = await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, files)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CS_VALIDATION')
+    expect(result.error.details?.['size']).toBeGreaterThan(MAX_EVIDENCE_TOTAL_BYTES)
+    expect(result.error.details?.['max_bytes']).toBe(MAX_EVIDENCE_TOTAL_BYTES)
+    // Refused before any HTTP call — the whole point of checking here.
+    expect(fetchImpl.calls).toHaveLength(0)
+  })
+
+  it('accepts exactly 50 000 000 bytes, because PayPal says "up to 50 MB"', async () => {
+    // `buildEvidenceForm` counts the `input` part in the total, so the files are sized to land the
+    // whole request on exactly the documented limit: 5 × 9 999 999 + 3 = 49 999 998, plus the 2 bytes
+    // of the `{}` input part.
+    const big = new Uint8Array(9_999_999)
+    const files = [
+      ...Array.from({ length: 5 }, (_v, i) => pdfFile(big, `part-${i}.pdf`)),
+      pdfFile(new Uint8Array(3), 'last.pdf'),
+    ]
+    const built = await buildEvidenceForm({}, files)
+    expect(built.ok).toBe(true)
   })
 
   it('refuses an empty file', async () => {
@@ -250,7 +340,7 @@ describe('the boundary is never hand-written', () => {
   it('sends no Content-Type header on a multipart call', async () => {
     // Hand-writing `multipart/form-data; boundary=…` with a guessed boundary makes every part
     // unparseable at PayPal, and the failure is a bare 400 with no detail.
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient(disputeOrLinks)
     const result = await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()])
     expect(result.ok).toBe(true)
 
@@ -260,7 +350,7 @@ describe('the boundary is never hand-written', () => {
   })
 
   it('the runtime still produces a content type with a boundary from what we passed', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient(disputeOrLinks)
     await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()])
     const call = callTo(fetchImpl.calls, '/provide-evidence')
 
@@ -275,7 +365,7 @@ describe('the boundary is never hand-written', () => {
   })
 
   it('does hand-write Content-Type for JSON bodies, where there is no boundary to compute', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient(disputeOrLinks)
     await client.sendMessage(DISPUTE_ID, 'hello')
     expect(headerOf(callTo(fetchImpl.calls, '/send-message'), 'content-type')).toBe('application/json')
   })
@@ -283,7 +373,7 @@ describe('the boundary is never hand-written', () => {
 
 describe('provideEvidence, appeal and provideSupportingInfo share the encoder', () => {
   it('each builds the same input part and never a boundary', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient(disputeOrLinks)
 
     await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()], { requestId: 'cs:dsp_1:file:1' })
     await client.appeal(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()], { requestId: 'cs:dsp_1:appeal:1' })
@@ -300,13 +390,13 @@ describe('provideEvidence, appeal and provideSupportingInfo share the encoder', 
   })
 
   it('carries the §8.15 filing key so a retried filing is deduplicated', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient(disputeOrLinks)
     await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()], { requestId: 'cs:dsp_1:file:1' })
     expect(headerOf(callTo(fetchImpl.calls, '/provide-evidence'), 'paypal-request-id')).toBe('cs:dsp_1:file:1')
   })
 
   it('a rejected oversize file never reaches the network', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient(disputeOrLinks)
     const result = await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [
       pdfFile(new Uint8Array(MAX_EVIDENCE_FILE_BYTES)),
     ])
@@ -329,8 +419,8 @@ describe('provideEvidence, appeal and provideSupportingInfo share the encoder', 
     const { client, fetchImpl } = makeClient(tokenResponse())
     const result = await client.provideEvidence(
       DISPUTE_ID,
-      // @ts-expect-error evidence_type is required by the API; omitting it must fail locally.
-      { notes: ['no type'] },
+      // @ts-expect-error evidence_type is required per evidence entry; omitting it must fail locally.
+      { evidences: [{ notes: 'no type' }] },
       [],
     )
     expect(result.ok).toBe(false)
@@ -340,7 +430,7 @@ describe('provideEvidence, appeal and provideSupportingInfo share the encoder', 
   })
 
   it('serialises the input part exactly once, with no stray JSON string field', async () => {
-    const { client, fetchImpl } = makeClient((call) => (isToken(call) ? tokenResponse() : linksResponse()))
+    const { client, fetchImpl } = makeClient(disputeOrLinks)
     await client.provideEvidence(DISPUTE_ID, EVIDENCE_INPUT, [pdfFile()])
     const parts = formParts(callTo(fetchImpl.calls, '/provide-evidence'))
     const inputParts = parts.filter((p) => p.name === EVIDENCE_INPUT_FIELD)
