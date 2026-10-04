@@ -1195,7 +1195,19 @@ export const auditLog = pgTable(
     // The chain walk: "next row in this chain, in insertion order".
     index('audit_log_chain_id_at_idx').on(t.chain_id, t.at),
     // Privacy export and the dispute timeline both read by subject.
-    index('audit_log_subject_idx').on(t.subject),
+    //
+    // `action` and `at` are in the index rather than a second index for one query that matters. The
+    // query is the Defender's `R-UNAUTH-2`: *was this device already reported lost before the mandate
+    // was signed?* That is the difference between "a key on a lost device still verifies, so we cannot
+    // show who signed" (accept the claim) and "a valid chain and a passkey is an authorised purchase"
+    // (contest it) — so on an UNAUTHORISED dispute it decides whether we fight or pay.
+    //
+    // There is deliberately **no `devices.lost_at` column** for this, and the reason is worth stating
+    // before someone adds one: a column can be updated, whereas an `audit_log` row is hash-chained to
+    // its predecessor and a rewritten entry breaks the chain. The dispute window is ~120 days and
+    // §12.13 keeps operational data 365 days, so the row is always there when the question is asked.
+    // See docs/DECISIONS.md D-024.
+    index('audit_log_subject_action_at_idx').on(t.subject, t.action, t.at),
     uniqueIndex('audit_log_chain_id_this_hash_key').on(t.chain_id, t.this_hash),
   ],
 )

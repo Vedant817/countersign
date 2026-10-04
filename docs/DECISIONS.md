@@ -443,3 +443,100 @@ off-by-one was found in `walletCapCheckIn` (`packages/db/repos/budget.ts`, WP-02
 attempt's RESERVE entry into the spend it compares against, so the effective wallet cap is `cap − cart`.
 Per AGENTS.md rule 8 this package does not edit that file; `packages/gate/test/budget.test.ts` pins the
 observed behaviour next to the intended value, so WP-02's fix shows up as exactly one failing assertion.
+
+
+## D-022 — §8.15's router table has three gaps, and §8.16 requires answers it does not contain
+
+**Date:** 2026-10-05 · **Raised by:** WP-15a · **Spec item:** §8.15, §8.16
+**Decision:** Implement the spec's rules verbatim as far as they go, and add named ids for the three
+postures it does not define. Documented below rather than smuggled in as exceptions.
+
+1. **No appeal rule.** §8.15's table has no `APPEAL` posture, yet §7.3 lists `APPEAL` in
+   `dispute_actions`, §8.9 lists `appeal` among the dispute calls, and §12.9's EC-DSP-3 says the
+   strategist proposes an appeal when a new fact arrives. Added `R-APPEAL-1`: lost the case, the
+   `appeal` HATEOAS link is present, and something material arrived since the decision.
+   **Why the link rather than `dispute_state === 'APPEALABLE'`:** PayPal states twice, in the API
+   reference and in the disputes guide, that the link is what determines eligibility ("If this link
+   does not appear, you cannot appeal the dispute"). This is the same correction as D-014, reached from
+   the other end.
+2. **No `MESSAGE_ONLY` posture.** The spec's enum is a filing posture set. But `R-DLNG`'s whole point
+   is that a parcel still in transit should be *waited on*, not filed against — spending one of a
+   merchant's response attempts on a parcel that has not landed is the expensive choice. Added
+   `R-INR-3` (tracker registered, still moving) → `MESSAGE_ONLY`.
+3. **No weak-UNAUTHORISED row.** EC-BUY-3 covers an `UNAUTHORISED` claim without a passkey, which the
+   spec's `R-UNAUTH-1` assumes exists. Added `R-UNAUTH-3` → `REVIEW`, because "absorb it or fight a
+   case with no passkey" is a money decision with no honest default.
+
+Two ordering fixes were also needed, and both are the kind of thing that makes a rule table look
+complete while being unreachable:
+
+- **`R-UNAUTH-2` could never fire.** `R-UNAUTH-1`'s stated condition is *also* true when the device
+  was stolen and the attacker used the passkey, so first-match ordering meant the "device was already
+  lost before the mandate was signed" branch was dead code. `R-UNAUTH-2` now precedes it.
+- **`R-CNP-1` could never fire** for a full refund, because `R-REF-1` (`ALREADY_REFUNDED`) matches
+  first and the spec's ordering is first-match-wins. It now requires a *partial* refund, which is the
+  case it was written for.
+
+Also split `R-NOCHAIN-1` into `R-NOCHAIN-1` and `R-CHAIN-BAD`: the spec's single row would tell a
+merchant "No mandate on this payment" when a mandate exists and merely failed to verify. Those are
+different conversations, and conflating them would be the first thing a merchant asks about.
+
+**Result: 22 rules — 14 verbatim from §8.15, 8 documented extensions.** The 40-case eval scores
+**40/40 exact (100.0%) on `ruleId` + `posture`, 40/40 on evidence types** (§8.16 AT-M15.1).
+
+## D-023 — The Defender's LLM ban is scoped to the files that choose the posture, not the package
+
+**Date:** 2026-10-05 · **Spec item:** §8.15, §8.16, §18 q20
+**Decision:** `eslint.config.mjs` bans `ai`, `@ai-sdk/*`, `openai`, `@anthropic-ai/*` and `ollama`
+in `packages/defender/src/{rules,router,rationale,types}.ts` — and **not** elsewhere in the package.
+
+**Reason:** Judge question 20 asks *"what stops the AI from filing a bogus dispute against a good
+customer?"* The answer has to be structural, and there are two ways to make it structural, only one of
+which is honest:
+
+- **Ban the whole package.** Then WP-15c's drafter cannot call a model to write the notes, which it
+  legitimately must. The ban would be unsatisfiable, so it would get deleted — or, worse, it would
+  drive the drafting into a package with no rule over it. That is strictly worse than not banning.
+- **Ban the files that decide the posture.** `rules.ts`, `router.ts` and `rationale.ts` stay pure;
+  `planner.ts` and the drafter may use a model. This is the boundary the design actually needs, and it
+  is exactly the boundary §8.15 vs §8.16 draws: the rules table picks `CONTEST` or `REFUND`, and the
+  model writes the prose.
+
+**Why a file-scoped rule and not just the existing structural test:** `test/router.test.ts` asserts the
+same boundary by reading the source, which catches it in CI — but only after the commit. A lint rule
+fails in the editor while the line is being written. Both exist, deliberately: removing the lint rule
+does not silently open the hole, and removing the test does not either.
+
+**Verified to fire,** not assumed: a planted `import { generateText } from 'ai'` in `router.ts` fails
+with the rule's message, and the same plant in `packages/gate/src/evaluate.ts` still fails with the
+Gate's message. Both files restored byte-for-byte afterwards.
+
+## D-024 — "Was this device lost before the mandate was signed?" comes from the audit log, not a column
+
+**Date:** 2026-10-05 · **Raised by:** WP-15a · **Spec item:** §7.2, §12.9 EC-KEY-1
+**Decision:** `R-UNAUTH-2` derives the device-lost instant by querying the hash-chained `audit_log`, and
+migration `0001_audit_log_subject_action_at` replaces `audit_log_subject_idx` with
+`audit_log_subject_action_at_idx`. **No `devices.lost_at` column is added.**
+
+**Reason:** WP-15a reported the schema as missing a column, which is a reasonable reading — `devices`
+carries `status` but no timestamp for when it became `LOST`. The audit log already answers it, and the
+difference matters because of who the fact is for.
+
+This ordering decides a live money question: on an `UNAUTHORISED` dispute it is the difference between
+"a key on a lost device still verifies, so we cannot show the person who signed was the account holder"
+(**accept the claim, pay `$89`) and "a valid chain and a passkey is an authorised purchase" (**contest
+it, save the `$89`). `R-UNAUTH-2`'s rationale says so out loud, because a merchant reading a
+contest-packet that turned out to be unprovable will remember that rather than the reasoning.
+
+An `audit_log` row is hash-chained to its predecessor, so rewriting one breaks the chain and the
+tamper is detectable. A `lost_at` column can be updated without trace — which means the one fact the
+Defender relies on to *lose* a contest could be quietly edited into a fact that makes it win. §12.13
+keeps operational data 365 days against a ~120-day dispute window, so the row is always there when the
+question is asked.
+
+**Index, not a second index:** the existing `(subject)` index already serves the privacy export and the
+dispute timeline, and Postgres uses a btree's leftmost prefix — so `(subject, action, at)` serves all
+three with one index instead of two.
+**Evidence:** `packages/db/src/schema.ts` `audit_log`;
+`packages/db/drizzle/0001_audit_log_subject_action_at.sql` (renamed from drizzle's `0001_tired_chimera`,
+which said nothing about what the file does).

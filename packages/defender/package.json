@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "eval": "vitest run --config vitest.eval.config.ts"
+    "eval": "vitest run test/eval.test.ts"
   },
   "dependencies": {
     "@countersign/core": "workspace:*",

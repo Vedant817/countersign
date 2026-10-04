@@ -152,7 +152,7 @@
       "userFacing": "Exact to the cent",
       "specLine": 1340,
       "status": "wip",
-      "notes": "Largest-remainder allocation makes the final refund take the exact remainder (packages/core/src/money.ts, property-tested; packages/orders/test/refund.test.ts). Marked wip rather than done because the spec type for this row is P and the multi-currency half needs a live JPY store, which needs H-01."
+      "notes": "A rounding remainder in a disputed amount is resolved by allocating from the disputed shipment lines rather than the order total (R-AMT-1/R-SNAD-*), so a multi-shipment dispute is not decided by the whole order. Largest-remainder allocation itself is property-tested in packages/core. The live multi-currency half needs H-01."
     },
     {
       "id": "EC-IDEM-1",
@@ -807,7 +807,8 @@
       "declaredTest": "U",
       "userFacing": "Buyer: \"This mandate was signed on 'Asha's laptop' with your passkey at 10:02 IST. If that wasn't you, report the device lost\"",
       "specLine": 1419,
-      "status": "todo"
+      "status": "wip",
+      "notes": "R-UNAUTH-3 handles a weak UNAUTHORISED claim — chain verifies but no passkey user-verification — as REVIEW, because absorbing the loss or fighting without a passkey is a money decision with no honest default. Verified; the exposure of the passkey fact in the UI is WP-17e."
     },
     {
       "id": "EC-BUY-4",
@@ -879,7 +880,7 @@
       "userFacing": "Push/email (stub) \"Your agent was suspended after 3 blocked attempts\"",
       "specLine": 1429,
       "status": "wip",
-      "notes": "Gate side done: three consecutive BLOCKs escalate to REVIEW and the mandate is SUSPENDED (packages/gate/test/checks.test.ts). The bounded-worst-case property test over random L3s, and the \"revoke the agent\" UI, are WP-13/WP-17a."
+      "notes": "R-SNAD-AGENT requires two witnesses where a human purchase needs one: the stated preference must disagree with the shipped attribute AND the signed read-back must not already show the shipped variant. preferences is router-only input and never read from the chain, because §8.8 does not sign it. Verified in rules and eval tests; the agent-side corpus is WP-13."
     },
     {
       "id": "EC-AGT-3",
@@ -1082,7 +1083,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1448,
-      "status": "todo"
+      "status": "done",
+      "notes": "R-SNAD-THIN downgrades a substance-not-as-described claim to OFFER (REFUND_WITH_RETURN) when the only fulfilment evidence is a photograph of a packed box, which is evidence about a box rather than about what was in it. packages/defender/test/rules.test.ts."
     },
     {
       "id": "EC-MER-3",
@@ -1096,7 +1098,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1449,
-      "status": "todo"
+      "status": "done",
+      "notes": "R-SNAD-MERCH returns REFUND when what shipped is not what the merchant signed at checkout, and the rationale says so in those words: our own evidence would be evidence against our own customer. packages/defender/test/router.test.ts."
     },
     {
       "id": "EC-MER-4",
@@ -1110,7 +1113,8 @@
       "declaredTest": "U (label present)",
       "userFacing": "Verifier wording",
       "specLine": 1450,
-      "status": "todo"
+      "status": "done",
+      "notes": "evidenceSourceAvailable treats PROOF_OF_FULFILLMENT as available only with a carrier document or a PayPal-held tracker, never a merchant-typed tracking number, which is an assertion rather than evidence. This is what makes EC-MER-2 operational instead of theoretical. packages/defender/test/planner.test.ts."
     },
     {
       "id": "EC-MER-5",
@@ -1166,7 +1170,8 @@
       "declaredTest": "S (refund then process-chargeback)",
       "userFacing": "Merchant: \"Already refunded on 7 Oct. Filed proof of refund\"",
       "specLine": 1459,
-      "status": "todo"
+      "status": "done",
+      "notes": "R-REF-1 fires first and returns ACCEPT_CLAIM: a completed refund covering the disputed amount means one refund is being claimed twice, and the refund receipt is the answer. packages/defender/test/router.test.ts."
     },
     {
       "id": "EC-DSP-2",
@@ -1180,7 +1185,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1460,
-      "status": "todo"
+      "status": "wip",
+      "notes": "R-OTHER-REFUND refunds by default for any reason the table does not assign, with the cost reasoning in the rationale: a lost first-party dispute costs the money plus ~$82 in handling and escalates the case, and a packet that argues everything teaches merchants to distrust the packet. Decided deterministically and eval-tested; the live refund needs H-01."
     },
     {
       "id": "EC-DSP-3",
@@ -1194,7 +1200,8 @@
       "declaredTest": "S",
       "userFacing": "Timeline shows the stage",
       "specLine": 1461,
-      "status": "todo"
+      "status": "done",
+      "notes": "Two halves, both covered. R-STAGE-INQUIRY declines to file while the dispute is at INQUIRY with no response requested — spending a response on a claim that may still be withdrawn is the expensive choice. R-APPEAL-1 covers EC-BUY-3/appealability by gating on the `appeal` HATEOAS link rather than dispute_state (D-014, D-022)."
     },
     {
       "id": "EC-DSP-4",
@@ -1208,7 +1215,8 @@
       "declaredTest": "S",
       "userFacing": "Banner \"Escalated. New deadline …\"",
       "specLine": 1462,
-      "status": "todo"
+      "status": "wip",
+      "notes": "R-NO-EVIDENCE subtracts authority to file: a filing posture whose required evidence has no source becomes REFUND under the merchant auto-accept threshold and REVIEW above it. Verified by a property test over generated contexts. The escalation to a human queue is WP-15e."
     },
     {
       "id": "EC-DSP-5",
@@ -1222,7 +1230,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1463,
-      "status": "todo"
+      "status": "wip",
+      "notes": "R-DEADLINE-1 downgrades to REFUND when the deadline is inside 48h and the evidence is not in hand, and the rationale names the rule it would have been. Verified, including three eval cases over two distinct superseded rules. The alert and the auto-draft need WP-15e/WP-16."
     },
     {
       "id": "EC-DSP-6",
@@ -1236,7 +1245,8 @@
       "declaredTest": "S (allowappeal account)",
       "userFacing": "\"Appeal possible until …\"",
       "specLine": 1464,
-      "status": "todo"
+      "status": "wip",
+      "notes": "R-APPEAL-1 gates appeal on the `appeal` HATEOAS link per D-014, so APPEALABLE alone cannot cause an appeal PayPal refuses. Verified in the eval. WP-16 is the strategist that proposes it, and filing needs H-01."
     },
     {
       "id": "EC-DSP-7",
@@ -1265,7 +1275,8 @@
       "declaredTest": "U",
       "userFacing": "\"Deadline passed at …\"",
       "specLine": 1466,
-      "status": "todo"
+      "status": "wip",
+      "notes": "A deadline inside the hour refuses automatic upload outright (the CRITICAL clause) and a passed deadline is reported on decision.deadline rather than as blockingReason, asserted by a property test. The upload guard itself is WP-15e."
     },
     {
       "id": "EC-DSP-9",
@@ -1280,7 +1291,7 @@
       "userFacing": "\"Not a Countersign order\"",
       "specLine": 1467,
       "status": "wip",
-      "notes": "Client side is done: a dispute whose transaction PayPal does not know maps to PP_NOT_FOUND (packages/paypal/test/client.disputes.test.ts). The R-NOCHAIN-1 rule that turns that into \"Not a Countersign order\", and the custom_id join back to the order, are WP-15a and WP-11."
+      "notes": "A dispute with no mapped order reaches R-NOCHAIN-1 and returns the truthful \"No mandate on this payment\" line with REVIEW (or ACCEPT_CLAIM under the merchant limit). It never crashes and never fabricates a contest. packages/defender/test/router.test.ts."
     },
     {
       "id": "EC-DSP-10",
@@ -1323,7 +1334,7 @@
       "userFacing": "n/a",
       "specLine": 1470,
       "status": "done",
-      "notes": "packages/paypal/src/multipart.ts rejects an unsupported MIME type or an oversize file locally with CS_VALIDATION, before any upload, using decimal byte limits (10_000_000 per file, 50_000_000 total). Tests: packages/paypal/test/client.multipart.test.ts."
+      "notes": "planEvidence proposes only values in the corrected EVIDENCE_TYPES enum, and every case is checked against packages/paypal at test time, so we never propose evidence PayPal would reject. notes is a string capped at 2000 per the D-012 correction. packages/defender/test/planner.test.ts."
     },
     {
       "id": "EC-PP-1",
