@@ -1,0 +1,229 @@
+# Render blueprint — Countersign (spec D20, D11)
+#
+# Everything here is paid, on purpose. Free Render web services spin down after 15 minutes of
+# inactivity and free Postgres expires after 30 days. Judging runs 2–15 Dec, so a free tier would die
+# mid-judging and take the demo URL with it (spec D11, [B11]).
+#
+# Approximate cost: 3 × Starter $7 + Postgres basic-256mb $6 = **$27/month**, covered by the
+# hackathon credits. Approving this blueprint as-is will spend that money.
+#
+# Before the first `render blueprint launch`:
+#   1. Create the repo on GitHub (HUMAN_TODO H-04) and push.
+#   2. Confirm a **Singapore** region exists for all three service types (spec U8 — Render dashboard).
+#   3. Apply the hackathon credits (HUMAN_TODO H-03).
+#
+# After the launch, set the secrets Render will NOT put in a file — every `sync: false` value below.
+# They are listed in `docs/HUMAN_TODO.md` and `.env.example`.
+#
+# Why `preDeployCommand: pnpm db:migrate` on `web` only: migrations must run exactly once per deploy
+# and must finish before the new code serves traffic. Putting it on the worker as well would race it.
+# The Gate's budget ledger reads and writes under `SELECT ... FOR UPDATE` (spec D19), so a migration
+# that ran *after* the new web instance started could deadlock against live traffic.
+
+databases:
+  - name: countersign-db
+    databaseName: countersign
+    user: countersign
+    # basic-256mb is $6/mo. Render Postgres provisions only some regions on this tier, which is why
+    # the region below is a variable rather than a literal.
+    plan: basic-256mb
+    postgresMajorVersion: '17'
+    region: singapore
+    ipAllowList: [] # private network only; nothing connects from the internet
+
+services:
+  # ---------------------------------------------------------------------------------------------
+  # web — Next.js 16. All UIs, all route handlers, the merchant MCP server, and packages/gate
+  #       (spec §3.1). The Gate runs *inside* web because the Gate must be on the merchant's side
+  #       of the boundary, with no LLM anywhere in its dependency graph (spec §8.10).
+  # ---------------------------------------------------------------------------------------------
+  - type: web
+    name: countersign-web
+    runtime: node
+    plan: starter # $7/mo. Never `free`: it sleeps, and a sleeping Gate cannot answer a judge.
+    region: singapore
+    branch: main
+    autoDeployTrigger: commit
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm --filter @countersign/web start
+    healthCheckPath: /status
+    preDeployCommand: pnpm db:migrate
+    numInstances: 1
+    envVars:
+      # ---- non-secret, committed as code ----
+      - key: APP_ENV
+        value: render
+      - key: NODE_ENV
+        value: production
+      - key: PAYPAL_ENV
+        value: sandbox # EC-ENV-1. Never `live`; boot refuses it.
+      - key: PAYPAL_API_BASE
+        value: https://api-m.sandbox.paypal.com
+      - key: PAYPAL_MCP_URL
+        value: https://mcp.sandbox.paypal.com/http
+      - key: PAYPAL_MCP_MODE
+        value: remote # week-1 check C3(b) may switch this to `local`
+      - key: LLM_MAIN_MODEL
+        value: gpt-6.1-sol
+      - key: LLM_CHEAP_MODEL
+        value: gpt-6-luna
+      - key: CHECKOUT_PRICE_LOCK_SECONDS
+        value: '900'
+      - key: FEATURE_BRYNTUM
+        value: 'false' # set true once HUMAN_TODO H-05 lands the trial token
+      - key: FEATURE_WEBAUTHN
+        value: 'true'
+      - key: FEATURE_JUDGE_MODE
+        value: 'true'
+      - key: VI_CLOCK_SKEW_SECONDS
+        value: '300'
+      - key: RETENTION_DAYS_OPERATIONAL
+        value: '365' # DPDP Rule 8(3) minimum (spec §12.13, [B17])
+      - key: RETENTION_DAYS_EVIDENCE
+        value: '540'
+      - key: LOG_LEVEL
+        value: info
+
+      # ---- injected by Render ----
+      - key: DATABASE_URL
+        fromDatabase:
+          name: countersign-db
+          property: connectionString
+      - key: PUBLIC_BASE_URL
+        fromService:
+          type: web
+          name: countersign-web
+          envVarKey: PUBLIC_BASE_URL
+          property: host
+
+      # ---- secrets: set in the Render dashboard, never in this file (HUMAN_TODO H-01/02/03) ----
+      - key: SESSION_SECRET
+        generateValue: true # 32+ chars, and a fresh one per environment
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: VI_SERVICE_TOKEN
+        sync: false # must match the vi service exactly
+      - key: VI_KEK
+        sync: false # 32 bytes base64. Back this up: see EC-KEY-4.
+      - key: VI_ISSUER_KID
+        sync: false
+      - key: VI_MERCHANT_KID
+        sync: false
+      - key: GATE_KID
+        sync: false
+      - key: GATE_SIGNING_KEY
+        sync: false # P-256 private JWK. Gate decision records are signed with it.
+      - key: VI_SERVICE_URL
+        fromService:
+          type: web
+          name: countersign-vi
+          envVarKey: VI_SERVICE_URL
+          property: host
+
+  # ---------------------------------------------------------------------------------------------
+  # vi — the crypto oracle (spec D2, §8.3). Private network only.
+  #     `internal: true` means Render never assigns it a public hostname, so the issuer key and the
+  #     encrypted agent private keys are unreachable from the internet. It has no health check path
+  #     because it is not routable; readiness is checked from web's /status instead.
+  # ---------------------------------------------------------------------------------------------
+  - type: web
+    name: countersign-vi
+    runtime: python
+    plan: starter
+    region: singapore
+    branch: main
+    autoDeployTrigger: commit
+    rootDir: apps/vi
+    buildCommand: uv sync --frozen --no-dev
+    startCommand: uv run --no-dev uvicorn vi_service.main:app --host 0.0.0.0 --port $PORT
+    internal: true
+    numInstances: 1
+    envVars:
+      - key: APP_ENV
+        value: render
+      - key: VI_CLOCK_SKEW_SECONDS
+        value: '300'
+      - key: LOG_LEVEL
+        value: info
+      - key: VI_SERVICE_TOKEN
+        sync: false # same value as on web
+      - key: VI_KEK
+        sync: false # same value as on web
+      - key: VI_ISSUER_KID
+        sync: false
+      - key: VI_MERCHANT_KID
+        sync: false
+
+  # ---------------------------------------------------------------------------------------------
+  # worker — pg-boss jobs (spec D12, §8.12): webhook processing, the reconciler, reservation
+  #         expiry, authorisation honour-period checks, retention, and the nightly eval sweep.
+  #
+  #         `runtime: worker` rather than `web`: Render's worker type has no public port and no
+  #         health check, which is exactly right for a process whose only output is durable side
+  #         effects. A `web` service here would just burn an ingress.
+  # ---------------------------------------------------------------------------------------------
+  - type: worker
+    name: countersign-worker
+    runtime: node
+    plan: starter
+    region: singapore
+    branch: main
+    autoDeployTrigger: commit
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @countersign/worker build
+    startCommand: pnpm --filter @countersign/worker start
+    numInstances: 1
+    envVars:
+      - key: APP_ENV
+        value: render
+      - key: NODE_ENV
+        value: production
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_API_BASE
+        value: https://api-m.sandbox.paypal.com
+      - key: PAYPAL_MCP_URL
+        value: https://mcp.sandbox.paypal.com/http
+      - key: PAYPAL_MCP_MODE
+        value: remote
+      - key: LLM_MAIN_MODEL
+        value: gpt-6.1-sol
+      - key: LLM_CHEAP_MODEL
+        value: gpt-6-luna
+      - key: VI_CLOCK_SKEW_SECONDS
+        value: '300'
+      - key: RETENTION_DAYS_OPERATIONAL
+        value: '365'
+      - key: RETENTION_DAYS_EVIDENCE
+        value: '540'
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        fromDatabase:
+          name: countersign-db
+          property: connectionString
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: VI_SERVICE_TOKEN
+        sync: false
+      - key: VI_SERVICE_URL
+        fromService:
+          type: web
+          name: countersign-vi
+          envVarKey: VI_SERVICE_URL
+          property: host
+      - key: GATE_KID
+        sync: false
+      - key: GATE_SIGNING_KEY
+        sync: false

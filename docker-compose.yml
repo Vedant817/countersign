@@ -1,0 +1,109 @@
+# Countersign — local development (spec D1: three runtimes, one Postgres)
+#
+# Why this file exists and what it deliberately does NOT contain:
+#   - Postgres 17, matching production (spec D11). Testing against 15 hides `numeric` and constraint
+#     behaviour that only shows up in 17.
+#   - One service, not three. `apps/web` and `apps/vi` run on the host via `pnpm dev` and
+#     `uv run uvicorn`, because vi-service needs a git-pinned Python dependency installed from
+#     source and a container would add a rebuild step for no gain locally.
+#   - No Redis. Jobs are Postgres-backed via pg-boss (spec D12), so there is no second stateful
+#     service to keep in sync.
+#
+# Usage:
+#   docker compose up -d db
+#   pnpm db:migrate && pnpm db:seed
+#   # terminal 1
+#   pnpm --filter @countersign/web dev
+#   # terminal 2
+#   cd apps/vi && uv run uvicorn vi_service.main:app --port 8000 --reload
+#   # terminal 3
+#   pnpm --filter @countersign/worker dev
+
+name: countersign
+
+services:
+  db:
+    image: postgres:17
+    container_name: countersign-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: countersign
+      POSTGRES_PASSWORD: countersign
+      POSTGRES_DB: countersign
+      # C collation, matching what Render's Postgres images provide. A database created under a
+      # different locale and then dumped/restored will sort strings differently, which shows up as
+      # subtly wrong ORDER BY results on indexed text columns — a genuinely baffling bug class.
+      POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=en-US --encoding=UTF8'
+    ports:
+      # Bound to loopback only. This database holds vault ids, signed mandates and dispute evidence;
+      # it must never be reachable from the network on a developer laptop.
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` alone reports ready before the database is actually writable, so migrations
+      # race the first start. `-d countersign -U countersign` waits for the real thing.
+      test: ['CMD-SHELL', 'pg_isready -U countersign -d countersign']
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    command:
+      # Log every statement that takes >200ms, so a missing index is visible during development
+      # rather than in production on Render.
+      - postgres
+      - -c
+      - log_min_duration_statement=200
+      - -c
+      - log_lock_waits=on
+      - -c
+      - max_connections=100
+
+  # Optional: run the whole stack in containers, which is how CI proves the images build.
+  # Not the default local path — see the header.
+  web:
+    profiles: ['containers']
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    environment:
+      APP_ENV: local
+      PUBLIC_BASE_URL: http://localhost:3000
+      DATABASE_URL: postgres://countersign:countersign@db:5432/countersign
+      VI_SERVICE_URL: http://vi:8000
+      SESSION_SECRET: local-only-not-a-secret-xxxxxxxxxxxxxxxxxxxxxx
+      VI_SERVICE_TOKEN: local-only-not-a-secret-xxxxxxxxxxxxxxxxxxxxxx
+      VI_KEK: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+      VI_ISSUER_KID: issuer-1
+      VI_MERCHANT_KID: merchant-1
+      GATE_KID: gate-1
+      GATE_SIGNING_KEY: '{"kty":"EC","crv":"P-256","x":"","y":"","d":""}'
+      PAYPAL_ENV: sandbox
+      PAYPAL_API_BASE: https://api-m.sandbox.paypal.com
+      PAYPAL_CLIENT_ID: ''
+      PAYPAL_CLIENT_SECRET: ''
+      OPENAI_API_KEY: ''
+      LOG_LEVEL: debug
+    ports:
+      - '3000:3000'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  vi:
+    profiles: ['containers']
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.vi
+    environment:
+      VI_SERVICE_TOKEN: local-only-not-a-secret-xxxxxxxxxxxxxxxxxxxxxx
+      VI_KEK: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+      VI_ISSUER_KID: issuer-1
+      VI_MERCHANT_KID: merchant-1
+      VI_CLOCK_SKEW_SECONDS: '300'
+      APP_ENV: local
+    ports:
+      - '8000:8000'
+
+volumes:
+  db-data:

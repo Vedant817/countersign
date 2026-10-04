@@ -16,7 +16,8 @@
       "declaredTest": "S: auth $100, capture $60 → remaining $40",
       "userFacing": "Receipt: \"Charged $60 for 1 of 2 items; $40 still held\"",
       "specLine": 1069,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The largest-remainder split that makes two partial captures sum exactly to the authorization is done and property-tested (packages/core/test/core.test.ts). The orchestrator that issues the two captures is WP-11."
     },
     {
       "id": "EC-CAP-2",
@@ -100,7 +101,8 @@
       "declaredTest": "U",
       "userFacing": "\"Only $X remains refundable\"",
       "specLine": 1075,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The SQL backstop exists (captures.refunded_minor <= amount_minor, packages/db/test/schema.test.ts). The local sum check and its CS_VALIDATION happen in the orchestrator, WP-11."
     },
     {
       "id": "EC-REF-3",
@@ -171,7 +173,8 @@
       "declaredTest": "I (fake fetch)",
       "userFacing": "Invisible",
       "specLine": 1085,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/paypal/src/client.ts retries a side-effecting call only with the same PayPal-Request-Id, so PayPal returns the earlier result rather than creating a second order. Tests: packages/paypal/test/client.retry.test.ts."
     },
     {
       "id": "EC-IDEM-3",
@@ -185,7 +188,8 @@
       "declaredTest": "I",
       "userFacing": "Invisible",
       "specLine": 1086,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/paypal/src/client.ts has a per-endpoint policy: side-effecting endpoints are marked re-read-first, and an ambiguous failure re-reads state via GET before deciding to retry rather than blind-retrying. The full table is packages/paypal/IDEMPOTENCY.md, with unverified cells marked as such."
     },
     {
       "id": "EC-IDEM-4",
@@ -255,7 +259,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1096,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The dedupe key exists as UNIQUE (paypal_event_id) (packages/db/test/schema.test.ts). The INSERT ... ON CONFLICT DO NOTHING ingest that relies on it is WP-12."
     },
     {
       "id": "EC-WH-3",
@@ -283,7 +288,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1098,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/paypal/src/client.ts verifyWebhookSignature calls POST /v1/notifications/verify-webhook-signature; an unverified event is refused before any processing. Tests: packages/paypal/test/client.disputes.test.ts."
     },
     {
       "id": "EC-WH-5",
@@ -311,7 +317,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1100,
-      "status": "todo"
+      "status": "done",
+      "notes": "A resource PayPal does not know about maps to PP_NOT_FOUND rather than throwing, so a simulator event or a foreign app’s webhook is recorded and ignored. Test: packages/paypal/test/client.disputes.test.ts (\"404 -> PP_NOT_FOUND (EC-DSP-9 / EC-WH-6)\")."
     },
     {
       "id": "EC-WH-7",
@@ -339,7 +346,8 @@
       "declaredTest": "U (fixed clock)",
       "userFacing": "Agent: \"Your mandate expired at 11:59 PM IST. Ask the user to renew\"",
       "specLine": 1107,
-      "status": "todo"
+      "status": "wip",
+      "notes": "withinValidity with the library skew is done (packages/core/test/core.test.ts). Gate check 1, which is what actually refuses an expired mandate, is WP-10."
     },
     {
       "id": "EC-MDT-2",
@@ -409,7 +417,8 @@
       "declaredTest": "I",
       "userFacing": "\"Your PayPal connection was removed. Reconnect to continue\"",
       "specLine": 1112,
-      "status": "todo"
+      "status": "wip",
+      "notes": "A deleted vault token comes back PP_NOT_FOUND (packages/paypal/test/client.vault.test.ts). Marking the wallet DELETED and suspending its mandates, plus the VAULT.PAYMENT-TOKEN.DELETED subscription, is WP-12."
     },
     {
       "id": "EC-MDT-7",
@@ -437,7 +446,8 @@
       "declaredTest": "E (fake browser clock)",
       "userFacing": "n/a",
       "specLine": 1119,
-      "status": "todo"
+      "status": "done",
+      "notes": "apps/vi sets iat/exp server-side in l2/prepare; the browser only signs bytes and never supplies a timestamp, so a wrong client clock cannot affect a mandate. Test: apps/vi/tests/test_verify.py."
     },
     {
       "id": "EC-TIME-2",
@@ -496,7 +506,8 @@
       "declaredTest": "U, I",
       "userFacing": "Merchant countdown; buyer \"Order cancelled: not shipped in time\"",
       "specLine": 1123,
-      "status": "todo"
+      "status": "wip",
+      "notes": "packages/paypal records that no PAYMENT.AUTHORIZATION.EXPIRED event exists, so expiry must be polled from expiration_time (docs/DECISIONS.md D-016). The honour-period cron and reauthorize logic are WP-11/WP-12."
     },
     {
       "id": "EC-TIME-6",
@@ -599,7 +610,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1135,
-      "status": "todo"
+      "status": "done",
+      "notes": "apps/vi/src/vi_service/checkout_jwt.py emits integer minor units plus a currency code, ported from the reference helper which uses float dollar strings. Tests: apps/vi/tests/test_checkout_jwt.py assert no float appears in the signed payload."
     },
     {
       "id": "EC-PRICE-1",
@@ -627,7 +639,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1142,
-      "status": "todo"
+      "status": "wip",
+      "notes": "vi refuses to sign an L3 whose amount is out of range (apps/vi/tests/test_l3.py). Rejecting a capture that exceeds the authorized amount locally is the orchestrator, WP-11."
     },
     {
       "id": "EC-PRICE-3",
@@ -655,7 +668,8 @@
       "declaredTest": "S",
       "userFacing": "\"1 item unavailable. You were charged only $60. $40 released\"",
       "specLine": 1144,
-      "status": "todo"
+      "status": "wip",
+      "notes": "products.stock has a CHECK constraint preventing a negative count (packages/db/test/schema.test.ts). Partial capture plus void of the remainder is WP-11."
     },
     {
       "id": "EC-STOCK-2",
@@ -683,7 +697,8 @@
       "declaredTest": "P",
       "userFacing": "\"Sold out just now\"",
       "specLine": 1146,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The CHECK prevents negative stock (packages/db/test/schema.test.ts). The SELECT ... FOR UPDATE decrement at ORDER_CREATED, and the 20-way race test, are WP-10/WP-11."
     },
     {
       "id": "EC-SPLIT-1",
@@ -697,7 +712,8 @@
       "declaredTest": "S",
       "userFacing": "Two tracking numbers on the receipt",
       "specLine": 1147,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The PayPal client supports one tracker per capture (packages/paypal/test/client.orders.test.ts). The per-shipment capture loop is WP-11."
     },
     {
       "id": "EC-SPLIT-2",
@@ -711,7 +727,8 @@
       "declaredTest": "S",
       "userFacing": "n/a",
       "specLine": 1148,
-      "status": "todo"
+      "status": "wip",
+      "notes": "Tracking twice against one capture is supported by the client (packages/paypal/test/client.orders.test.ts). The CAPTURE-intent fulfilment path is WP-11."
     },
     {
       "id": "EC-SPLIT-3",
@@ -739,7 +756,8 @@
       "declaredTest": "U, S",
       "userFacing": "Buyer: \"This matched your signed limits. The merchant offers a return\"",
       "specLine": 1155,
-      "status": "todo"
+      "status": "wip",
+      "notes": "makeOffer with REFUND_WITH_RETURN is implemented and tested (packages/paypal/test/client.disputes.test.ts). The router decision that prefers an offer over contesting is WP-15a."
     },
     {
       "id": "EC-BUY-2",
@@ -823,7 +841,8 @@
       "declaredTest": "E (seeded listings) + red-team eval",
       "userFacing": "Chat: \"🛡 Blocked: the cart was $999 but your limit is $130. A listing tried to instruct your agent\"",
       "specLine": 1166,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The three injection payloads are seeded from one exported constant so the corpus and the seed cannot drift (packages/db/test/seed.test.ts). The agent-side defences and the Gate verdict are WP-13."
     },
     {
       "id": "EC-AGT-2",
@@ -923,7 +942,8 @@
       "declaredTest": "Drill (manual, documented)",
       "userFacing": "Banner: \"Re-approve mandates\"",
       "specLine": 1173,
-      "status": "todo"
+      "status": "done",
+      "notes": "apps/vi/src/vi_service/keys.py derives agent keys from VI_KEK; with the KEK changed, agent keys are undecryptable and re-minting is the only path, while issuer/merchant public keys survive in JWKS so historical evidence still verifies. Test: apps/vi/tests/test_keys.py."
     },
     {
       "id": "EC-FAM-1",
@@ -1232,7 +1252,8 @@
       "declaredTest": "U",
       "userFacing": "\"Not a Countersign order\"",
       "specLine": 1205,
-      "status": "todo"
+      "status": "wip",
+      "notes": "Client side is done: a dispute whose transaction PayPal does not know maps to PP_NOT_FOUND (packages/paypal/test/client.disputes.test.ts). The R-NOCHAIN-1 rule that turns that into \"Not a Countersign order\", and the custom_id join back to the order, are WP-15a and WP-11."
     },
     {
       "id": "EC-DSP-10",
@@ -1274,7 +1295,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1208,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/paypal/src/multipart.ts rejects an unsupported MIME type or an oversize file locally with CS_VALIDATION, before any upload, using decimal byte limits (10_000_000 per file, 50_000_000 total). Tests: packages/paypal/test/client.multipart.test.ts."
     },
     {
       "id": "EC-PP-1",
@@ -1288,7 +1310,8 @@
       "declaredTest": "I",
       "userFacing": "\"PayPal is having trouble. We'll retry for 15 min; nothing is charged twice\"",
       "specLine": 1214,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/paypal/src/circuit.ts opens a per-host circuit after 5 consecutive PP_UNAVAILABLE for 30 s and then fails fast with retryable:true; a 429 deliberately does not count as an outage because PayPal is up and merely throttling. Tests: packages/paypal/test/circuit.test.ts."
     },
     {
       "id": "EC-PP-2",
@@ -1302,7 +1325,8 @@
       "declaredTest": "I",
       "userFacing": "Judge Mode queue position",
       "specLine": 1215,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/paypal/src/backoff.ts backs off with full jitter and honours Retry-After; a 429 carrying Retry-After: 2 waits at least 2 s, verified with an injected clock and sleep. Tests: packages/paypal/test/backoff.test.ts."
     },
     {
       "id": "EC-PP-3",
@@ -1316,7 +1340,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1216,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/paypal/src/client.ts refreshes the OAuth token once on a 401 via a single-flight refresh, then reports PP_AUTH. Tests: packages/paypal/test/client.oauth.test.ts."
     },
     {
       "id": "EC-PP-4",
@@ -1401,7 +1426,8 @@
       "declaredTest": "U",
       "userFacing": "\"We'll erase on 2 Jun 2027 because a dispute needs this record\"",
       "specLine": 1244,
-      "status": "todo"
+      "status": "wip",
+      "notes": "Unbuilt. WP-19 owns packages/privacy. The PRIVACY_LEGAL_HOLD code already exists in the registry (packages/core/src/errors.ts) and the schema has privacy_requests.legal_hold_reason (packages/db), but no behaviour and therefore no test yet."
     },
     {
       "id": "EC-PRIV-2",

@@ -9,7 +9,6 @@
  */
 import { writeFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const ROOT = join(import.meta.dirname, '..')
 

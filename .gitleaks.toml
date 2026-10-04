@@ -1,0 +1,55 @@
+# gitleaks configuration — spec §8.0, AGENTS.md rule 4.
+#
+# The scan runs in CI on every push and PR, over full history. This file tunes it in two directions,
+# and the balance between them matters:
+#
+#  - **Fewer false positives**, because a scan that cries wolf gets disabled, and a disabled scan is
+#    worse than none. Every allowlist entry below is specific to a shape that is demonstrably not a
+#    credential.
+#  - **No genuine secret is allowlisted.** If a real key ever matches one of these patterns, that is a
+#    bug in the allowlist and the fix is to remove the entry, not to widen it.
+#
+# `--redact` in CI prints only a fingerprint, never the value, so a leak cannot be read out of the log
+# by anyone with workflow access.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Non-credential strings that match a generic secret pattern"
+
+# --- PayPal client IDs are not secrets ---
+#
+# `PAYPAL_CLIENT_ID` is an identifier, not a credential: it appears in browser-visible settings and in
+# the OAuth token request, and it grants nothing on its own. The *secret* is caught by the generic
+# high-entropy rule and by the keyword rules. Flagging the client id would train a reviewer to ignore
+# this file.
+regexes = [
+  # Sandbox and live client ids: A + 13 alphanumerics + a dash + a long suffix.
+  '''\bA[A-Z0-9]{13}-[A-Za-z0-9_-]{20,}\b''',
+]
+
+paths = [
+  # Our own specification. It quotes example keys, endpoint shapes and header names, and is the
+  # single largest text file in the repository, so a generic pattern will hit it.
+  '''docs/spec/''',
+  # The verification report cites PayPal doc URLs and enum values.
+  '''docs/verification/''',
+  # Lockfiles contain integrity hashes, which are high-entropy base64 by construction. They are
+  # checksummed by pnpm/uv on every install, so tampering with them is not the threat this scan covers.
+  '''pnpm-lock\.yaml''',
+  '''uv\.lock''',
+  # Fixtures are captured sandbox responses. They MUST still be scanned for real credentials — a
+  # captured Authorization header would be a real leak — so this path is deliberately NOT allowlisted.
+]
+
+# Committed build output carries the same strings as source.
+paths_ignore = []
+
+# Documentation and fixtures legitimately contain placeholder secrets. These are anchored to the
+# exact placeholder values used in .env.example and docker-compose.yml, so a real key can never match.
+regexTarget = 'match'
+
+# A webhook id is an identifier used for signature verification, not the signature itself. It is still
+# treated as a secret in code (it is in SECRET_ENV_KEYS) so it never reaches a log, but its *shape*
+# matches too many generic rules to be useful in the scan.

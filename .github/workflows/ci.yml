@@ -1,0 +1,285 @@
+name: CI
+
+# spec D21, §15 WP-00. Every gate in AGENTS.md rule 5, plus the two checks that are specific to this
+# project: the edge-case ledger must be complete, and no float may touch money.
+
+on:
+  push:
+    branches: [main, 'wp/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# One pending run per ref: a superseded push should not consume minutes on a PR nobody is reading.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Node 24 LTS (spec §4). pnpm 12.8.1 is pinned via packageManager; corepack reads it from there,
+  # so this is the only place the pnpm version is declared for CI.
+  NODE_VERSION: '24'
+
+jobs:
+  # ---------------------------------------------------------------------------------------------
+  # Secrets first, and fast. A leaked key should fail the build in seconds, not after 12 minutes of
+  # tests. gitleaks runs on the full history on main and on the diff for a PR.
+  # ---------------------------------------------------------------------------------------------
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history: a secret committed and removed later is still a leak
+      - name: gitleaks (full history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+      - name: assert .env files are ignored except .env.example
+        run: |
+          set -euo pipefail
+          # A belt-and-braces check that does not depend on gitleaks' allowlist behaviour. If
+          # `.env*` were ever committed, the next push would spread real credentials.
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$' ; then
+            echo "FAIL: an .env file is tracked. Remove it and rotate whatever it contained." >&2
+            exit 1
+          fi
+          echo "ok: no .env file is tracked"
+
+  # ---------------------------------------------------------------------------------------------
+  # Typecheck, lint, format, money discipline, edge-case ledger — no tests, so a type error is
+  # reported in ~40s instead of after the full suite.
+  # ---------------------------------------------------------------------------------------------
+  static:
+    name: typecheck · lint · format · money · edge cases
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: typecheck
+        run: pnpm typecheck
+      - name: lint
+        run: pnpm lint
+      - name: format check
+        run: pnpm format:check
+      - name: money discipline (no floats in money)
+        run: node scripts/check-money-discipline.mjs
+      - name: edge-case ledger is complete
+        # The 109-case gate. `--allow-incomplete` is deliberately NOT used here: it exists for local
+        # work in progress, and using it in CI would make the gate decorative.
+        run: pnpm test:ec
+      - name: edge-case ledger is not stale
+        run: node scripts/gen-edge-cases.mjs --check
+
+  # ---------------------------------------------------------------------------------------------
+  # The TypeScript test suite, sharded so a failure points at a package instead of at "the suite".
+  # ---------------------------------------------------------------------------------------------
+  test-node:
+    name: tests (node, ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: unit and integration tests
+        run: pnpm vitest --run --shard=${{ matrix.shard }}/3
+      - name: upload junit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-node-${{ matrix.shard }}
+          path: '**/reports/junit.xml'
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------------------------
+  # Python. Kept in its own job because the failure vocabulary is different (pytest, ruff, uv) and
+  # because a broken VI pin should fail in 60s rather than after the Node suite.
+  # ---------------------------------------------------------------------------------------------
+  test-python:
+    name: tests (vi-service)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/vi
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.12.22'
+          enable-cache: true
+      - name: pin Python 3.13 (spec §4 — the version the VI library was verified against)
+        run: uv python pin 3.13
+      - run: uv sync --frozen --extra dev
+      - name: ruff
+        run: uv run ruff check src tests
+      - name: ruff format
+        run: uv run ruff format --check src tests
+      - name: pytest
+        run: uv run pytest --junitxml=reports/junit.xml
+      - name: assert the pinned VI library is the one we think it is
+        # A floating dependency here would silently change the crypto core. The pin is in
+        # pyproject.toml and uv.lock, but the lock could be regenerated by mistake, so assert the
+        # installed distribution's direct URL against the commit the spec fixed (spec D2, [B1]).
+        run: |
+          set -euo pipefail
+          EXPECTED=356c29635f1c44df7de02edb58699ca9f29bece6
+          ACTUAL=$(uv pip show verifiable-intent 2>/dev/null | sed -n 's/^Direct-URL: //p' || true)
+          echo "direct_url=$ACTUAL"
+          case "$ACTUAL" in
+            *"$EXPECTED"*) echo "ok: VI library pinned to $EXPECTED" ;;
+            *) echo "FAIL: expected the pinned commit $EXPECTED, got '$ACTUAL'" >&2; exit 1 ;;
+          esac
+      - name: upload junit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-python
+          path: apps/vi/reports/junit.xml
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------------------------
+  # Builds. `main` must always build (AGENTS.md rule 1).
+  # ---------------------------------------------------------------------------------------------
+  build:
+    name: build (web + packages + worker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: build
+        run: pnpm build
+        env:
+          # A build must not need real credentials. Next inlines NEXT_PUBLIC_* at build time and
+          # route handlers read env at request time, so the app compiles against placeholders. The
+          # one thing it must not do is *validate* the environment at build time — that happens on
+          # first request, which is why /status exists (spec §8.19).
+          APP_ENV: ci
+          PUBLIC_BASE_URL: https://ci.countersign.invalid
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+          SESSION_SECRET: ci-only-not-a-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxx
+          PAYPAL_ENV: sandbox
+          PAYPAL_API_BASE: https://api-m.sandbox.paypal.com
+          PAYPAL_CLIENT_ID: ci
+          PAYPAL_CLIENT_SECRET: ci
+          OPENAI_API_KEY: ci
+          VI_SERVICE_URL: http://127.0.0.1:8000
+          VI_SERVICE_TOKEN: ci-only-not-a-secret-xxxxxxxxxxxxxxxxxxxx
+          VI_KEK: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+          VI_ISSUER_KID: issuer-1
+          VI_MERCHANT_KID: merchant-1
+          GATE_KID: gate-1
+          GATE_SIGNING_KEY: '{"kty":"EC","crv":"P-256","x":"","y":"","d":""}'
+      - name: upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: apps/web/.next/trace
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------------------------
+  # The one gate that can fail on a laptop with no database and no credentials: does the schema
+  # still produce DDL, and is the seed still idempotent? Runs against a real Postgres 17 service
+  # container so a broken migration cannot merge.
+  # ---------------------------------------------------------------------------------------------
+  db-migrations:
+    name: migrations + seed against postgres 17
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:17
+        env:
+          POSTGRES_USER: countersign
+          POSTGRES_PASSWORD: countersign
+          POSTGRES_DB: countersign
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U countersign -d countersign"
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://countersign:countersign@localhost:5432/countersign
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: migrate
+        run: pnpm db:migrate
+      - name: migrate again (AT-M2.1 — must be a no-op)
+        run: pnpm db:migrate
+      - name: seed
+        run: pnpm db:seed
+      - name: seed again (AT-M2.2 — must be idempotent)
+        run: pnpm db:seed
+      - name: assert no money column is a float
+        # The structural money rule. A `numeric` or `doublePrecision` money column would pass every
+        # unit test in the repo and still lose a cent in production, so it is asserted against the
+        # live schema rather than against the TypeScript.
+        run: |
+          set -euo pipefail
+          BAD=$(psql "$DATABASE_URL" -Atc "
+            SELECT table_name || '.' || column_name || ' :: ' || data_type
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND data_type IN ('double precision', 'real', 'numeric', 'money')
+              AND (
+                column_name LIKE '%minor%' OR column_name LIKE '%amount%'
+                OR column_name LIKE '%total%'   OR column_name LIKE '%price%'
+                OR column_name LIKE '%budget%'  OR column_name LIKE '%cap%'
+                OR column_name LIKE '%spent%'  OR column_name LIKE '%reserved%'
+              );
+          ")
+          if [ -n "$BAD" ]; then
+            echo "FAIL: money columns must be bigint + char(3) currency (spec §0):" >&2
+            echo "$BAD" >&2
+            exit 1
+          fi
+          echo "ok: every money column is an integer"
+
+  # ---------------------------------------------------------------------------------------------
+  # Everything must pass. Required, not advisory — see AGENTS.md rule 1.
+  # ---------------------------------------------------------------------------------------------
+  all-gates-green:
+    name: all gates green
+    if: always()
+    needs: [secret-scan, static, test-node, test-python, build, db-migrations]
+    runs-on: ubuntu-latest
+    steps:
+      - name: fail if any job failed
+        run: |
+          set -euo pipefail
+          echo '${{ toJSON(needs) }}'
+          RESULT="${{ needs.*.result }}"
+          if echo "$RESULT" | grep -qv success; then
+            echo "FAIL: at least one gate did not pass." >&2
+            echo "$RESULT" | tr ' ' '\n' | grep -v success >&2 || true
+            exit 1
+          fi
+          echo "ok: every gate passed"

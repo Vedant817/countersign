@@ -137,8 +137,9 @@ function main() {
         if (code.trim() === '') return
         for (const rule of RULES) {
           rule.re.lastIndex = 0
-          let m
-          while ((m = rule.re.exec(code)) !== null) {
+          // The match itself is not needed — the rule's own message explains what to do — so the
+          // loop only advances the regex.
+          while (rule.re.exec(code) !== null) {
             if (rule.exemptLine && rule.exemptLine.test(line)) continue
             if (rule.requireLine && !rule.requireLine.test(line)) continue
             violations.push({ file: rel, line: i + 1, id: rule.id, snippet: line.trim(), why: rule.why })

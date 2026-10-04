@@ -65,9 +65,18 @@ function walk(dir, out = []) {
 const ID_RE = /\b(EC-[A-Z]+-\d+)\b/g
 
 /**
- * Walks each test file line by line, keeping a small context window above the current line so an
- * `EC-…` marker in a comment (`// EC-WH-4 forged webhook`) also counts. Records the enclosing
- * `it(`/`test(`/`def test_` title plus a test-function name when one exists.
+ * Walks a test file and attributes every `EC-…` reference to the test that encloses it.
+ *
+ * The attribution rule is deliberately strict: a reference counts only if it appears **inside** a
+ * test, between one test declaration and the next. An earlier version used a fixed 2-line lookbehind,
+ * which credited an EC id mentioned in a file-header comment or an import block — so a file could
+ * claim coverage for a case no test actually touches, and the published ledger would overstate
+ * itself. A ledger that lies is worse than no ledger.
+ *
+ * A reference may therefore be:
+ *  - in the test's own title, e.g. `it('EC-CAP-1 partial capture …')`,
+ *  - in a comment on the lines immediately above it (the convention AGENTS.md asks for), or
+ *  - anywhere in the body, which is what lets one test legitimately close several cases.
  */
 function scan(file) {
   const src = readFileSync(file, 'utf8')
@@ -75,29 +84,37 @@ function scan(file) {
   const hits = []
   const rel = relative(ROOT, file).split(sep).join('/')
 
-  let fnName = null
-  const fnStack = []
+  // A test declaration starts a new attribution window; anything before the first one is file scope.
+  const isTestDecl = (line) =>
+    /\b(?:it|test|describe)\s*\(/.test(line) || /^\s*def\s+(test_[A-Za-z0-9_]+)/.test(line)
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
+  const descRe = /\b(?:it|test|describe)\s*\(\s*(['"`])(.*?)\1/
+  const fnRe = /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)/
+  const pyDefRe = /^\s*def\s+(test_[A-Za-z0-9_]+)/
 
-    const pyDef = line.match(/^\s*def\s+(test_[A-Za-z0-9_]+)/)
-    const tsFn = line.match(/^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)/)
-    const desc = line.match(/\b(?:it|test|describe)\s*\(\s*(['"`])(.*?)\1/)
-    if (pyDef || tsFn) {
-      fnName = (pyDef ?? tsFn)[1]
-      fnStack.push(fnName)
+  let openTest = null // { line, title, fn }
+  const closed = []
+
+  lines.forEach((line, i) => {
+    const lineNo = i + 1
+
+    if (isTestDecl(line)) {
+      if (openTest) closed.push(openTest)
+      const d = line.match(descRe)
+      const f = line.match(pyDefRe) ?? line.match(fnRe)
+      openTest = { line: lineNo, title: d ? d[2] : null, fn: f ? f[1] : null }
     }
-    if (desc) fnName = fnName ?? null
 
-    const window = [lines[i - 2], lines[i - 1], line].filter(Boolean).join('\n')
-    const found = window.match(ID_RE)
-    if (!found) continue
-
+    // Only credit references inside an open test window.
+    if (!openTest) return
+    const found = line.match(ID_RE)
+    if (!found) return
     for (const id of new Set(found)) {
-      hits.push({ id, file: rel, line: i + 1, title: desc ? desc[2] : null, fn: fnName })
+      hits.push({ id, file: rel, line: lineNo, title: openTest.title, fn: openTest.fn })
     }
-  }
+  })
+  if (openTest) closed.push(openTest)
+
   return hits
 }
 
@@ -228,7 +245,7 @@ function main() {
   const badStatus = rows.filter((r) => !['todo', 'wip', 'done', 'blocked', 'dropped'].includes(r.status))
   const blockedNoReason = rows.filter((r) => r.status === 'blocked' && !r.blockedReason)
 
-  const generatedAt = new Date().toISOString().replace('T', ' ').slice(0, 16) + 'Z'
+  const generatedAt = `${new Date().toISOString().replace('T', ' ').slice(0, 16)}Z`
   writeFileSync(DOC, render(rows, generatedAt))
 
   const total = rows.length
@@ -238,12 +255,19 @@ function main() {
   for (const r of rows.filter((x) => x.testCount === 0)) {
     console.log(`  ✗ ${r.id.padEnd(12)} ${statusOf(r).padEnd(20)} ${r.scenario.slice(0, 60)}`)
   }
+  if (claimedNotDone.length) {
+    // Not a failure, but it is the state that lets a ledger overstate itself: a test exists and
+    // nobody has confirmed the handling is actually in place. Surfacing it is the point.
+    console.log(`\n  ${claimedNotDone.length} case(s) have a test but are still status "todo" —`)
+    console.log('  confirm the handling is real, then set status "done" in docs/edge-cases.json:')
+    for (const r of claimedNotDone) console.log(`    · ${r.id}  ${r.scenario.slice(0, 54)}`)
+  }
   if (unknown.length) {
     console.log('\n  References to ids that are not in the spec catalogue:')
     for (const u of unknown) console.log(`    ? ${u.id} at ${u.file}:${u.line}`)
   }
   console.log('─'.repeat(72))
-  console.log(`  wrote docs/EDGE_CASES.md`)
+  console.log('  wrote docs/EDGE_CASES.md')
   console.log(`  ${rows.reduce((n, r) => n + r.testCount, 0)} test references total\n`)
 
   const problems = []

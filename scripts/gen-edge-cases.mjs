@@ -143,15 +143,66 @@ function main() {
     cases: rows,
   }
 
-  const next = JSON.stringify(payload, null, 2) + '\n'
+  // Trailing newline so the file is POSIX-clean and diffs stay small.
+  const next = `${JSON.stringify(payload, null, 2)}\n`
 
   if (process.argv.includes('--check')) {
-    const current = existsSync(OUT) ? readFileSync(OUT, 'utf8') : ''
-    if (current !== next) {
-      console.error('docs/edge-cases.json is stale. Run: node scripts/gen-edge-cases.mjs')
+    /**
+     * Compare only the **generated** fields.
+     *
+     * `status`, `notes` and `blockedReason` are hand-maintained and preserved across regeneration.
+     * Comparing the whole file would therefore make `--check` fail forever the moment a human updates
+     * a status — which is exactly what the file is for, and it would train people to ignore the CI
+     * staleness gate. So the check asks the one question it should: *does the spec still say what the
+     * catalogue says it says?*
+     */
+    if (!existsSync(OUT)) {
+      console.error('docs/edge-cases.json is missing. Run: node scripts/gen-edge-cases.mjs')
       process.exit(1)
     }
-    console.log('docs/edge-cases.json is up to date (109 cases).')
+    const current = JSON.parse(readFileSync(OUT, 'utf8'))
+
+    const GENERATED_KEYS = [
+      'id',
+      'section',
+      'sectionTitle',
+      'wp',
+      'module',
+      'scenario',
+      'detection',
+      'handling',
+      'declaredTest',
+      'userFacing',
+      'specLine',
+    ]
+    const project = (c) => Object.fromEntries(GENERATED_KEYS.map((k) => [k, c[k]]))
+
+    const drift = []
+    if (current.total !== rows.length) {
+      drift.push(`total is ${current.total}, spec §12 now yields ${rows.length}`)
+    }
+    if ((current.cases ?? []).length !== rows.length) {
+      drift.push(`cases array has ${(current.cases ?? []).length} entries, expected ${rows.length}`)
+    } else {
+      for (let i = 0; i < rows.length; i++) {
+        const a = project(current.cases[i])
+        const b = project(rows[i])
+        for (const k of GENERATED_KEYS) {
+          if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) {
+            drift.push(`row ${i + 1} (${rows[i].id}) field "${k}" drifted from the spec`)
+          }
+        }
+      }
+    }
+
+    if (drift.length) {
+      console.error('docs/edge-cases.json is stale relative to the spec:')
+      for (const d of drift.slice(0, 20)) console.error(`  - ${d}`)
+      if (drift.length > 20) console.error(`  … and ${drift.length - 20} more`)
+      console.error('\nRun: node scripts/gen-edge-cases.mjs   (status/notes/blockedReason are preserved)')
+      process.exit(1)
+    }
+    console.log(`docs/edge-cases.json matches spec §12 (${rows.length} cases). Hand-maintained fields intact.`)
     return
   }
 

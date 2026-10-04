@@ -304,3 +304,47 @@ latency optimisation. Knowing which events are fictional changes what the reconc
 a cron that assumes a webhook will tell an expired authorisation to a buyer is a wrong statement
 about money.
 **Evidence:** audit items 14 and 26; `components/event_names` in the PayPal OpenAPI specs.
+## D-017 — How `docs/EDGE_CASES.md` decides what "covered" means
+
+**Date:** 2026-10-04
+**Decision:** Three statuses, enforced by `scripts/ec-coverage.mjs`:
+
+| Status | Meaning | Gate |
+|---|---|---|
+| `done` | handling exists **and** a test exercises it **and** nothing else is owed | counts as covered |
+| `wip` | a real test exists for the part that is built, but the owning work package has not landed | not covered; reported separately |
+| `blocked` | cannot be done in sandbox; `blockedReason` is **required** | allowed to be uncovered |
+
+Anything else uncovered fails CI. Two supporting decisions matter more than the table:
+
+1. **An EC reference only counts if it appears inside a test body** — between one test declaration and
+   the next. An earlier version credited a 2-line lookbehind, which meant an EC id mentioned in a
+   file header or an import block counted as coverage. A ledger that overstates itself is worse than
+   no ledger, because §14's SLOs and the README's eval table are meant to be checkable by a judge.
+2. **`gen-edge-cases.mjs --check` compares only the spec-derived fields**, not `status`/`notes`/
+   `blockedReason`. Those three are hand-maintained, so a whole-file comparison would make the
+   staleness gate fail forever the moment a human did the job the file exists for — which trains
+   people to ignore the gate. The check now asks the only question that matters: *does the spec still
+   say what the catalogue says it says?* Verified by temporarily editing the spec and confirming the
+   check fires on exactly the changed row.
+
+**Current state:** 38 of 109 cases have a referencing test — 24 `done`, 15 `wip`, 1 `blocked`
+(EC-TIME-3, see D-009). The other 71 are unclaimed. Every `wip` note names the work package that owes
+the rest, so the ledger doubles as the queue for WP-21.
+
+## D-018 — The Gate LLM ban is an ESLint rule, not a convention
+
+**Date:** 2026-10-04
+**Decision:** `eslint.config.mjs` applies `no-restricted-imports` to `packages/gate/**/*.ts`, banning
+`ai`, `@ai-sdk/*`, `openai` and `@anthropic-ai/*`, with a message pointing at spec §8.10.
+**Reason:** Core invariant I-1 (§3.1) is that no money moves without a Gate `ALLOW`, and §8.10 says
+"**No LLM** anywhere in M10". That is the project central claim, and a line in a README is not a
+control — the first well-meaning refactor that reaches for a model to "make the Gate smarter" would
+silently make the product core claim false. A lint error makes that impossible to merge.
+**Honest limit:** this is a *direct-import* control. An LLM reached by reflection, or through a
+package that wraps one, would not be caught. The mitigation is that `packages/gate` dependency list
+is reviewed alongside this rule, and that `jose` — the only crypto dependency — has no transitive
+runtime dependency that could pull in a model client.
+**Evidence:** `eslint.config.mjs` `GATE_LLM_BAN`. The rule is active in `pnpm lint` today; the Gate
+package is still a stub, so the ban gets its first real exercise in WP-10 — which is exactly why the
+WP-10 reviewer should check it rather than assume it.
