@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "eval": "vitest run --config vitest.eval.config.ts"
+    "eval:ci": "vitest run test/eval.ci.test.ts",
+    "eval:live": "tsx eval/run-live.ts",
+    "test:eval:live": "vitest run --config vitest.eval.config.ts"
   },
   "dependencies": {
     "@countersign/core": "workspace:*",

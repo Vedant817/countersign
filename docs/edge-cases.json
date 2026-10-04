@@ -537,7 +537,7 @@
       "userFacing": "\"Your limit is in ₹. This store charges in $. Create a $ mandate\"",
       "specLine": 1130,
       "status": "done",
-      "notes": "Handled in packages/core (WP-01): currency mismatch throws instead of converting"
+      "notes": "packages/compiler/src/compile.ts validates the compiled currency against the mandate's currency and never converts. A request naming two currencies raises a blocking ambiguity (src/ambiguity.ts::currencyAmbiguity) rather than picking one, because picking would be choosing a currency AND a number the user never wrote. Tests: packages/compiler/test/compile.test.ts, test/ambiguity.test.ts."
     },
     {
       "id": "EC-FX-2",
@@ -596,7 +596,7 @@
       "userFacing": "n/a",
       "specLine": 1134,
       "status": "done",
-      "notes": "Handled in packages/core (WP-01): fromPayPalValue refuses sub-minor precision; boundary schemas refuse JS numbers"
+      "notes": "Every amount the compiler produces goes through fromPayPalValue, so a model emitting \"129.995\" is refused with CS_ROUNDING rather than rounded. packages/compiler/src/literal.ts and src/constraints.ts; test/literal.test.ts asserts the model-supplied string is parsed, never coerced."
     },
     {
       "id": "EC-FX-6",
@@ -611,7 +611,7 @@
       "userFacing": "n/a",
       "specLine": 1135,
       "status": "done",
-      "notes": "apps/vi/src/vi_service/checkout_jwt.py emits integer minor units plus a currency code, ported from the reference helper which uses float dollar strings. Tests: apps/vi/tests/test_checkout_jwt.py assert no float appears in the signed payload."
+      "notes": "Compiled amounts are integer minor units end to end; the read-back renderer uses core.formatMoney, and the JPY (zero minor digit) case is pinned in a snapshot. Test: packages/compiler/test/readback.test.ts."
     },
     {
       "id": "EC-PRICE-1",
@@ -898,7 +898,8 @@
       "declaredTest": "E",
       "userFacing": "\"This device is new. Reconnect PayPal to create a key. Your existing mandates still work; revoke them?\"",
       "specLine": 1170,
-      "status": "todo"
+      "status": "wip",
+      "notes": "Client half done: packages/vi-client maps a finalize failure to VI_SIGNATURE_MISMATCH rather than a generic error, which is the branch the re-enrolment UI hangs on (test/client.test.ts). The browser side — IndexedDB empty -> Device LOST -> new enrolment -> old mandates keep working until expiry — is WP-05."
     },
     {
       "id": "EC-KEY-2",
@@ -1512,7 +1513,8 @@
       "declaredTest": "I",
       "userFacing": "Clear fallback messages",
       "specLine": 1255,
-      "status": "todo"
+      "status": "done",
+      "notes": "compile() maps a provider timeout or outage to LLM_UNAVAILABLE with retryable:true, and never returns a partially-filled CompiledMandate, which is what lets the UI fall back to the manual constraint form. Test: packages/compiler/test/compile.test.ts."
     },
     {
       "id": "EC-LLM-2",
@@ -1527,7 +1529,7 @@
       "userFacing": "n/a",
       "specLine": 1256,
       "status": "done",
-      "notes": "Handled in packages/core (WP-01): parseOr/parseEnv: one invalid value is reported, never guessed"
+      "notes": "One repair retry with the schema issues listed, then a typed failure. A model answer that fails its zod schema never becomes a constraint. Test: packages/compiler/test/compile.test.ts."
     },
     {
       "id": "EC-LLM-3",

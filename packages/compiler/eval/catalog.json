@@ -1,0 +1,84 @@
+{
+  "_comment": "The catalog every compiler eval runs against. Committed rather than generated so the cached CI run and the live nightly run score the *same* items, and a score is comparable between them. Prices are integer minor units (spec §0); the loader turns them into bigint, so no amount is ever a float. Mirrors packages/compiler/test/helpers.ts, and test/eval.golden.test.ts asserts the two agree.",
+  "merchants": [
+    { "id": "mrc_northwind", "name": "Northwind Outfitters", "website": "https://northwind.countersign.test" },
+    { "id": "mrc_contoso", "name": "Contoso Supply", "website": "https://contoso.countersign.test" },
+    { "id": "mrc_fabrikam", "name": "Fabrikam Home", "website": "https://fabrikam.countersign.test" }
+  ],
+  "skus": [
+    {
+      "id": "SKU-TRAIL-42",
+      "title": "Trail Runner",
+      "merchantId": "mrc_northwind",
+      "priceMinor": 12999,
+      "currency": "USD",
+      "attributes": { "size": "M", "colour": "Slate", "model": "TR-2" },
+      "inStock": true
+    },
+    {
+      "id": "SKU-ALPINE-07",
+      "title": "Alpine Boot",
+      "merchantId": "mrc_northwind",
+      "priceMinor": 8999,
+      "currency": "USD",
+      "attributes": { "size": "L", "colour": "Sand", "model": "AB-1" },
+      "inStock": true
+    },
+    {
+      "id": "SKU-RAIN-11",
+      "title": "Rain Shell",
+      "merchantId": "mrc_northwind",
+      "priceMinor": 4500,
+      "currency": "USD",
+      "inStock": false
+    },
+    {
+      "id": "SKU-CAMP-19",
+      "title": "Camp Stove",
+      "merchantId": "mrc_northwind",
+      "priceMinor": 5999,
+      "currency": "USD",
+      "inStock": true
+    },
+    {
+      "id": "SKU-COFFEE-3",
+      "title": "House Blend 250g",
+      "merchantId": "mrc_contoso",
+      "priceMinor": 1850,
+      "currency": "USD",
+      "inStock": true
+    },
+    {
+      "id": "SKU-TEA-5",
+      "title": "Sencha 100g",
+      "merchantId": "mrc_contoso",
+      "priceMinor": 2400,
+      "currency": "USD",
+      "inStock": true
+    },
+    {
+      "id": "SKU-CHAI-9",
+      "title": "Masala Chai 100g",
+      "merchantId": "mrc_contoso",
+      "priceMinor": 34000,
+      "currency": "INR",
+      "inStock": true
+    },
+    {
+      "id": "SKU-LAMP-2",
+      "title": "Desk Lamp",
+      "merchantId": "mrc_fabrikam",
+      "priceMinor": 3200,
+      "currency": "GBP",
+      "inStock": true
+    },
+    {
+      "id": "SKU-MUG-4",
+      "title": "Stoneware Mug",
+      "merchantId": "mrc_fabrikam",
+      "priceMinor": 1400,
+      "currency": "GBP",
+      "inStock": true
+    }
+  ]
+}
