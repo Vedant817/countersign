@@ -59,6 +59,7 @@ import type { WebhookHeaders } from '@countersign/paypal'
 import { storedEventBody, storedHeaders, storedRawBytes, verifyDelivery } from './signature'
 import {
   compareRankedState,
+  disputeStageOf,
   rankAuthorization,
   rankCapture,
   rankDispute,
@@ -693,10 +694,22 @@ export async function ingestDispute(
       fixedWithoutWebhook,
     )
   }
+  // `disputeStageOf(next)`, not `String(dispute.dispute_life_cycle_stage ?? 'INQUIRY') as Stage`.
+  //
+  // The cast version was *not* a live bug — the `!next.known` guard above already returns before this
+  // line, so an unrecognised stage could never reach the write, and a probe confirms
+  // `rankDispute({stage: 'BRAND_NEW_STAGE'}).known === false`. WP-15e reported it as a crash risk and
+  // that reading was wrong.
+  //
+  // But it was correct only by accident of ordering. `disputeStageOf` exists precisely for this call,
+  // re-derives the stage from the rank the comparison already vouched for, and returns `null` rather
+  // than a guess — so the two properties that make the write safe live in one place instead of one
+  // place plus a reader's memory about the line above. Verified equal for every recognised stage, so
+  // this changes nothing observable.
   const written = await deps.store.aggregates.disputes.upsertFromFetch({
     paypalDisputeId,
     id: (local.value?.id ?? derivedDisputeId(paypalDisputeId)) as DisputeId,
-    stage: String(dispute.dispute_life_cycle_stage ?? 'INQUIRY') as UpsertDisputeInputStage,
+    stage: disputeStageOf(next) as UpsertDisputeInputStage,
     status: status as UpsertDisputeInputStatus,
     reason: str(dispute.reason) ?? 'UNSPECIFIED',
     amount: disputeAmount(dispute),

@@ -98,6 +98,15 @@ export type DisputeActionName =
   | 'ACK_RETURN'
   | 'SUPPORTING_INFO'
   | 'ESCALATE'
+  /**
+   * A refund we issued against the capture.
+   *
+   * Beyond spec §7.2's eight values, added with migration `0002`. `ACCEPT` means *we conceded the
+   * buyer's claim to PayPal*; a refund issued in settlement is a different act, and recording the most
+   * common outcome in the product as something else makes the S-17 timeline and any audit of whether we
+   * contested inaccurate. See docs/DECISIONS.md D-028.
+   */
+  | 'REFUND'
 
 /**
  * The rule ids. **Fourteen come from spec §8.15's table verbatim; seven are extensions.**

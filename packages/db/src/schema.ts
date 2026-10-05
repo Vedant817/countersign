@@ -315,6 +315,19 @@ export const disputeActionEnum = pgEnum('dispute_action', [
   'ACK_RETURN',
   'SUPPORTING_INFO',
   'ESCALATE',
+  /**
+   * A refund we issued against this capture.
+   *
+   * **Not in spec §7.2's list** (`FILE/OFFER/ACCEPT/MESSAGE/APPEAL/ACK_RETURN/SUPPORTING_INFO/
+   * ESCALATE`), and added because the omission misrepresents what happened. A `REFUND`-posture dispute
+   * is the Defender's most common outcome — `R-OTHER-REFUND` alone refunds by default — and it was
+   * being recorded as `ACCEPT`. That is not a naming preference: `ACCEPT` means *we conceded the
+   * buyer's claim to PayPal*, and a refund issued in settlement is a different act with different
+   * consequences. Anything reading `dispute_actions.action` alone — the S-17 timeline, an audit, a
+   * judge's question about whether we contested — would have been reading a lie about our own
+   * behaviour. See docs/DECISIONS.md D-028.
+   */
+  'REFUND',
 ])
 
 export const privacyRequestKindEnum = pgEnum('privacy_request_kind', ['EXPORT', 'ERASE'])
@@ -964,6 +977,18 @@ export const refunds = pgTable(
     actor: text('actor'),
     /** Free-text justification stored with the refund; the router/notes reference it. */
     note: text('note'),
+    /**
+     * When PayPal reported the refund **settled**, as opposed to when we created it.
+     *
+     * Null while `status` is `PENDING` or `FAILED`. `R-REF-1` asks "have we already refunded this?",
+     * and that is a question about settled money: PayPal settles a refund days after it is created, so
+     * `created_at` answers "yes" for one that later failed and for one still in flight. Getting it wrong
+     * is expensive in both directions — contesting an already-refunded capture wastes one of the
+     * merchant's response attempts, and accepting a claim already paid costs the money twice.
+     *
+     * Added beyond spec §7.2, which lists no `completed_at` on `refunds`. See docs/DECISIONS.md D-028.
+     */
+    completed_at: ts('completed_at'),
     ...paypalMirror(),
     created_at: createdAt(),
     updated_at: updatedAt(),
@@ -973,6 +998,11 @@ export const refunds = pgTable(
     index('refunds_capture_id_idx').on(t.capture_id),
     // The buyer-facing "refund processing" timeline.
     index('refunds_status_created_at_idx').on(t.status, t.created_at),
+    // The Defender's `R-REF-1` asks "have we already refunded this?". That is a question about
+    // **settled** money, not about when the row was written — PayPal settles a refund days after it is
+    // created, so a `created_at` answer says yes for one that later failed and for one still in flight.
+    // Added with `completed_at`; see docs/DECISIONS.md D-028.
+    index('refunds_capture_completed_at_idx').on(t.capture_id, t.completed_at),
     check('refunds_amount_minor_non_negative', sql`${t.amount_minor} >= 0`),
   ],
 )

@@ -163,3 +163,11 @@ export type {
   ShipmentFacts,
   SpecRuleId,
 } from './types'
+
+// --- WP-15e: the filer and ingest (signature list in README-FILER.md) -------------------------------------
+export { fileDispute, narrowPlanToPermit, uploadPermitFor, withCheckedNotes } from './filer'
+export { buildDisputeContext, ingestDisputeToDefender, joinDisputeToOrder } from './ingest'
+
+// --- WP-16: the Strategist -----------------------------------------------------------------------------------
+export { proposeStrategy, proposeStrategyDeterministic } from './strategist'
+export { executeStrategy } from './strategist-actions'

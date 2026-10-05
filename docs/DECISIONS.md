@@ -602,3 +602,77 @@ positive case trustworthy; and the symbol survives every scale the renderer migh
 module), because a code that scans only on a developer laptop is worse than no code at all.
 
 **Evidence:** `packages/defender/test/qr-decode.test.ts`. `jsqr` is dev-only and ships in nothing.
+
+## D-027 — The root test run timed out because of unbounded worker parallelism, not slow tests
+
+**Date:** 2026-10-05 · **Raised by:** WP-15e observing 7 failures in the root run that passed per-package
+**Decision:** The run-wide vitest flags (`--testTimeout=20000 --hookTimeout=30000 --maxWorkers=6`) live
+in `package.json`'s `test` script, and CI calls `pnpm test:ci` rather than `pnpm vitest`.
+
+**Reason — the honest sequence, because the first fix was wrong.**
+
+1. `pnpm test` (root, 70 files) reported `Test timed out in 5000ms` in nine files. `pnpm --filter <pkg>
+   test` passed the same tests. So the tests were fine and the two runs disagreed.
+2. **First attempt:** put `testTimeout` and `maxWorkers` in `vitest.workspace.ts`. That changed *which*
+   tests failed and they still said 5000 ms — so it did nothing. A Vitest workspace root
+   `test` block supplies project **discovery**; per-project options come from each project config, and
+   the root run-wide knobs are not applied to them.
+3. **What the real cause looked like,** once the timeouts were out of the way:
+   `[vitest-pool]: Failed to start forks worker for test files …`. On 24 cores vitest defaults to ~23
+   fork workers for 70 files. Each is a separate Node process, and several suites are CPU-bound *and*
+   memory-heavy — 2,000 Ed25519 verifications, PDF rendering with font subsetting, a 515 KB TTF in the
+   graph, QR rasterising. Twenty-three of those thrash, and every test that was genuinely working
+   slowly is reported as a timeout.
+4. So the cause is **unbounded parallelism**. A timeout increase only moved the symptom, and it is
+   worth naming that as a mistake: the four "fixes" before this one (per-test `{timeout}` overrides on
+   the fuzz suite, the race property test, the 20k-ULID test) were each treating a configuration defect
+   as a test defect.
+
+**CI-relevant, not a local quirk.** GitHub standard runners are 2-core. The unsharded default would
+have failed there identically, and CI was calling `pnpm vitest --run --shard=N/3`, which bypasses the
+npm script and therefore the flags — so the bug was on the path to a green build as well.
+
+**Fixed worker count, not a derived one.** A machine-dependent `maxWorkers` makes the suite behave
+differently on a laptop and on a runner, so a timeout that passes locally can still fail in CI. A
+reproducible run is worth more than the four minutes saved.
+
+**Side finding worth keeping:** `drizzle-kit` 0.31.11 **swallows migration errors and exits 1 with no
+diagnostic at all** — 272 characters of output, no error line. It is reached whenever the database has
+tables but no drizzle journal, which is a real state (a partially-applied deploy, a restored dump).
+`pnpm db:migrate` failing in CI or in Render 's `preDeployCommand` would therefore be a red build
+with no stated reason. Exit codes are still correct, so the gate holds; the diagnosis is what is
+missing.
+
+## D-028 — Two schema gaps the Defender found by reading §7.2 against real behaviour
+
+**Date:** 2026-10-05 · **Raised by:** WP-15e · **Spec item:** §7.2 `refunds`, `dispute_actions`
+**Decision:** Migration `0002_refunds_completed_at_and_refund_action` adds `refunds.completed_at` and
+adds `REFUND` to the `dispute_action` enum. Both are additions; no data is rewritten and no column is
+dropped, so it is safe to apply to a database that already holds disputes.
+
+**1. `refunds.completed_at`.** `R-REF-1` asks "have we already refunded this?", which is a question
+about **settled** money. PayPal settles a refund days after we create it, so reading `created_at`
+answers "yes" for a refund that later failed and for one still in flight. The error is expensive in
+both directions: contesting an already-refunded capture wastes one of the merchant's response
+attempts, and accepting a claim already paid costs the money twice. Spec §7.2 lists no such column.
+
+**2. `dispute_action` gains `REFUND`.** Spec §7.2 lists eight values, none of them a refund, so a
+`REFUND`-posture dispute was being recorded as `ACCEPT`. That is not a naming preference: `ACCEPT`
+means *we conceded the buyer's claim to PayPal*, and a refund issued in settlement is a different
+act with different consequences. `R-OTHER-REFUND` alone refunds by default, which makes this the most
+common outcome in the product and the least accurate field in it — anything reading
+`dispute_actions.action` alone, which is the S-17 timeline, an audit, and any judge asking whether we
+contested, would have been reading a lie about our own behaviour.
+
+**Verified against a real Postgres 17:** migrations apply, a second `migrate` is a no-op (AT-M2.1), the
+seed is idempotent twice over (AT-M2.2), the enum lists all nine values including `REFUND`, and the
+column is `timestamp with time zone`.
+
+**A reported crash that was not one.** WP-15e also flagged `packages/webhooks/src/jobs.ts` casting
+`dispute_life_cycle_stage` unchecked, which would fail as Postgres `22P02` inside the store call.
+Probed rather than fixed: `rankDispute({stage: 'BRAND_NEW_STAGE'}).known === false`, and the
+`!next.known` guard returns before the write, so no unrecognised stage can reach the database. Not a
+live bug. It was still changed to `disputeStageOf(next)` — the accessor written for exactly this call,
+which returns `null` rather than a guess — because the cast was correct only by accident of ordering,
+and both safety properties now live in one place instead of one place plus a reader's memory
+about the line above. Verified identical for every recognised stage.

@@ -822,7 +822,8 @@
       "declaredTest": "S (J3)",
       "userFacing": "The packet shows the signed read-back verbatim",
       "specLine": 1420,
-      "status": "todo"
+      "status": "wip",
+      "notes": "R-UNAUTH-1 contests a friendly-fraud UNAUTHORISED claim when the chain verifies and a passkey signed the mandate, and the rationale quotes both the signing time and the L3 the agent key bound. The checkFroThatABrandNewOne test asserts it. The merchant-facing override in S-18 is WP-17e."
     },
     {
       "id": "EC-BUY-5",
@@ -836,7 +837,8 @@
       "declaredTest": "U, S (J4)",
       "userFacing": "\"Your agent bought size 9; you asked for 10. The merchant refunded you\"",
       "specLine": 1421,
-      "status": "todo"
+      "status": "wip",
+      "notes": "R-SNAD-AGENT returns REFUND rather than blaming the buyer when our own agent made the purchase and the read-back is silent on the variant - \"Blaming the buyer for a software misreading is not something we will file\". Verified in rules and eval tests. The agent-side corpus that produces such a dispute is WP-13."
     },
     {
       "id": "EC-BUY-6",
@@ -1158,7 +1160,8 @@
       "declaredTest": "U",
       "userFacing": "Merchant confirm dialog: \"Router says agent fault. Contest anyway?\"",
       "specLine": 1453,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The Strategist may only act within the posture the router gave it, so an AGENT_FAULT recommendation cannot be escalated into a contest by a merchant or a model - permittedActionsFor is derived from the posture, not from the liability label. Test: packages/defender/test/strategist.test.ts. The override control in the UI is WP-17e."
     },
     {
       "id": "EC-DSP-1",
@@ -1173,7 +1176,7 @@
       "userFacing": "Merchant: \"Already refunded on 7 Oct. Filed proof of refund\"",
       "specLine": 1459,
       "status": "done",
-      "notes": "R-REF-1 fires first and returns ACCEPT_CLAIM: a completed refund covering the disputed amount means one refund is being claimed twice, and the refund receipt is the answer. packages/defender/test/router.test.ts."
+      "notes": "R-REF-1 and R-CNP-1 both return ACCEPT_CLAIM with liability ALREADY_REFUNDED, and the filer mints a REFUND_PROOF permit whose posture is the literal ACCEPT_CLAIM - which is what prevents it being passed where a CONTEST permit is required. Uploading PROOF_OF_REFUND is correct here and accept-claim would be wrong: it would ask PayPal to refund money already returned. Test: packages/defender/test/filer.test.ts, test/router.test.ts."
     },
     {
       "id": "EC-DSP-2",
