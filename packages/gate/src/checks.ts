@@ -274,16 +274,61 @@ function fail(n: number, reason: CsError, detail?: string): CheckResult {
 }
 
 /**
- * A check that had nothing to enforce. `passed: false` + `notApplicable: true`, never `passed: true`.
+ * A check that had **nothing to enforce**. `passed: false` + `notApplicable: true`, never `passed: true`.
  *
  * Reporting "not applicable" as a pass would be the D19 lie in a new costume: a constraint the user
  * signed, in the decision record, claimed as enforced when it was not. §8.10's `checks_hash` covers all
  * twelve entries, so the distinction is visible to anyone who re-reads the signed record.
+ *
+ * ## But there are two reasons a check can decline, and only one of them is legitimate
+ *
+ * | Reason | Correct | Example |
+ * |---|---|---|
+ * | The thing checked **does not exist in this request** — nothing to enforce | `notApplicable` | no budget constraint was signed; the wallet has no period cap row |
+ * | The thing checked **should exist and does not** — cannot evaluate what matters | **`missing`, which blocks** | there is no checkout session to bind the cart to |
+ *
+ * The second was implemented as `notApplicable`, and that is QA3-GATE-1 (`critical`, confirmed by
+ * execution): with no checkout session, checks 5 through 10 each declined, `resolveOutcome` treated
+ * `notApplicable` as non-blocking, and the Gate signed an `ALLOW` carrying `amount: "0.00"`,
+ * `payee: ""`, no price lock and no reservation. Six checks declined for one reason, and the record
+ * asserted `chain_valid: true` over a cart that did not exist.
+ *
+ * No money moved, because `packages/orders::loadOrderDraft` re-reads the session independently and
+ * refuses. That is a second line of defence catching the first line's failure, which is not a design
+ * anyone would choose. And it is worse than "no money moved": **the signature is load-bearing.** That
+ * `gate_decisions` row is the evidentiary spine of a dispute packet, so a signed record claiming a
+ * valid chain over a nonexistent cart propagates into evidence an adjudicator is told is
+ * cryptographically sound.
+ *
+ * So the rule is: **`notApplicable` means "nothing to enforce", never "could not enforce".** A missing
+ * subject is a {@link missing}. Two names exist so that is a one-word decision at each call site
+ * rather than a judgement call repeated twelve times.
  */
 function notApplicable(n: number, detail: string): CheckResult {
   return {
     check: { n, code: codeFor(n), passed: false, notApplicable: true, detail },
     reasons: [],
+  }
+}
+
+/**
+ * The subject of this check does not exist, so the check could not evaluate what it exists to
+ * evaluate. **Blocking**, unlike {@link notApplicable}.
+ *
+ * QA3-GATE-1 is what happens when that distinction is not made. `missing` is for a missing *subject*;
+ * `notApplicable` is for an absent *constraint*.
+ */
+function missing(n: number, detail: string): CheckResult {
+  return {
+    check: { n, code: codeFor(n), passed: false, detail },
+    reasons: [
+      {
+        code: 'GATE_CHECK_UNSATISFIABLE',
+        message: detail,
+        userMessage:
+          'We could not check this purchase properly, so we are not allowing it. Nothing has been charged.',
+      },
+    ],
   }
 }
 
@@ -872,7 +917,12 @@ export function recurrenceObligationsMet(
  */
 export async function check5CheckoutBinding(ctx: CheckContext): Promise<CheckResult> {
   const session = await loadSession(ctx)
-  if (!session) return notApplicable(5, 'no checkout session to bind against')
+  // **Blocking**, not `notApplicable` - see the table on `notApplicable` and QA3-GATE-1. Checks 5-10
+  // all hang off this one, so a non-blocking decline here is six checks declining at once and an
+  // `ALLOW` signed over a cart that does not exist.
+  if (!session) {
+    return missing(5, 'no checkout session to bind against, so there is no cart to check')
+  }
 
   const decoded = decodeCheckoutJwt(session.checkout_jwt)
   if (!decoded.ok) {
@@ -946,7 +996,10 @@ export async function check5CheckoutBinding(ctx: CheckContext): Promise<CheckRes
  */
 export async function check6PriceLock(ctx: CheckContext): Promise<CheckResult> {
   const session = ctx.state.checkout ?? (await loadSession(ctx))
-  if (!session) return notApplicable(6, 'no checkout session to price against')
+  // Blocking, for the reason on `notApplicable` and in check 5. Reachable only if check 5 already
+  // declined, but a check must not rely on an earlier check having stopped the run.
+  if (!session)
+    return missing(6, 'no checkout session to price against, so no amount could be locked')
 
   const decoded = decodeL3(ctx.input.l3a)
   ctx.state.l3a = decoded.ok ? decoded.claims : null
@@ -1019,8 +1072,7 @@ export async function check6PriceLock(ctx: CheckContext): Promise<CheckResult> {
  */
 export async function check7Replay(ctx: CheckContext): Promise<CheckResult> {
   const session = ctx.state.checkout ?? (await loadSession(ctx))
-  if (!session)
-    return notApplicable(7, 'no checkout session, so there is no cart to bind the attempt to')
+  if (!session) return missing(7, 'no checkout session, so there is no cart to bind the attempt to')
   const amount = ctx.state.reserveAmount
   if (!amount) return notApplicable(7, 'no amount resolved by check 6')
 
@@ -1091,7 +1143,8 @@ export async function check7Replay(ctx: CheckContext): Promise<CheckResult> {
  */
 export async function check10Stock(ctx: CheckContext): Promise<CheckResult> {
   const session = ctx.state.checkout
-  if (!session) return notApplicable(10, 'no checkout session, so there are no lines to check')
+  // Blocking, for the same reason as check 6.
+  if (!session) return missing(10, 'no checkout session, so the line items cannot be checked')
 
   const lines = cartLines(session)
   if (lines.length === 0) return notApplicable(10, 'the locked cart has no lines')

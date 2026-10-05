@@ -70,16 +70,14 @@ const SCENARIOS: readonly Scenario[] = [
       'The seeded catalog carries prompt-injection payloads in listing_html (packages/db, §8.13).',
       'The Gate decides on the signed chain and our own rows — never on anything a listing says.',
     ],
-    missing: [
-      'The agent that would read those listings is WP-13 and is not wired to a runner.',
-    ],
+    missing: ['The agent that would read those listings is WP-13 and is not wired to a runner.'],
     demonstratedAt:
       'packages/gate/test/fuzz.test.ts (AT-M10.6) — a thousand mutations, 0 ALLOWs. The property being demonstrated is the one that matters: the Gate cannot be moved by data.',
   },
   {
     id: 'J3',
     title: 'UNAUTHORISED dispute → contest → adjudicate SELLER_FAVOR',
-    spec: "J3: `UNAUTHORISED` dispute → contest → adjudicate SELLER_FAVOR.",
+    spec: 'J3: `UNAUTHORISED` dispute → contest → adjudicate SELLER_FAVOR.',
     state: 'partial',
     have: [
       'The Defender exists: route() is a pure rules table, ingestDisputeToDefender re-fetches, and fileDispute files a packet whose every claim is cited to a fact.',
@@ -151,16 +149,16 @@ export default function JudgePage() {
         The four scenarios are not runnable yet.
       </h1>
       <p className="mt-4 max-w-2xl text-pretty text-[--color-ink-soft]">
-        This page is the honest version of Judge Mode. The deterministic core that each scenario exercises
-        exists and is tested — the Gate decides, the order orchestrator moves money only on an{' '}
-        <code>ALLOW</code>, and the Defender files only what it can cite. What does not exist is the runner
-        that drives those four scenarios end to end against the PayPal sandbox with live logs. That runner is{' '}
-        <strong>WP-20</strong>, and it is not built.
+        This page is the honest version of Judge Mode. The deterministic core that each scenario
+        exercises exists and is tested — the Gate decides, the order orchestrator moves money only
+        on an <code>ALLOW</code>, and the Defender files only what it can cite. What does not exist
+        is the runner that drives those four scenarios end to end against the PayPal sandbox with
+        live logs. That runner is <strong>WP-20</strong>, and it is not built.
       </p>
       <p className="mt-3 max-w-2xl text-pretty text-sm text-[--color-ink-soft]">
-        Rather than four buttons that do nothing, here is exactly which part of each scenario exists, which
-        package owns it, and where the working half is demonstrated. Click any link and you are reading a real
-        test, not a promise.
+        Rather than four buttons that do nothing, here is exactly which part of each scenario
+        exists, which package owns it, and where the working half is demonstrated. Click any link
+        and you are reading a real test, not a promise.
       </p>
 
       <section className="mt-8 flex flex-wrap gap-3" aria-label="Scenario counts">
@@ -169,7 +167,9 @@ export default function JudgePage() {
             key={state}
             className="rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] px-4 py-3"
           >
-            <div className="font-mono text-2xl font-semibold text-[--color-ink]">{counts[state]}</div>
+            <div className="font-mono text-2xl font-semibold text-[--color-ink]">
+              {counts[state]}
+            </div>
             <div className="text-xs text-[--color-ink-faint]">{STATE_COPY[state].label}</div>
           </div>
         ))}
@@ -242,13 +242,14 @@ export default function JudgePage() {
       <section className="mt-12 rounded-[--radius-card] border-l-4 border-[--color-blocked] bg-[--color-blocked-soft] p-6">
         <h2 className="font-semibold">One dead path, stated rather than worked around</h2>
         <p className="mt-2 text-sm text-[--color-ink-soft]">
-          J4 is meant to end in an honest refund. It cannot. <code>orders.refund()</code> refuses while a
-          dispute is open on the capture — that is EC-REF-4&rsquo;s detection doing its job — so the
-          Defender&rsquo;s <code>REFUND</code> posture is refused by construction. There is no version of this
-          that gets fixed by reaching around the check: refunding outside the over-refund guard or refunding
-          twice are both worse than the refusal, and a double refund is the single most expensive bug this
-          product could ship. The fix belongs in <code>packages/orders</code> as an explicit, audited
-          &ldquo;merchant conceded a disputed capture&rdquo; mode — it is reported, not patched.
+          J4 is meant to end in an honest refund. It cannot. <code>orders.refund()</code> refuses
+          while a dispute is open on the capture — that is EC-REF-4&rsquo;s detection doing its job
+          — so the Defender&rsquo;s <code>REFUND</code> posture is refused by construction. There is
+          no version of this that gets fixed by reaching around the check: refunding outside the
+          over-refund guard or refunding twice are both worse than the refusal, and a double refund
+          is the single most expensive bug this product could ship. The fix belongs in{' '}
+          <code>packages/orders</code> as an explicit, audited &ldquo;merchant conceded a disputed
+          capture&rdquo; mode — it is reported, not patched.
         </p>
       </section>
 
@@ -258,8 +259,16 @@ export default function JudgePage() {
         </h2>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2">
           {[
-            { href: '/status', label: '/status', body: 'Every dependency probed for real. 200 when it can serve, 503 when a required one is down.' },
-            { href: '/v', label: '/v/…', body: 'The public verifier. Download a packet and check the chain yourself, offline.' },
+            {
+              href: '/status',
+              label: '/status',
+              body: 'Every dependency probed for real. 200 when it can serve, 503 when a required one is down.',
+            },
+            {
+              href: '/v',
+              label: '/v/…',
+              body: 'The public verifier. Download a packet and check the chain yourself, offline.',
+            },
             { href: '/', label: '/', body: 'The landing page, and what the product claims.' },
           ].map((link) => (
             <li key={link.href}>
@@ -276,8 +285,8 @@ export default function JudgePage() {
       </section>
 
       <footer className="mt-16 border-t border-[--color-rule] pt-6 text-sm text-[--color-ink-faint]">
-        A gap that is labelled is worth more than a button that lies. Nothing on this page is generated by a
-        model.
+        A gap that is labelled is worth more than a button that lies. Nothing on this page is
+        generated by a model.
       </footer>
     </div>
   )

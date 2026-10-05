@@ -150,7 +150,11 @@ export async function check8Budget(ctx: CheckContext): Promise<CheckResult> {
   const mandate = ctx.state.mandate
   const amount = ctx.state.reserveAmount
   if (!mandate) return notApplicableBudget(ctx, 8, 'no mandate row: check 1 could not resolve one')
-  if (!amount) return notApplicableBudget(ctx, 8, 'no amount resolved by check 6')
+  // **Blocking.** No amount is not "nothing to enforce" - it is the absence of the thing this check
+  // exists to enforce. See `unsatisfiableBudget` and QA3-GATE-1.
+  if (!amount) {
+    return unsatisfiableBudget(8, 'no amount resolved by check 6, so there is nothing to reserve')
+  }
 
   // (1) The signed ceiling, from the verified chain — and the D19 obligation, discharged or refused,
   // both before anything is written. `pending` is the typed list check 4 built with
@@ -418,7 +422,9 @@ export async function check9WalletCap(ctx: CheckContext): Promise<CheckResult> {
   const mandate = ctx.state.mandate
   const amount = ctx.state.reserveAmount
   if (!mandate) return notApplicableBudget(ctx, 9, 'no mandate row: check 1 could not resolve one')
-  if (!amount) return notApplicableBudget(ctx, 9, 'no amount resolved by check 6')
+  // Blocking, for the same reason as check 8.
+  if (!amount)
+    return unsatisfiableBudget(9, 'no amount resolved by check 6, so there is no spend to cap')
 
   const period = await resolvePeriod(ctx, mandate.walletId)
   if (period.applicable === false) {
@@ -592,6 +598,28 @@ export { RESERVATION_TTL_SECONDS }
 
 function reason(e: CsError) {
   return { code: e.code, message: e.message, userMessage: e.userMessage }
+}
+
+/**
+ * A missing **subject**, so the check could not evaluate what it exists to evaluate. **Blocking.**
+ *
+ * The local twin of `missing()` in `checks.ts`. Duplicated rather than imported because
+ * `checks.ts` imports this file for checks 8 and 9, and an import back would be a cycle. The two must
+ * produce the identical record, so `blocksWhenSubjectMissingIsBlocking` in
+ * `test/missing-subject.test.ts` asserts the codes match rather than trusting the comment.
+ */
+function unsatisfiableBudget(n: number, detail: string): CheckResult {
+  return {
+    check: { n, code: codeFor(n), passed: false, detail },
+    reasons: [
+      {
+        code: 'GATE_CHECK_UNSATISFIABLE',
+        message: detail,
+        userMessage:
+          'We could not check this purchase properly, so we are not allowing it. Nothing has been charged.',
+      },
+    ],
+  }
 }
 
 function notApplicableBudget(ctx: CheckContext, n: number, detail: string): CheckResult {

@@ -42,6 +42,26 @@ export const CS_ERROR_CODES = [
   'GATE_OUT_OF_STOCK',
   'GATE_AGENT_SUSPENDED',
   'GATE_WALLET_CAP',
+  /**
+   * A check could not evaluate the thing it exists to evaluate - the subject was missing.
+   *
+   * Distinct from a check that passed, and distinct from \
+otApplicable\ ("nothing to enforce").
+   * Added for QA3-GATE-1, where a missing checkout session made checks 5-10 decline non-blockingly
+   * and the Gate signed an \ALLOW\ over a cart that did not exist. A buyer seeing this should read
+   * "we could not check this properly", not "you spent too much", and that distinction is the point.
+   */
+  'GATE_CHECK_UNSATISFIABLE',
+  /**
+   * A check could not evaluate the thing it exists to evaluate — the subject was missing.
+   *
+   * Distinct from a check that *passed*, and distinct from `notApplicable` ("nothing to enforce").
+   * Added for QA3-GATE-1, where a missing checkout session made checks 5-10 decline
+   * non-blockingly and the Gate signed an `ALLOW` over a cart that did not exist. A buyer seeing this
+   * should read "we could not check this properly", not "you spent too much" — the message in the
+   * registry below says so, and that distinction is the point.
+   */
+  'GATE_CHECK_UNSATISFIABLE',
   // --- paypal ---
   'PP_AUTH',
   'PP_RATE_LIMITED',
@@ -135,6 +155,8 @@ const USER_MESSAGES: Partial<Record<CsErrorCode, string>> = {
   GATE_PRICE_LOCK_EXPIRED: 'The locked price expired, so the agent needs to re-quote.',
   GATE_OUT_OF_STOCK: 'That item just sold out.',
   GATE_AGENT_SUSPENDED: 'That agent is suspended, so it cannot spend right now.',
+  GATE_CHECK_UNSATISFIABLE:
+    'We could not check this purchase properly, so we are not allowing it. Nothing has been charged.',
   GATE_WALLET_CAP: 'This purchase would pass your wallet-level cap.',
   PP_AUTH: 'We could not authorise with PayPal. Please try again shortly.',
   PP_RATE_LIMITED: 'PayPal is asking us to slow down. We will retry automatically.',
