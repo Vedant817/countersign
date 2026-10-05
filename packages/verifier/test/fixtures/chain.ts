@@ -35,7 +35,7 @@
 
 import { webcrypto, type webcrypto as WebCrypto } from 'node:crypto'
 
-import { currency, fixedClock, type Clock } from '@countersign/core'
+import { currency, fixedClock, toPayPalValue, type Clock } from '@countersign/core'
 import { canonicalJson } from '@countersign/db'
 import { signDecisionRecord } from '@countersign/gate'
 
@@ -83,15 +83,43 @@ export const FIXTURE_MERCHANT = CAPTURED.merchant as { id: string; name: string;
 export const FIXTURE_ITEM = CAPTURED.item as { id: string; title: string }
 
 /**
- * §8.5's deterministic read-back — the text the user *signed*.
+ * §8.8's deterministic read-back — the text the user *signed*.
  *
  * Quoted rather than paraphrased, because a verifier that printed a paraphrase would be printing something no
  * signature covers. EC-MER-6 makes this a required packet field precisely so a merchant cannot omit the part
  * that hurts them.
+ *
+ * ### It is in `readback.ts`'s output form, deliberately
+ *
+ * `readBack()` emits `READBACK_HEADER` first, always, then one line per constraint in `READBACK_ORDER`. So this
+ * fixture is header-first and uses the `**bold**` emphasis around each amount, which is what
+ * `verify-view.ts::readStatedCaps` reads. It is not passed through the real renderer — `fixtures/` cannot
+ * depend on `packages/compiler`, and re-deriving it here would be a second implementation of a template, the
+ * exact antipattern `bundle.ts` exists to avoid. Instead `test/binding.test.ts` asserts the **sentinel**
+ * (`READBACK_HEADER`) agrees with `packages/compiler`'s own constant, so the one string this fixture depends on
+ * cannot drift. The remaining prose is fixture data, and every check that reads it reads it as data.
+ *
+ * The amounts match the capture: the L2's `budget` and `amount_range` both cap at 20 000 minor units of USD,
+ * which is the $200.00 the older paraphrase quoted, and `total_minor` is 13 300 — so the read-back's cap and
+ * the cart's total are different numbers, which is correct and is what `readback_cap_vs_mandate` expects.
  */
-export const FIXTURE_READBACK =
-  'You are allowing the agent "Trail Finder" to buy on your behalf, up to $200.00 in total, only at ' +
-  'Northwind Outfitters, and only items like Trail Runner. This mandate expires on 15 Jan 2027.'
+export const FIXTURE_READBACK = [
+  '**What you are authorising**',
+  'Spend at most **$200.00** in total',
+  'Spend at most **$200.00** per payment',
+  'Only at **Northwind Outfitters**',
+  'Pay only **Northwind Outfitters**',
+  'Buy at least **1** of **Trail Runner**',
+  'This mandate expires **Fri 15 Jan 2027, 11:59 PM**',
+  '',
+  '**How we read your request**',
+  '- We read size "10" and colour "grey" as a preference, not a limit. These are not signed and do not bound ' +
+    'what the agent may buy.',
+  '',
+  '**Not covered**',
+  '- Expiry: there is no automatic renewal. When this mandate expires the agent cannot spend under it again, ' +
+    'even if it meant to.',
+].join('\n')
 
 export const FIXTURE_PREFERENCES: Readonly<Record<string, string>> = { size: '10', color: 'grey' }
 
@@ -186,9 +214,18 @@ export async function makeChainBundle(
       gdc: 'gdc_fixture_000000000000000001',
       att: 'att_fixture_00000000000000001',
       mdt: 'mdt_fixture_00000000000000001',
-      amount: String(CAPTURED.total_minor),
-      // String minor units, never a float: the Gate record's `amount` is what the invariant I-1 is stated in
-      // terms of, and §0 makes it integer minor units end to end (EC-FX-6).
+      // **`toPayPalValue`, not `String(total_minor)`.** `packages/gate/src/evaluate.ts` writes
+      // `amount: amount ? toPayPalValue(amount) : '0.00'`, so the signed payload carries a PayPal *decimal
+      // string* (`"133.00"`, and `"500"` for JPY). This fixture previously wrote the raw minor units
+      // (`"13300"`), which no Gate has ever produced — and it went unnoticed precisely because nothing
+      // compared the record's amount against the price lock. `verify-view.ts::gate_record_amount` now does,
+      // and read the fixture's invented format as a $13,300 decision on a $133.00 cart. The check was right and
+      // the fixture was wrong, which is the direction a fixture bug should be caught in.
+      amount: toPayPalValue({
+        minor: BigInt(CAPTURED.total_minor),
+        currency: currency(CAPTURED.currency),
+      }),
+      // The ISO code, and never a float anywhere: §0 rule 9 / EC-FX-6.
       currency: currency(CAPTURED.currency),
       payee: FIXTURE_MERCHANT.id,
       checks_hash: 'a'.repeat(64),
@@ -329,6 +366,13 @@ export function makeInMemoryStore(options: StoreFixtureOptions): VerifierStore {
             currency: 'USD',
             stage: 'CHARGEBACK',
             status: 'UNDER_REVIEW',
+            // **Present, and this is load-bearing.** `verify-view.ts::paypalDispute_binding` compares these two
+            // against `bundle.paypal`, because they are the only anchor on the page that a holder of a packet
+            // URL cannot recompute — they live on a different row. A fixture whose dispute row carried neither
+            // would leave that check permanently `SKIPPED`, which is the one state in which it proves nothing,
+            // and every test in this package would still pass.
+            capture_id: 'FIXTURECAPTURE001',
+            order_id: 'FIXTUREORDER001',
           } as never,
         }
       },

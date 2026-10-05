@@ -307,6 +307,25 @@ describe('an untampered packet passes every offline check', () => {
     expect(checks.filter((c) => c.status === 'FAIL').map((f) => `${f.id}: ${f.detail}`)).toEqual([])
     expect(checks.filter((c) => c.status === 'SKIPPED').map((s) => s.id)).toEqual([])
 
+    // **The untampered packet is expected to carry `WARN`s, and that is the point.** `readback_binding` and
+    // `preferences_binding` report that no signature covers the consent text, on every packet, forever — not
+    // because this one is deficient but because that is a true statement about §7.3's design. A suite that
+    // asserted "no WARN on a clean packet" would be asserting that the read-back is authenticated, which is
+    // the false claim this work removed. What must hold is that each WARN *names* an uncovered field, so a
+    // reader learns which parts of the page no signature reaches.
+    const warned = checks.filter((c) => c.status === 'WARN').map((c) => c.id)
+    expect(warned).toEqual([
+      'gate_record_attempt',
+      'gate_record_mandate',
+      'readback_binding',
+      'preferences_binding',
+    ])
+    for (const id of warned) {
+      expect(checkOf(checks, id).detail).toMatch(
+        /unverified|uncovered|unauthenticated|not signed|no signature|cannot confirm|only says/i,
+      )
+    }
+
     const ids = checks.map((c) => c.id)
     for (const expected of [
       'bundle_hash',
@@ -318,6 +337,19 @@ describe('an untampered packet passes every offline check', () => {
       'custom_id_binding',
       'checkout_binding',
       'gate_record',
+      'gate_record_amount',
+      'gate_record_currency',
+      'gate_record_payee',
+      'gate_record_attempt',
+      'gate_record_mandate',
+      'gate_record_chain',
+      'gate_record_vi_commit',
+      'gate_record_iat',
+      'paypal_dispute_binding',
+      'readback_rendered',
+      'readback_cap_vs_mandate',
+      'readback_binding',
+      'preferences_binding',
       'vi_lib_commit',
       'l1_disclosures',
     ]) {
@@ -338,9 +370,95 @@ describe('an untampered packet passes every offline check', () => {
     const gate = checkOf(checks, 'gate_record')
     expect(gate.status).toBe('PASS')
     expect(gate.detail).toContain(fixture.gateKid)
-    // And it quotes what the record decided, so a reader sees the claim rather than a tick.
-    expect(gate.detail).toContain('13300 USD')
-    expect(gate.detail).toContain('mrc_northwind')
+    // And it says what it did **not** establish. `gate_record` is the signature row; agreement with the chain
+    // is `gate_record_amount` / `_currency` / `_payee`, and a reader who saw only a tick on the signature would
+    // have been told the packet is sound when nothing had been compared to anything.
+    expect(gate.detail).toMatch(/not that it is about this purchase/i)
+  })
+
+  it('binds the decision record to the price lock, and says which field moved', async () => {
+    const fixture = await makeChainBundle()
+    const { loaded } = await loadedFor(fixture)
+    const checks = await offlineChecks(loaded, CAPTURED_AT_SEC)
+
+    // §3.1 I-1 is stated in terms of the attempt, the amount, the currency and the payee. Three of the four are
+    // comparable against artefacts this bundle carries under a signature.
+    expect(statusOf(checks, 'gate_record_amount')).toBe('PASS')
+    expect(statusOf(checks, 'gate_record_currency')).toBe('PASS')
+    expect(statusOf(checks, 'gate_record_payee')).toBe('PASS')
+    expect(statusOf(checks, 'gate_record_chain')).toBe('PASS')
+    expect(statusOf(checks, 'gate_record_vi_commit')).toBe('PASS')
+    expect(statusOf(checks, 'gate_record_iat')).toBe('PASS')
+
+    expect(checkOf(checks, 'gate_record_amount').detail).toContain('$133.00')
+    expect(checkOf(checks, 'gate_record_payee').detail).toContain('mrc_northwind')
+  })
+
+  it('reports the attempt and mandate ids as uncovered, because no signature in the bundle names either', async () => {
+    const fixture = await makeChainBundle()
+    const { loaded } = await loadedFor(fixture)
+    const checks = await offlineChecks(loaded, CAPTURED_AT_SEC)
+
+    // The record asserts `att` and `mdt`, and there is nothing to compare them against: the L1's `sub` is the
+    // user, the L2 names no mandate, the L3s name no attempt, the price lock names only a checkout id. The
+    // honest status is `WARN` with that reason — **not** `PASS`, and not silence.
+    expect(statusOf(checks, 'gate_record_attempt')).toBe('WARN')
+    expect(statusOf(checks, 'gate_record_mandate')).toBe('WARN')
+    expect(checkOf(checks, 'gate_record_attempt').detail).toContain('att_fixture')
+    expect(checkOf(checks, 'gate_record_attempt').detail).toMatch(
+      /nothing in §7\.3's bundle can confirm/i,
+    )
+  })
+
+  it('states that the read-back and the preferences are covered by no signature', async () => {
+    const fixture = await makeChainBundle()
+    const { loaded } = await loadedFor(fixture)
+    const checks = await offlineChecks(loaded, CAPTURED_AT_SEC)
+
+    // `readback_sha256` PASSES on an untampered packet — it is a real self-consistency check, and EC-MER-6's
+    // anti-omission half depends on it. But it is a digest published inside the document it covers, and the
+    // page must say so rather than let a green tick stand in for "the buyer signed this".
+    expect(statusOf(checks, 'readback_hash')).toBe('PASS')
+    const binding = checkOf(checks, 'readback_binding')
+    expect(binding.status).toBe('WARN')
+    expect(binding.label).toMatch(/no signature in this packet covers the read-back/i)
+    expect(binding.detail).toMatch(/published inside the document it covers/i)
+    expect(binding.detail).toMatch(/one line of work/i)
+    expect(binding.detail).toMatch(/unauthenticated/i)
+    expect(binding.detail).toMatch(/out of the `custom_id` preimage/i)
+
+    // §8.8 says preferences are not signed, in the read-back itself. Same treatment.
+    expect(statusOf(checks, 'preferences_binding')).toBe('WARN')
+    expect(checkOf(checks, 'preferences_binding').detail).toMatch(/not signed/i)
+  })
+
+  it('reads the caps the read-back states, and reports them against the signed ceiling', async () => {
+    const fixture = await makeChainBundle()
+    const { loaded } = await loadedFor(fixture)
+    const checks = await offlineChecks(loaded, CAPTURED_AT_SEC)
+
+    // The L2 caps at 20 000 minor units of USD and the read-back says "$200.00", so the two agree and the
+    // largest stated figure is inside the ceiling.
+    const cap = checkOf(checks, 'readback_cap_vs_mandate')
+    expect(cap.status).toBe('PASS')
+    expect(cap.detail).toContain('$200.00')
+    // And the renderer check passes on the fixture, which is in `readback.ts`'s output form.
+    expect(statusOf(checks, 'readback_rendered')).toBe('PASS')
+  })
+
+  it('binds the packet to the dispute it is filed under, using a row the packet cannot rewrite', async () => {
+    const fixture = await makeChainBundle()
+    const { loaded } = await loadedFor(fixture)
+    const checks = await offlineChecks(loaded, CAPTURED_AT_SEC)
+    const binding = checkOf(checks, 'paypal_dispute_binding')
+    expect(binding.status).toBe('PASS')
+    // **Masked.** §8.18 makes the packet id the page's only identifier, and a check detail is rendered into the
+    // page — so naming the order id in a failure message would put it on the page in the one message written
+    // to help a reader. `test/verify.test.ts`'s page-model case asserts neither id appears in the report at all.
+    expect(binding.detail).not.toContain('FIXTUREORDER001')
+    expect(binding.detail).not.toContain('FIXTURECAPTURE001')
+    expect(binding.detail).toMatch(/masked/i)
+    expect(binding.detail).toMatch(/from the dispute, which is not part of the/i)
   })
 
   it('reports the buyer email as masked and the L1 as disclosing it', async () => {

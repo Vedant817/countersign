@@ -24,11 +24,17 @@
  *
  * ## Why each dependency is required, and what that costs
  *
- * See the route's header for the table. The part that matters here: **`not_configured` is never a failure**,
- * even for a required dependency. A required dependency that is not configured produces `ok: false` at the
- * report level (so Render sees a 503) while the probe row says `not_configured`, because "we have no
- * credentials" and "we tried and it refused" are different diagnoses and an operator needs to tell them
- * apart from a log line.
+ * See the route's header for the table. The part that matters here: `not_configured` is a **third
+ * diagnosis, not a softened `up` and not a synonym for `down`**. The two levels deliberately disagree:
+ *
+ * - The **probe row** says `not_configured`, never `down`, because no call was made. "We have no
+ *   credentials" and "we tried and it refused" are different faults and an operator has to be able to
+ *   tell them apart from one log line.
+ * - The **report** still says `ok: false` (so Render sees a 503), because a required dependency that is
+ *   absent cannot serve a purchase. An instance with no PayPal credentials must not be handed traffic.
+ *
+ * So "never a failure" is true of the row's vocabulary and false of the report's verdict, and it is the
+ * verdict that maps to the HTTP status. `not_configured` buys a clearer diagnosis, not a softer one.
  */
 import { systemClock } from '@countersign/core'
 import { ViClient } from '@countersign/vi-client'

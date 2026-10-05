@@ -11,15 +11,122 @@ claims independently"_ — and the answer is this page plus the file it serves.
 
 ---
 
-## The five source files
+## The six source files
 
-| File             | Owns                                                                                                    | The trap it exists to avoid                                                                                                           |
-| ---------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `bundle.ts`      | RFC 8785 canonicalisation, both digests, SD-JWT decode + resolve, the **raw download** document         | Two implementations of JCS would be two digests for one document, and the hash's whole purpose is that a third party reproduces ours. |
-| `redact.ts`      | the **redacted page** document, `maskEmail`/`maskOpaqueId`, `assertRedactionHolds`                      | "Redacted" that is only hidden by CSS leaves the raw L1 in the page's JSON, and view-source prints it.                                |
-| `verify-view.ts` | the twelve offline checks, the live checks, the report model, `publicPacketUrl`, **AT-M18.2's** limiter | A single green tick would have to hide D-009 (no as-of clock) and D19 (three constraints nobody evaluates).                           |
-| `verify-py.ts`   | the generated offline `verify.py`                                                                       | A code block is not evidence, and a script with no embedded digest proves nothing.                                                    |
-| `types.ts`       | the closed ports and the report types                                                                   | —                                                                                                                                     |
+| File             | Owns                                                                                                                                        | The trap it exists to avoid                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bundle.ts`      | RFC 8785 canonicalisation, both digests, SD-JWT decode + resolve, the **raw download** document                                             | Two implementations of JCS would be two digests for one document, and the hash's whole purpose is that a third party reproduces ours.               |
+| `binding.ts`     | what the **signed** artefacts assert: the price lock's total and merchant, L3a's payee, the chain's `iat` window, the L2's spending ceiling | A digest is a function of the document, so it cannot bind the document. Only a signature the holder cannot produce can.                             |
+| `redact.ts`      | the **redacted page** document, `maskEmail`/`maskOpaqueId`, `assertRedactionHolds`                                                          | "Redacted" that is only hidden by CSS leaves the raw L1 in the page's JSON, and view-source prints it.                                              |
+| `verify-view.ts` | the offline checks, the live checks, the report model, `publicPacketUrl`, **AT-M18.2's** limiter                                            | A single green tick would have to hide D-009 (no as-of clock), D19 (three constraints nobody evaluates), **and which fields no signature reaches**. |
+| `verify-py.ts`   | the generated offline `verify.py`                                                                                                           | A code block is not evidence, and a script with no embedded digest proves nothing.                                                                  |
+| `types.ts`       | the closed ports and the report types                                                                                                       | —                                                                                                                                                   |
+
+---
+
+## The central promise, and where it was false
+
+Every packet's PDF carries a QR pointing at `/v/{packetId]`, and the promise of that page is that **the page a
+buyer reads is provably about _this_ purchase.** An adversarial audit (QA3-VENDOR-1) showed that promise was
+false, and the failure was structural rather than a bug in one function:
+
+- **`gateRecordCheck` verified the decision record's signature and never compared it to anything.** A genuinely
+  Ed25519-signed `ALLOW` for a _different attempt, amount, currency and payee_ verified and the page reported
+  every check passing. §3.1 I-1 is stated in terms of _this_ attempt, _this_ amount, _this_ currency, _this_
+  payee, and nothing on the page compared any of the four.
+- **`readback` is a `PACKET_ONLY_MEMBER`** (`bundle.ts`), so §7.3 excludes it from the `custom_id` preimage. Its
+  only check was a self-hash — a digest published inside the document it covers, which the holder recomputes in
+  one line. The read-back could be replaced with _"You may spend up to $9,999,999 at any merchant"_ and the page
+  reported all-pass.
+- **`paypal.order_id` / `capture_ids` are outside the `custom_id` preimage by design**, and `bundle_hash` is a
+  digest of the bundle, so repointing `paypal` at another capture and recomputing both digests produced a
+  document that is internally perfect.
+
+The common cause: **every check was either a function of the document (a digest) or a self-consistency check
+(a digest published inside the document).** Neither binds anything, and a substitution survives both. What binds
+is a comparison against something the person rewriting the document cannot recompute, and there are only five of
+those in §7.3: the issuer's L1 and L2, the agent's L3a and L3b, the merchant's price lock, and the Gate's own
+signed record.
+
+### What the record is now compared against, field by field
+
+`gate_record` (the signature row) is unchanged in scope and now says so explicitly: it establishes that the
+record **has not been edited**, and points at the rows that establish whether it is about this purchase. Eight
+new rows do the comparing, **one per field, so a failure names the field**:
+
+| row                     | compared against                                      | signature the anchor rests on        |
+| ----------------------- | ----------------------------------------------------- | ------------------------------------ |
+| `gate_record_amount`    | `checkout_jwt` → `cart.total.amount_minor`            | the **merchant** key (§8.3)          |
+| `gate_record_currency`  | `checkout_jwt` → `cart.total.currency_code`           | the **merchant** key                 |
+| `gate_record_payee`     | `checkout_jwt` → `merchant.id`, else L3a → `payee.id` | merchant key, else the **agent** key |
+| `gate_record_chain`     | `chain_valid` vs §3.1 I-1's precondition              | the Gate's own signature             |
+| `gate_record_vi_commit` | `bundle.vi_lib_commit`                                | the Gate's own signature             |
+| `gate_record_iat`       | the `iat` window spanned by **all five** chain tokens | four independent issuers             |
+| `gate_record_attempt`   | **nothing** — `WARN`                                  | —                                    |
+| `gate_record_mandate`   | **nothing** — `WARN`                                  | —                                    |
+
+`amount` is parsed with `fromPayPalValue`, the same function `packages/gate` writes it with, so the comparison
+is in **integer minor units** and cannot round (§0, EC-FX-6). An amount that will not parse is a `FAIL`, not a
+skip: a signed claim this page cannot read is an unchecked claim.
+
+**Both directions of `iat` are checked**, and that is asserted rather than assumed. The pre-existing
+`gate_record` row already reported `fresh: false` as a `WARN` when `iat` is far from `nowSec`, which covers
+"older than expected". `gate_record_iat` compares against the **chain's own window** instead, so a record from
+a _newer_ attempt is caught too — `test/binding.test.ts` and `test/verify-py.test.ts` each run both directions.
+
+### How the packet substitution is caught
+
+`paypal_dispute_binding` compares the bundle against **`disputes.capture_id` and `disputes.order_id`** — the row
+this page is served _for_. That is a different table from the document, so it is the one anchor a holder of a
+packet URL and write access to `evidence_packets.bundle` cannot reach. `loadVerifierPacket` already read that row
+for the page's labels; two more members of the same read are all that was needed.
+
+Both directions are checked (a wrong order, and a `capture_ids` list not **containing** the dispute's capture),
+and both ids are **masked** in the message — §8.18 makes the packet id the page's only identifier, and a check
+detail is rendered into the page, so naming them would reintroduce them in the one message written to help a
+reader. A multi-capture order `PASS`es, because §7.2 legitimately allows sibling captures on one order.
+
+### How the read-back is bound — and where it is not
+
+| claim                                        | how it is established                                                                                    |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| not edited after `readback_sha256` was taken | `readback_hash`, unchanged, and EC-MER-6's anti-omission half still depends on it                        |
+| **is the compiler's own rendering**          | `readback_rendered` — a `WARN`, §8.8's `readBack()` emits `**What you are authorising**` unconditionally |
+| **grants no more than the signed mandate**   | `readback_cap_vs_mandate` — every money figure in the text, against the **largest cap in the signed L2** |
+| **is the buyer's consent**                   | **cannot be established. `readback_binding` is a `WARN` on every packet.**                               |
+
+The fourth row is the honest answer and it is stated on the page. There is no signature in §7.3's bundle that
+commits to the read-back's words: it is a `mandates` column written after the mandate was signed, §7.3 excludes
+it from the `custom_id` preimage, and `vi-client/src/types.ts:570` states that `prompt_summary` "is advisory and
+is not covered by the signature". **No local change can manufacture a binding that does not exist in the signed
+material**, so the page says "treat the read-back as unauthenticated" instead of printing a tick. See
+[What cannot be bound to anything](#what-cannot-be-bound-to-anything) for the smallest real fix.
+
+`readback_cap_vs_mandate` catches the audit's exact forgery — $9,999,999 is 499 850× the signed ceiling — and it
+is **not** dependent on the attacker's wording: money is located by its **currency symbol**, which is how
+`formatMoney` writes it, where the first version looked for the word `Spend` and the forged phrasing walked past
+it. A figure this page **cannot read** is skipped rather than truncated, because a truncated figure is small
+enough to pass a ceiling check (`₹9,99,999` is lakh-grouped; a permissive reader takes the `₹9` and reports
+900 minor units).
+
+### What cannot be bound to anything
+
+Three fields are covered by **no signature in §7.3**, and both this package and the generated `verify.py` say
+so on every packet. Each needs a change **outside `packages/verifier`** — reported here rather than fixed here
+(AGENTS.md rule 8).
+
+| field         | why nothing signed names it                                                                                             | the smallest real fix                                                                                                                                                                                                                                    |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `readback`    | a `mandates` column written after signing; a `PACKET_ONLY_MEMBER`, outside the `custom_id` preimage                     | add `readback_sha256` to §7.3's `custom_id` core **and** have `packages/orders` read it from `mandates.readback` when deriving `custom_id`. One column, two files, one hashing rule — and it binds because PayPal's own order record carries the result. |
+| `preferences` | §8.8 states it is not a VI constraint and is not signed                                                                 | same change, or accept it: a preference does not bound authority, so a substituted one misleads a human rather than an agent.                                                                                                                            |
+| `att` / `mdt` | the L1's `sub` is the user, the L2 names no mandate, the L3s name no attempt, the price lock names only a `checkout_id` | add `att` to the merchant-signed price lock claims (`apps/vi`'s `checkout_jwt.py` already receives the attempt id), **or** carry it in the L3a. Either makes `gate_record_attempt` a real check.                                                         |
+
+The `readback` fix is the important one, and it is worth being precise about why the obvious version does not
+work: **moving `readback` into `HASHED_MEMBERS` inside this package would break D18.** `custom_id` is derived at
+order-creation time, when `readback` does not exist yet on the `OrderDraft`, and PayPal's order record already
+carries a `custom_id` computed without it. Changing only the verifier's list would make the recomputed
+`custom_id` disagree with the one PayPal holds on **every existing packet**. The change has to start at
+`packages/orders`.
 
 ---
 
@@ -109,6 +216,22 @@ The preferences digest is taken over `canonicalJson(preferences)`, so `{}` hashe
 empty string. Getting that wrong would make every packet with no preferences fail its own check — the sort of
 false alarm that teaches readers to ignore the page.
 
+### Anti-omission holds. Anti-substitution needed a signature.
+
+The two halves of EC-MER-6 have different strengths, and conflating them is what let the audit's forgery
+through. `test/binding.test.ts` asserts both, and also asserts the **negative** — that a substitution the design
+cannot catch is _not_ reported as caught:
+
+| half                  | what it detects                                            | strength                                                                                           |
+| --------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **anti-omission**     | the field is missing                                       | **holds.** `required_members` fails; three separate tests, one per deleted member                  |
+| **anti-substitution** | the field is replaced with something internally consistent | **cannot hold without a signature.** `readback_cap_vs_mandate` is a ceiling, not an authentication |
+
+A forger who writes a _smaller_ invented allowance ("up to $150.00" against a $200.00 mandate) satisfies every
+check in this package. `test/binding.test.ts` asserts that, deliberately, and then asserts that the page still
+refuses to call it verified — `readback_binding` is a `WARN` on every packet. A test that claimed the forgery
+was caught would be asserting the thing the audit found missing.
+
 ---
 
 ## The per-check model
@@ -126,24 +249,56 @@ SKIPPED  the check needs material this packet does not carry — named, never si
 **Absent is never the same as passing.** `apps/vi` makes the same call for the same reason: an empty constraint
 list is `satisfied: false` — "nothing to check" is not "checked".
 
-### The twelve offline checks
+### The offline checks
 
-| id                  | category  | what it detects                                                           |
-| ------------------- | --------- | ------------------------------------------------------------------------- |
-| `bundle_hash`       | integrity | any edit to any member; the published digest vs a recomputation           |
-| `custom_id`         | integrity | a core that no longer reproduces PayPal's `custom_id` (D18)               |
-| `readback_hash`     | integrity | an edited consent read-back (EC-MER-6)                                    |
-| `preferences_hash`  | integrity | an edited preferences block (EC-MER-6)                                    |
-| `key_order`         | integrity | a canonical form that is _not_ order-independent                          |
-| `required_members`  | schema    | EC-MER-6's anti-omission half                                             |
-| `custom_id_binding` | binding   | `paypal.custom_id` disagreeing with the recomputation (D-018)             |
-| `checkout_binding`  | binding   | a price lock that is not the one L3b committed to (AT-M3.7)               |
-| `gate_record`       | signature | **our own** Ed25519 signature on the decision record, against `jwks_keys` |
-| `vi_lib_commit`     | schema    | a packet verified against another library version                         |
-| `l1_disclosures`    | schema    | what the L1 actually discloses (EC-PRIV-3's boundary)                     |
+**Two kinds, and the distinction is the point.** A row whose evidence is a _recomputation_ (`integrity`) proves
+internal consistency and nothing more, because anyone holding the document can recompute it. A row whose evidence
+is a _comparison against a separately signed artefact_ (`binding`) is what actually establishes which transaction
+a packet is about.
+
+| id                        | category  | what it detects                                                           | evidence              |
+| ------------------------- | --------- | ------------------------------------------------------------------------- | --------------------- |
+| `bundle_hash`             | integrity | any edit to any member; the published digest vs a recomputation           | recomputation         |
+| `custom_id`               | integrity | a core that no longer reproduces PayPal's `custom_id` (D18)               | recomputation         |
+| `readback_hash`           | integrity | an edited consent read-back (EC-MER-6)                                    | recomputation         |
+| `preferences_hash`        | integrity | an edited preferences block (EC-MER-6)                                    | recomputation         |
+| `key_order`               | integrity | a canonical form that is _not_ order-independent                          | recomputation         |
+| `required_members`        | schema    | EC-MER-6's anti-omission half                                             | presence              |
+| `custom_id_binding`       | binding   | `paypal.custom_id` disagreeing with the recomputation (D-018)             | recomputation         |
+| `checkout_binding`        | binding   | a price lock that is not the one L3b committed to (AT-M3.7)               | L3b vs the lock       |
+| `gate_record`             | signature | **our own** Ed25519 signature on the decision record, against `jwks_keys` | the Gate key          |
+| `gate_record_amount`      | binding   | a record approving a different amount from the price lock                 | the merchant key      |
+| `gate_record_currency`    | binding   | a record approving a different currency                                   | the merchant key      |
+| `gate_record_payee`       | binding   | a record approving a different payee                                      | merchant or agent key |
+| `gate_record_chain`       | binding   | `chain_valid` false, which I-1 says authorised nothing                    | the Gate key          |
+| `gate_record_vi_commit`   | binding   | a decision made by different library code                                 | the Gate key          |
+| `gate_record_iat`         | binding   | a record decided outside the chain's own `iat` window, **both ways**      | four issuers          |
+| `gate_record_attempt`     | binding   | **WARN always** — no signed artefact names an attempt                     | none                  |
+| `gate_record_mandate`     | binding   | **WARN always** — no signed artefact names a mandate                      | none                  |
+| `paypal_dispute_binding`  | binding   | a packet filed for a transaction it does not describe                     | the `disputes` row    |
+| `readback_rendered`       | binding   | a read-back that is not §8.8's renderer's output                          | the compiler's rule   |
+| `readback_cap_vs_mandate` | binding   | a read-back granting more than the signed mandate permits                 | the signed L2         |
+| `readback_binding`        | signature | **WARN always** — no signature covers the read-back                       | none                  |
+| `preferences_binding`     | signature | **WARN always** — no signature covers the preferences                     | none                  |
+| `vi_lib_commit`           | schema    | a packet verified against another library version                         | presence              |
+| `l1_disclosures`          | schema    | what the L1 actually discloses (EC-PRIV-3's boundary)                     | the L1                |
+
+**Four rows are `WARN` on every packet, including an honest one.** That is not a defect and it is not something
+a test may assert away: `gate_record_attempt`, `gate_record_mandate`, `readback_binding` and `preferences_binding`
+report fields that **no signature in §7.3 reaches**. `test/verify.test.ts` asserts the exact set of four and that
+each names its uncovered field, so a future change that quietly promoted one to `PASS` would fail rather than
+ship. An untampered packet has **no FAIL and no SKIPPED** — both are still asserted — and four WARNs that are
+true.
 
 Plus, from `POST /v1/public/verify`: `chain_valid`, one row per `checks_performed`, one **WARN** per
 `checks_skipped`, `constraints`, `network_enforced` (D19), `vi_bundle_hash`, `at_time` (EC-TIME-3), `vi_keys`.
+
+### Two fields the signature row used to print without checking
+
+`gate_record`'s old detail ended "The record says the Gate decided ALLOW for 13300 USD to mrc*northwind" — which
+read as a verified claim and was neither checked nor even correct. `chain_valid` is now `gate_record_chain` and
+is compared against §3.1 I-1's own precondition; `amount`/`currency`/`payee` are three more rows. The signature
+row keeps its scope — \_the record has not been edited* — and says so, pointing at the rows that do the rest.
 
 ### `checkout_binding` resolves the L3b, it does not merely decode it
 
@@ -224,7 +379,18 @@ covers the whole document: **editing any field changes at least one digest**, so
 Phase 3 additionally runs `verify_chain`, `check_constraints(STRICT)` over both sides, the merchant's ES256
 signature on the price lock, and our own Ed25519 signature on the decision record.
 
-### Four decisions in the generated source worth knowing
+**The digests are necessary and nowhere near sufficient, and phase 2 says so.** Phase 1 catches every _edit_; it
+catches no _substitution_, because recomputing two digests over a forged document is one line of work. Phase 2's
+new rows — `gate_record_amount`, `_payee`, `_chain`, `_lib`, `_iat`, `readback_cap` — each compare against an
+artefact the forger cannot re-sign, and they are what make the exit code mean something about _which_
+transaction the document describes.
+
+The script carries the same two unconditional `[WARN]`s the page does (`gate_record_ids`, `readback_binding`) and
+a `WHAT IS NOT COVERED BY ANY SIGNATURE` section in its own header, so a reader learns the limits **before**
+running it rather than after trusting a zero exit code. A `WARN` does not change the exit code, which is exactly
+why the warning text has to carry the finding.
+
+### Five decisions in the generated source worth knowing
 
 1. **Expiry is tolerated.** The pinned `verify_chain` has no clock override, so an expired mandate reports an
    expiry error _forever_ — including on a bundle nobody touched. Failing on it would be a permanent false alarm
@@ -237,6 +403,12 @@ signature on the price lock, and our own Ed25519 signature on the decision recor
    L2, so `verify_chain` needs them reconstructed — the same job `vi_service/l2.py::find_disclosures` does.
    Without it every real chain reports `L3a (payment) sd_hash does not match L2 serialized form`.
 4. **Floats are refused by the canonicaliser**, with a message naming RFC 8785 §3.2.2 number formatting.
+5. **The money regex is written with doubled backslashes**, because the source lives inside a TypeScript template
+   literal where a single `\d` is an escape sequence that vanishes before Python sees it. The failure is
+   _silent_: the pattern still compiles and then matches nothing, so `readback_cap` reports `[SKIP]` on every
+   read-back and looks like it has nothing to say. `test/verify-py.test.ts` therefore asserts `readback_cap`
+   **PASSes** on the fixture — not merely that the script runs — which is the only assertion that would have
+   caught it. A regex that cannot match is the worst kind of bug in a verifier.
 
 ### Determinism
 
@@ -287,6 +459,31 @@ the published value agree) and `paypal_custom_id` **fails** — the bundle's own
 order record holds. That is D-018's consistency check doing its job, and it is a stronger result than a
 `custom_id` mismatch: it proves a re-hashed edit cannot survive contact with a value an outside party also has.
 
+### The substitution cases, which no digest can see
+
+Every row above tampers with a field and lets a digest notice. `test/binding.test.ts` (page) and
+`test/verify-py.test.ts` (script) each add the cases where the document is made **internally consistent** — both
+digests recomputed, and for the record substitutions a **fresh, genuinely valid Ed25519 signature** produced by
+`signDecisionRecord`, with the matching public key published so phase 3 verifies it like any other. Nothing about
+the signature is wrong, which is exactly why the signature check `PASS`es and these rows have to exist.
+
+| substitution                                          | caught by (page)                                     | caught by (script)                |
+| ----------------------------------------------------- | ---------------------------------------------------- | --------------------------------- |
+| a record for another amount                           | `gate_record_amount`                                 | `gate_record_amount`              |
+| a record for another payee                            | `gate_record_payee`                                  | `gate_record_payee`               |
+| a record with `chain_valid` false                     | `gate_record_chain`                                  | `gate_record_chain`               |
+| a record decided **before** the chain existed         | `gate_record_iat`                                    | `gate_record_iat`                 |
+| a record decided **after** the chain was issued       | `gate_record_iat`                                    | `gate_record_iat`                 |
+| a record for another attempt / mandate                | **not caught** — `WARN`, asserted                    | **not caught** — `WARN`           |
+| `paypal` repointed at another capture, digests redone | `paypal_dispute_binding`                             | — (the script has no dispute row) |
+| a read-back granting $9,999,999, digest recomputed    | `readback_cap_vs_mandate`                            | `readback_cap`                    |
+| …the same, wearing `**What you are authorising**`     | `readback_cap_vs_mandate`                            | `readback_cap`                    |
+| a read-back granting a _smaller_ invented allowance   | **not caught** — asserted, with the `WARN` beside it | same                              |
+
+The last two rows are the honest boundary, and both are asserted in the suite. A forger who writes a smaller
+invented allowance satisfies every digest and every ceiling check in existence, because **no signature in §7.3
+covers the read-back**. The page does not claim otherwise; it says "treat the read-back as unauthenticated".
+
 ---
 
 ## The offline tests **run Python**
@@ -316,10 +513,33 @@ produced elided bodies (`"…ACHK6KF92"`) that decoded to nothing — while the 
 only asserted on shapes the truncated strings happened to satisfy. The cross-language digest comparison is the
 assertion that would have caught it.
 
-`paypal`, `shipments`, `buyer`, `readback` and `preferences` are shaped as `packages/defender` shapes them, with
-made-up values. Every check here is a check on the **document**, so none of that needs to be real, and §8.0 rule
-5's concern is about the **chain**, which is genuine throughout. The Gate key is a real Ed25519 key generated
-per call, so `signDecisionRecord` → `verifyDecisionRecord` is a genuine round trip through `jose`.
+`paypal`, `shipments`, `buyer` and `preferences` are shaped as `packages/defender` shapes them, with made-up
+values. Every check here is a check on the **document**, so none of that needs to be real, and §8.0 rule 5's
+concern is about the **chain**, which is genuine throughout. The Gate key is a real Ed25519 key generated per
+call, so `signDecisionRecord` → `verifyDecisionRecord` is a genuine round trip through `jose`.
+
+### Two fixture corrections this work made, and what they hid
+
+Both were found by the new checks rather than by review, which is the argument for having them.
+
+**The Gate record's `amount` was in the wrong format.** The fixture signed `String(total_minor)` — `"13300"`.
+`packages/gate/src/evaluate.ts` writes `toPayPalValue(amount)` — `"133.00"` — so **no Gate has ever produced the
+format the fixture asserted**, and `gate_record_amount` read it as a $13,300 decision inside a $133.00 packet.
+The check was right and the fixture was wrong. Nothing had noticed for the life of the fixture precisely because
+no check compared the record's amount to the price lock.
+
+**`FIXTURE_READBACK` was a paraphrase.** It is now in `readback.ts`'s output form — header first, `**bold**`
+amounts — because `readStatedCaps` reads what the renderer writes and a fixture in another shape would prove
+nothing. It is not rendered by the real `readBack()`: `fixtures/` cannot depend on `packages/compiler`, and
+re-deriving the renderer here would be a second implementation of a template, the exact antipattern `bundle.ts`
+exists to avoid. What is instead asserted is that the **sentinel** agrees — `test/binding.test.ts` imports
+`READBACK_HEADER` from `packages/compiler` by relative path and compares, the same technique
+`test/verify.test.ts` already uses for `publicPacketUrl`. One string is pinned; the rest is fixture data, and
+every check that reads it reads it as data.
+
+**The fixture's dispute row now carries `capture_id` and `order_id`.** Without them `paypal_dispute_binding`
+would sit permanently `SKIPPED` — the one state in which it proves nothing — and every test in this package would
+still pass.
 
 ---
 
@@ -380,6 +600,19 @@ A `packetId` that does not match `pkt_` + 26 Crockford characters cannot name a 
    because the data is the same public data. Noted in `types.ts` so nobody treats the direct table read as the
    only option.
 
+6. **`readback` cannot be bound to any signature, and closing that needs `packages/orders`.** Reported in full
+   under [What cannot be bound to anything](#what-cannot-be-bound-to-anything). In short: `custom_id` is derived at
+   order-creation time from `EvidenceBundleCore`, which has no read-back member because `OrderDraft.mandate` has
+   none — `mandates.readback` is not read by `packages/orders` at all. Adding `readback_sha256` to
+   `EVIDENCE_BUNDLE_HASHED_MEMBERS` would make this verifier's recomputation disagree with the `custom_id`
+   PayPal already holds on every filed packet, so the change has to begin at
+   `packages/orders/src/create.ts::evidenceBundleCore` and add the digest to the `OrderDraft`.
+
+7. **`att` and `mdt` are named by nothing signed.** Also in the same section. `apps/vi`'s
+   `checkout_jwt.py::issue` already receives the attempt id (`checkout_id` is `chk_…`, and `l3.py` receives
+   `attempt_id`), so putting `att` into the merchant-signed price-lock claims is a one-line payload addition —
+   and it is the only one of the two that could be done without changing §7.3's shape.
+
 ---
 
 ## Commands
@@ -413,6 +646,13 @@ bundleHashBase64Url(bundle): string    // what apps/vi returns
 customIdForBundle(bundle): string | null
 canonicalBundleCore(bundle): Record<string, unknown>
 wireBundle(bundle): Record<string, unknown>   // every member vi declares, nulls included
+
+// the signed anchors — decode only, never verification
+readChainAnchors(bundle): ChainAnchors       // price lock, L3a, the iat window
+readMonetaryCeiling(bundle): MonetaryCeiling // the signed L2's largest spending cap
+readStatedCaps(readback, currency): bigint[] // the caps the text states
+isCompilerReadback(value): boolean
+READBACK_HEADER: string                     // §8.8's fixed first line
 
 // the two documents
 buildRedactedPacketDocument(input): RedactedPacketDocument

@@ -226,13 +226,40 @@ WHAT IT CHECKS, AND WHAT EACH CHECK PROVES
         checkout_binding    The agent's L3b commits to a checkout_hash; the price lock in the bundle must be
                             the one that hash is for. Without this, a valid signature over a DIFFERENT cart
                             would look identical.
-        readback_binding    The read-back text on file is the one whose digest was published.
+        gate_record_amount  The decision record's amount and currency against the merchant-signed price
+        gate_record_payee   lock. A valid signature is not enough: a genuine Gate signature over somebody
+        gate_record_chain   else's amount is still the wrong amount. §3.1 I-1 names this attempt, this
+        gate_record_lib     amount, this currency, this payee — so each is compared, separately, by name.
+        gate_record_iat     …including when the record was signed, against the chain's own iat window.
+        readback_cap        Every money figure the read-back states, against the largest cap in the SIGNED
+                            L2. A consent text cannot grant more than the mandate it describes.
+        readback_binding    WHY THE READ-BACK IS NOT AUTHENTICATED. Its digest is published inside the
+                            document it covers, so recomputing it is one line of work, and §7.3 keeps
+                            \`readback\` out of the \`custom_id\` preimage. This is a [WARN] on every bundle,
+                            always — see WHAT IS NOT COVERED below.
 
     Phase 3 — signatures (needs the pinned Verifiable Intent library)
         chain               verify_chain() over L1/L2/L3a/L3b.
         constraints         check_constraints(STRICT) over the constraints the L2 discloses.
         checkout_jwt        The merchant's ES256 signature over the price lock.
         gate_decision       Countersign's own Ed25519 signature on the decision record.
+
+WHAT IS NOT COVERED BY ANY SIGNATURE
+    Three fields in this document cannot be verified, and this script says so rather than passing them:
+
+      readback      The consent text. \`mandates.readback\` is a database column written after the mandate
+                    was signed; it is a PACKET_ONLY_MEMBER, so it is outside the \`custom_id\` preimage,
+                    and the L2 does not carry it either. \`readback_cap\` bounds it from above and
+                    \`readback_sha256\` detects an edit after hashing — neither proves the buyer saw it.
+      preferences   §8.8 says so itself: preferences are not a Verifiable Intent constraint and are not
+                    signed. The same is true of the packet's own record of them.
+      att, mdt      The decision record names an attempt and a mandate. Nothing else in this bundle does:
+                    the L1 names the user, the L2 names no mandate, the L3s name no attempt, and the price
+                    lock names only a checkout id. So substituting either is NOT detected here, and a
+                    reader should not assume otherwise.
+
+    Closing that gap needs a change to §7.3 or to the Gate's signed payload — not to this script, and not
+    to the verifier page. Neither can manufacture a binding that does not exist in the signed material.
 
 EXIT CODES
     0   Every check that could run passed. Warnings and skips are printed and do not change this.
@@ -261,6 +288,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 from typing import Any
 `
@@ -594,6 +622,11 @@ def phase_one(doc: dict[str, Any]) -> None:  # noqa: ANN401
 
 # ---------------------------------------------------------------------------------------------
 # Phase 2 — binding. Also hashlib only.
+#
+# Everything below compares two things that are SEPARATELY SIGNED, or reports that it cannot.
+# Recomputing a digest is not a binding: an attacker holding the document re-derives bundle_hash
+# and custom_id in one line. The only anchors that survive that are the merchant's price lock,
+# the agent's L3a, the issuer's L2, and the chain's own iat window — so those are what is read.
 # ---------------------------------------------------------------------------------------------
 def _find_checkout_hash(node: Any, depth: int = 0) -> Any:  # noqa: ANN401
     if depth > 6:
@@ -647,15 +680,379 @@ def phase_two(doc: dict[str, Any]) -> None:  # noqa: ANN401
                 % (committed, from_jwt),
             )
 
+    _gate_record_binding(bundle)
+    _readback_binding(bundle)
+
+
+# ---------------------------------------------------------------------------------------------
+# The decision record, compared field by field against the price lock and the chain's own window.
+#
+# §3.1 I-1 is stated in terms of "this attempt, this amount, this currency, this payee". Verifying the
+# signature establishes only that the record is intact — and an intact record can be somebody else's. Each
+# field gets its own row so a failure names itself; one row saying "the record does not match" leaves a
+# chargeback analyst guessing which part moved.
+# ---------------------------------------------------------------------------------------------
+#: MINOR_DIGITS per ISO code, from packages/core/src/money.ts. Only 0 and 2 occur.
+_MINOR_DIGITS = {"JPY": 0}
+_DEFAULT_MINOR_DIGITS = 2
+
+
+def _minor_digits(currency: Any) -> int:  # noqa: ANN401
+    return _MINOR_DIGITS.get(currency if isinstance(currency, str) else "", _DEFAULT_MINOR_DIGITS)
+
+
+def _price_lock_total(bundle: dict[str, Any]) -> Any:  # noqa: ANN401
+    """cart.total from the merchant-signed price lock, or None. apps/vi writes amount_minor/currency_code."""
+    jwt = jwt_payload(bundle.get("checkout_jwt"))
+    if not isinstance(jwt, dict):
+        return None
+    cart = jwt.get("cart")
+    total = cart.get("total") if isinstance(cart, dict) else None
+    if not isinstance(total, dict):
+        total = jwt.get("total")
+    if not isinstance(total, dict):
+        return None
+    minor = total.get("amount_minor")
+    if isinstance(minor, bool) or not isinstance(minor, int):
+        return None
+    currency = total.get("currency_code")
+    if not isinstance(currency, str) or not currency:
+        return None
+    return (minor, currency)
+
+
+def _price_lock_merchant(bundle: dict[str, Any]) -> Any:  # noqa: ANN401
+    jwt = jwt_payload(bundle.get("checkout_jwt"))
+    if not isinstance(jwt, dict):
+        return None
+    merchant = jwt.get("merchant")
+    if not isinstance(merchant, dict):
+        cart = jwt.get("cart")
+        merchant = cart.get("merchant") if isinstance(cart, dict) else None
+    if not isinstance(merchant, dict):
+        return None
+    ident = merchant.get("id")
+    return ident if isinstance(ident, str) and ident else None
+
+
+def _l3a_payee(bundle: dict[str, Any]) -> Any:  # noqa: ANN401
+    """The payee id from the agent-key-signed L3a, resolved from its disclosures."""
+    return _find_by_vct(resolve_token(bundle.get("l3a")), "mandate.payment.1")
+
+
+def _find_by_vct(node: Any, name: str, depth: int = 0) -> Any:  # noqa: ANN401
+    """The first node carrying vct=name, walking delegate_payload and nested wrappers."""
+    if depth > 6:
+        return None
+    if isinstance(node, list):
+        for entry in node:
+            found = _find_by_vct(entry, name, depth + 1)
+            if found is not None:
+                return found
+        return None
+    if not isinstance(node, dict):
+        return None
+    if node.get("vct") == name:
+        return node.get("payee") if isinstance(node.get("payee"), dict) else None
+    return _find_by_vct(node.get("delegate_payload"), name, depth + 1)
+
+
+def _chain_iat_window(bundle: dict[str, Any]) -> Any:  # noqa: ANN401
+    """(earliest, latest) iat across every token, or None. Five tokens, four issuers, one window."""
+    stamps: list[int] = []
+    for member in ("l1", "l2", "l3a", "l3b", "checkout_jwt"):
+        payload = jwt_payload(bundle.get(member))
+        iat = payload.get("iat") if isinstance(payload, dict) else None
+        if isinstance(iat, int) and not isinstance(iat, bool):
+            stamps.append(iat)
+    return (min(stamps), max(stamps)) if stamps else None
+
+
+def _money_string(minor: int, currency: str) -> str:
+    """Render minor units the way packages/core's formatMoney does, for a message a reader can act on."""
+    symbols = {"USD": "$", "EUR": "€", "GBP": "£", "INR": "₹", "JPY": "¥", "AUD": "A$", "CAD": "C$"}
+    digits = _minor_digits(currency)
+    sign = "-" if minor < 0 else ""
+    body = str(abs(minor))
+    if digits == 0:
+        return "%s%s%d" % (sign, symbols.get(currency, currency + " "), abs(minor))
+    body = body.rjust(digits + 1, "0")
+    whole, frac = body[:-digits], body[-digits:]
+    grouped = ""
+    for index, char in enumerate(whole):
+        if index > 0 and (len(whole) - index) % 3 == 0:
+            grouped += ","
+        grouped += char
+    return "%s%s%s.%s" % (sign, symbols.get(currency, currency + " "), grouped, frac)
+
+
+def _parse_paypal_decimal(value: Any, currency: str) -> Any:  # noqa: ANN401
+    """A PayPal decimal string to integer minor units, or None. Refuses anything it cannot read exactly."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or text.startswith("-") or "e" in text.lower() or " " in text or "_" in text:
+        return None
+    if "." in text:
+        whole, frac = text.split(".", 1)
+        if not whole.isdigit() or not frac.isdigit():
+            return None
+    elif text.isdigit():
+        whole, frac = text, ""
+    else:
+        return None
+    digits = _minor_digits(currency)
+    if len(frac) > digits:
+        return None
+    return int(whole) * 10**digits + (int(frac.ljust(digits, "0")) if digits else 0)
+
+
+def _gate_record_binding(bundle: dict[str, Any]) -> None:
+    """Compare every field of the signed record with the artefacts that also carry a signature."""
+    record = bundle.get("gate_decision")
+    if not isinstance(record, str) or record.count(".") != 2:
+        # phase_one already reported the shape problem; nothing here can be compared to an unreadable record.
+        skip("gate_record_amount", "the decision record is not a compact JWS")
+        return
+    try:
+        payload = json.loads(b64u_decode(record.split(".")[1]).decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        skip("gate_record_amount", "the decision record payload does not decode")
+        return
+    if not isinstance(payload, dict):
+        skip("gate_record_amount", "the decision record payload is not an object")
+        return
+
+    authority = "spec 3.1 I-1, section 8.10"
+
+    # --- amount and currency, against the merchant-signed price lock --------------------------------
+    lock = _price_lock_total(bundle)
+    currency = payload.get("currency")
+    if lock is None:
+        skip("gate_record_amount", "this bundle carries no readable price lock, and nothing signed states the amount")
+    elif not isinstance(currency, str) or not currency:
+        fail("gate_record_amount", "the decision record carries no currency, so its amount cannot be read")
+    else:
+        minor = _parse_paypal_decimal(payload.get("amount"), currency)
+        if minor is None:
+            fail(
+                "gate_record_amount",
+                "the record states amount %r in %s, which is not a plain decimal; an amount this page cannot "
+                "read cannot be checked" % (payload.get("amount"), currency),
+            )
+        else:
+            expect(
+                minor == lock[0] and currency == lock[1],
+                "gate_record_amount",
+                "the record approves %s and the merchant-signed price lock commits to %s"
+                % (_money_string(minor, currency), _money_string(lock[0], lock[1])),
+                "the record approves %s but the merchant-signed price lock commits to %s (%s)"
+                % (_money_string(minor, currency), _money_string(lock[0], lock[1]), authority),
+            )
+
+    # --- payee, against the price lock or the agent-signed L3a ---------------------------------------
+    # Two anchors, because two issuers sign it. Losing one degrades one row rather than blanking the check.
+    payee = None
+    source = None
+    merchant = _price_lock_merchant(bundle)
+    if merchant:
+        payee, source = merchant, "the price lock"
+    else:
+        l3a_payee = _l3a_payee(bundle)
+        if isinstance(l3a_payee, dict) and isinstance(l3a_payee.get("id"), str):
+            payee, source = l3a_payee["id"], "the agent-signed L3a"
+    if payee is None:
+        skip("gate_record_payee", "neither the price lock nor the L3a names a merchant to compare against")
+    else:
+        expect(
+            payload.get("payee") == payee,
+            "gate_record_payee",
+            'both say "%s" (from %s)' % (payee, source),
+            'the record approves payment to "%s" while %s names "%s"'
+            % (payload.get("payee"), source, payee),
+        )
+
+    # --- chain_valid, and the library that decided ---------------------------------------------------
+    expect(
+        payload.get("chain_valid") is True,
+        "gate_record_chain",
+        "the signed record says chain_valid true, which is I-1's precondition for money to have moved",
+        "the signed record carries chain_valid false; only an ALLOW on a valid chain reaches PayPal",
+    )
+    bundle_commit = bundle.get("vi_lib_commit")
+    if not isinstance(bundle_commit, str) or not bundle_commit:
+        skip("gate_record_lib", "this bundle records no vi_lib_commit")
+    else:
+        expect(
+            payload.get("vi_commit") == bundle_commit,
+            "gate_record_lib",
+            "the record and this bundle both name %s" % bundle_commit,
+            "the record says %r and this bundle names %s; a decision made by different code cannot be "
+            "re-verified by the code this packet claims produced it"
+            % (payload.get("vi_commit"), bundle_commit),
+        )
+
+    # --- time, against the chain's own window -------------------------------------------------------
+    window = _chain_iat_window(bundle)
+    if window is None:
+        skip("gate_record_iat", "no token in this bundle carries an iat, so there is no signed window")
+    else:
+        iat = payload.get("iat")
+        if not isinstance(iat, int) or isinstance(iat, bool):
+            fail("gate_record_iat", "the record carries no numeric iat, so it cannot be placed in the chain's window")
+        elif iat < window[0]:
+            fail(
+                "gate_record_iat",
+                "the record says iat %d but every signed token was issued at or after %d; a decision cannot "
+                "predate the mandate it authorised" % (iat, window[0]),
+            )
+        elif iat > window[1]:
+            fail(
+                "gate_record_iat",
+                "the record says iat %d while the latest signed token was issued at %d; a decision signed "
+                "%ds after the chain it names is a record for a different transaction"
+                % (iat, window[1], iat - window[1]),
+            )
+        else:
+            ok("gate_record_iat", "iat %d is inside this chain's window %d-%d" % (iat, window[0], window[1]))
+
+    # --- what nothing signed here can be compared against -------------------------------------------
+    warn(
+        "gate_record_ids",
+        'att=%r mdt=%r are NOT confirmed: nothing else in this bundle names an attempt or a mandate, so '
+        "substituting either is not detected here" % (payload.get("att"), payload.get("mdt")),
+    )
+
+
+def _signed_ceiling(bundle: dict[str, Any]) -> Any:  # noqa: ANN401
+    """
+    The largest spending limit in the signed L2, or None.
+
+    Read from the L2's RESOLVED disclosures, so the numbers are the ones the issuer signed. Only
+    amount_range (per payment) and budget (in total) carry money, and only their max can bound a cap;
+    the min of an amount_range is a floor and says nothing about how much may be spent.
+    """
+    resolved = resolve_token(bundle.get("l2"))
+    best: dict[str, int] = {}
+    for constraint in _all_constraints(resolved):
+        if constraint.get("type") not in ("mandate.payment.amount_range", "mandate.payment.budget"):
+            continue
+        cur = constraint.get("currency")
+        top = constraint.get("max")
+        if not isinstance(cur, str) or not cur:
+            continue
+        if isinstance(top, bool) or not isinstance(top, int):
+            continue
+        best[cur] = max(best.get(cur, top), top)
+    if not best:
+        return None
+    if len(best) > 1:
+        # Two currencies and one symbol could mean any of three: refusing is the honest answer, and reporting
+        # a guess here would put a wrong number in a binding sentence.
+        return None
+    (only_currency, only_max), = best.items()
+    return (only_currency, only_max)
+
+
+def _all_constraints(node: Any, depth: int = 0) -> list[Any]:  # noqa: ANN401
+    """Every constraints[] entry under delegate_payload, depth-limited and order-preserving."""
+    if depth > 6:
+        return []
+    if isinstance(node, list):
+        out: list[Any] = []
+        for entry in node:
+            out.extend(_all_constraints(entry, depth + 1))
+        return out
+    if not isinstance(node, dict):
+        return []
+    out = []
+    listed = node.get("constraints")
+    if isinstance(listed, list):
+        out.extend(entry for entry in listed if isinstance(entry, dict))
+    out.extend(_all_constraints(node.get("delegate_payload"), depth + 1))
+    return out
+
+
+#: A money figure, identified by its currency symbol. §8.8 renders every amount through formatMoney, which
+#: always emits one, so a symbol-prefixed decimal is money by the renderer's own rule wherever it appears.
+#: A money figure, identified by its currency symbol. §8.8 renders every amount through formatMoney, which
+#: always emits one, so a symbol-prefixed decimal is money by the renderer's own rule wherever it appears.
+#: Grouping must be thousands throughout — the lookahead refuses a partial match rather than reporting a
+#: truncated figure, because a truncated figure can be small enough to pass a ceiling check.
+#:
+#: Every backslash below is doubled, and that is load-bearing: this source lives inside a TypeScript template
+#: literal, where a single backslash before s / d / . is an escape sequence that vanishes before Python sees it.
+#: The failure is silent rather than loud — the pattern still compiles, and then matches nothing, so every
+#: read-back reports SKIP and the ceiling check looks like it has nothing to say. A regex that cannot match is
+#: the worst kind of bug in a verifier, which is why this comment exists and why test/verify-py.test.ts
+#: asserts the ceiling check PASSes on the fixture rather than merely that it does not crash.
+_MONEY_FIGURE = re.compile(
+    r"(?:US\\$|A\\$|C\\$|[$€£₹¥])\\s*(\\d+(?:,\\d{3})*)(?:\\.(\\d+))?(?!\\d|,|\\.\\d)",
+    re.UNICODE,
+)
+
+
+def _stated_caps(readback: str, currency: str) -> list[int]:
+    """Every money figure the read-back states, in minor units of the given currency. Unreadable are skipped."""
+    digits = _minor_digits(currency)
+    out: list[int] = []
+    for match in _MONEY_FIGURE.finditer(readback):
+        fraction = match.group(2) or ""
+        if len(fraction) > digits:
+            continue
+        whole = match.group(1).replace(",", "")
+        plain = whole if digits == 0 else "%s.%s" % (whole, fraction.ljust(digits, "0"))
+        parsed = _parse_paypal_decimal(plain, currency)
+        if parsed is not None:
+            out.append(parsed)
+    return out
+
+
+def _readback_binding(bundle: dict[str, Any]) -> None:
+    """Bound the read-back from above, and state plainly that nothing signs it."""
     readback = bundle.get("readback")
     published = PUBLISHED.get("PUBLISHED_READBACK_SHA256")
     if isinstance(readback, str) and isinstance(published, str):
         expect(
             sha256_hex(readback.encode("utf-8")) == published,
-            "readback_binding",
-            "the read-back text on file is the one whose digest was published",
-            "the read-back does not hash to its published digest",
+            "readback_digest",
+            "the read-back text on file hashes to its published digest",
+            "the read-back does not hash to its published digest — the text was changed after the hash was taken",
         )
+
+    ceiling = _signed_ceiling(bundle)
+    if ceiling is None:
+        skip("readback_cap", "the signed L2 states no single-currency spending limit, so there is no ceiling to compare")
+    else:
+        currency, allowed = ceiling
+        stated = _stated_caps(readback, currency) if isinstance(readback, str) else []
+        if not stated:
+            skip("readback_cap", "the read-back states no money figure this script can read")
+        else:
+            over = [value for value in stated if value > allowed]
+            expect(
+                not over,
+                "readback_cap",
+                "every allowance the read-back states is at or under the signed ceiling of %s (largest stated: %s)"
+                % (_money_string(allowed, currency), _money_string(max(stated), currency)),
+                "the read-back states %s while the signed mandate permits at most %s; a consent text cannot "
+                "grant more authority than the mandate it describes"
+                % (", ".join(_money_string(value, currency) for value in over), _money_string(allowed, currency)),
+            )
+
+    # The row that matters most, and the one that is a WARN on every bundle, always.
+    #
+    # readback_sha256 PASSing is not authentication: the digest is published inside the document it covers,
+    # so recomputing it is one line of work. §7.3 keeps readback out of the custom_id preimage as a
+    # PACKET_ONLY_MEMBER, and the L2 does not carry it either. So this script can say the text was not edited
+    # after its hash was taken, and cannot say the buyer ever saw it. Printing a tick that implied otherwise is
+    # the failure this row exists to prevent.
+    warn(
+        "readback_binding",
+        "NOT AUTHENTICATED: the digest is published inside the document it covers, and readback is a "
+        "PACKET_ONLY_MEMBER outside the custom_id preimage, so no signature in this bundle commits to these "
+        "words. Treat the read-back as unverified: a smaller invented allowance would satisfy every check above",
+    )
 
 
 # ---------------------------------------------------------------------------------------------

@@ -35,7 +35,11 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
+import { webcrypto, type webcrypto as WebCrypto } from 'node:crypto'
+
 import { describe, expect, it } from 'vitest'
+
+import { signDecisionRecord, type GateRecordPayload } from '@countersign/gate'
 
 import {
   bundleHashHex,
@@ -46,6 +50,7 @@ import {
 } from '../src/bundle'
 import { renderVerifyPy, type VerifyPyKey } from '../src/verify-py'
 import {
+  CAPTURED_AT_SEC,
   CAPTURED_CHAIN,
   cloneBundle,
   FIXTURE_PREFERENCES_SHA256,
@@ -54,6 +59,70 @@ import {
   makeChainBundle,
   type ChainBundleFixture,
 } from './fixtures/chain'
+
+/**
+ * Re-sign a decision record's payload with a different claim, keeping its signature valid.
+ *
+ * **A real Ed25519 signature**, via `signDecisionRecord` and a fresh key — and the generated script is handed
+ * the matching key, so the substitution is invisible to every signature check and to both digests. That is the
+ * whole difficulty: what is left is a payload that disagrees with a *different* signed artefact, which is what
+ * the `gate_record_*` rows read.
+ *
+ * Without this, the "record for another amount" case would be a test of a flipped signature byte, which is
+ * already covered — and it would look like it proved the binding worked.
+ */
+/**
+ * `node:crypto`'s `CryptoKey`, which is the one this Node build actually has.
+ *
+ * Named structurally rather than as the bare `CryptoKey`, because `tsconfig.json` here declares
+ * `types: ['node']` and the unqualified `CryptoKey` is a **DOM** type a Node build has no scope for. The
+ * fixture module documents the same thing at the same cost.
+ */
+type WebCryptoKey = WebCrypto.CryptoKey
+
+/** A real Ed25519 signing key for the substitution cases. Generated once so `kid` is stable per run. */
+const SUBSTITUTION_KEY = await (async () => {
+  const pair = (await webcrypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ])) as unknown as { privateKey: WebCryptoKey; publicKey: WebCryptoKey }
+  const jwk = (await webcrypto.subtle.exportKey('jwk', pair.publicKey)) as Record<string, unknown>
+  return { key: pair.privateKey, kid: 'gate-key-substitution-1', jwk }
+})()
+
+/**
+ * Re-sign a decision record's payload with different claims, keeping its signature valid.
+ *
+ * `payload` is read out of the record rather than restated, so the case only changes the fields it names — an
+ * unrelated field drifting in the fixture would otherwise make the assertion test the wrong thing.
+ */
+async function reSignRecord(
+  record: unknown,
+  overrides: Partial<GateRecordPayload>,
+): Promise<string> {
+  const payload = JSON.parse(
+    Buffer.from(String(record).split('.')[1]!, 'base64url').toString('utf8'),
+  ) as GateRecordPayload
+  const signed = await signDecisionRecord({
+    key: SUBSTITUTION_KEY.key,
+    kid: SUBSTITUTION_KEY.kid,
+    payload: { ...payload, ...overrides },
+  })
+  if (!signed.ok) throw new Error(`could not re-sign: ${signed.error.message}`)
+  return signed.value
+}
+
+/**
+ * The JWKS entry the generated script needs in order to accept {@link SUBSTITUTION_KEY}.
+ *
+ * `role: 'GATE'` and the literal, because `VerifyPyKey` closes the union — a widened `string` would not
+ * compile, which is the type system doing its job.
+ */
+const SUBSTITUTION_JWK: VerifyPyKey = {
+  kid: SUBSTITUTION_KEY.kid,
+  role: 'GATE',
+  public_jwk: SUBSTITUTION_KEY.jwk,
+}
 
 // ---------------------------------------------------------------------------
 // Locating the interpreter
@@ -152,17 +221,30 @@ function allKeys(fixture: ChainBundleFixture): VerifyPyKey[] {
       public_jwk: CAPTURED_CHAIN.merchantPublicJwk as Record<string, unknown>,
     },
     { kid: fixture.gateKid, role: 'GATE', public_jwk: fixture.gateJwk },
+    // **The substitution key is always published**, so a record re-signed by {@link reSignRecord} verifies in
+    // phase 3 like any other. That is deliberate: the point of those cases is that the signature check is
+    // *satisfied* and the binding check is what catches the substitution. Publishing the key is what makes the
+    // test prove it rather than merely assert it.
+    SUBSTITUTION_JWK,
   ]
 }
 
-/** The script, generated from a bundle exactly as the page would generate it. */
+/**
+ * The script, generated from a bundle exactly as the page would generate it.
+ *
+ * `gateKid` follows whichever key actually signed the record, so a re-signed record is not reported as
+ * "signed by an unknown key" — which would be a `gate_decision` FAIL and would mask what the binding rows say.
+ */
 function scriptFor(fixture: ChainBundleFixture, bundle = fixture.bundle): string {
+  const record = String(bundle['gate_decision'] ?? '')
+  const signedBySubstitution =
+    record.includes(`.${SUBSTITUTION_KEY.kid}.`) || record.startsWith(`${SUBSTITUTION_KEY.kid}.`)
   return renderVerifyPy({
     packetId: fixture.packetId,
     bundle,
     bundleHashHex: bundleHashHex(bundle),
     keys: allKeys(fixture),
-    gateKid: fixture.gateKid,
+    gateKid: signedBySubstitution ? SUBSTITUTION_KEY.kid : fixture.gateKid,
   })
 }
 
@@ -399,7 +481,13 @@ describe.skipIf(SKIP_REASON)('AT-M18.1 the offline script exits 0 on an untamper
       'required_members',
       'gate_record_shape',
       'checkout_binding',
-      'readback_binding',
+      'gate_record_amount',
+      'gate_record_payee',
+      'gate_record_chain',
+      'gate_record_lib',
+      'gate_record_iat',
+      'readback_digest',
+      'readback_cap',
       'constraints',
       'checkout_jwt',
       'gate_decision',
@@ -411,6 +499,32 @@ describe.skipIf(SKIP_REASON)('AT-M18.1 the offline script exits 0 on an untamper
     // complete packet with all three public keys embedded there is nothing legitimate to skip.
     expect(stdout, `something was skipped:\n${stdout}`).not.toContain('[SKIP]')
     expect(stdout).toContain('RESULT: the document is internally consistent')
+  })
+
+  it('carries the two WARNs that name what no signature covers, and never calls the read-back verified', async () => {
+    const { code, stdout } = await runClean()
+    expect(code, `stdout was:\n${stdout}`).toBe(0)
+    // **The point of the whole file.** A WARN does not change the exit code, so a reader who only looks at the
+    // code still sees 0 — which is exactly why the WARN text has to carry the finding.
+    expect(stdout).toMatch(/\[WARN\] gate_record_ids/)
+    expect(stdout).toMatch(/att=.*mdt=.*NOT confirmed/)
+    expect(stdout).toMatch(/\[WARN\] readback_binding/)
+    expect(stdout).toMatch(/NOT AUTHENTICATED/)
+    expect(stdout).toMatch(/Treat the read-back as unverified/)
+    // And the *absence* of the old claim. `readback_binding` used to be a PASS reading "the read-back text on
+    // file is the one whose digest was published", which reads as authentication and is not.
+    expect(stdout).not.toContain('readback text on file is the one whose digest was published')
+  })
+
+  it('documents the uncovered fields in its own header, so the reader learns it before running it', async () => {
+    const fixture = await makeChainBundle()
+    const text = scriptFor(fixture)
+    expect(text).toContain('WHAT IS NOT COVERED BY ANY SIGNATURE')
+    for (const member of ['readback', 'preferences', 'att, mdt']) {
+      expect(text, `${member} is not listed as uncovered`).toContain(member)
+    }
+    // And it says where the fix has to happen, so nobody goes looking in this script for it.
+    expect(text).toMatch(/needs a change to §7\.3 or to the Gate's signed payload/)
   })
 
   it('runs phase 3 with the pinned library, and either verifies the chain or says it is out of window', async () => {
@@ -479,12 +593,15 @@ describe.skipIf(SKIP_REASON)(
      */
     async function expectTamperCaught(
       label: string,
-      tamper: (b: Record<string, unknown>) => void,
+      tamper: (b: Record<string, unknown>) => void | Promise<void>,
       expectName: string,
     ): Promise<void> {
       const fixture = await makeChainBundle()
       const bundle = cloneBundle(fixture.bundle)
-      tamper(bundle)
+      // **Awaited**, because a substitution has to produce a real signature and signing is async. Assigning the
+      // promise would leave a `Promise` where a JWS string belongs, and `downloadDoc`'s `structuredClone` fails
+      // with a `DataCloneError` that reads like a harness bug rather than a missing await.
+      await tamper(bundle)
       // **The script is regenerated too**, so its embedded digests match the tampered document. That is the
       // strongest form of this test: a tamperer who controls the page as well as the bundle — who can re-hash
       // and re-publish the `verify.py` — still gets caught by the per-field checks.
@@ -574,6 +691,88 @@ describe.skipIf(SKIP_REASON)(
       expect(code).not.toBe(0)
       expect(stdout).toContain('[FAIL] bundle_hash')
       expect(stdout).toContain('[FAIL] custom_id')
+    })
+
+    // ---- the substitution cases, which the digests cannot see ------------------------------------------------
+    //
+    // Everything above tampers with a field and lets a digest notice. These three replace a field with
+    // something internally consistent: the digests are recomputed, the script is regenerated, and only a check
+    // that reads a DIFFERENT SIGNED ARTEFACT can catch them.
+
+    it('catches a record for another amount, when the digests and the script are regenerated around it', async () => {
+      // A genuinely valid Gate signature over a $9,999,999 decision inside a $133.00 packet. Nothing about the
+      // signature is wrong — which is precisely why `gate_decision` PASSes and this row has to exist.
+      await expectTamperCaught(
+        'gate record amount',
+        async (b) => {
+          b['gate_decision'] = await reSignRecord(b['gate_decision'], { amount: '999999.00' })
+        },
+        'gate_record_amount',
+      )
+    })
+
+    it('catches a record for another payee', async () => {
+      await expectTamperCaught(
+        'gate record payee',
+        async (b) => {
+          b['gate_decision'] = await reSignRecord(b['gate_decision'], {
+            payee: 'SOME_OTHER_MERCHANT',
+          })
+        },
+        'gate_record_payee',
+      )
+    })
+
+    it('catches a record whose chain_valid is false, which I-1 says authorised nothing', async () => {
+      await expectTamperCaught(
+        'gate record chain_valid',
+        async (b) => {
+          b['gate_decision'] = await reSignRecord(b['gate_decision'], { chain_valid: false })
+        },
+        'gate_record_chain',
+      )
+    })
+
+    it('catches a record decided outside the chain\u2019s own time window, in BOTH directions', async () => {
+      // Two cases, because a check that only caught "too old" would be satisfied by any comparison against
+      // `nowSec` — which is what the pre-existing `fresh` WARN already did.
+      for (const [label, iat] of [
+        ['too early', CAPTURED_AT_SEC - 86_400],
+        ['too late', CAPTURED_AT_SEC + 86_400],
+      ] as const) {
+        await expectTamperCaught(
+          `gate record iat ${label}`,
+          async (b) => {
+            b['gate_decision'] = await reSignRecord(b['gate_decision'], { iat })
+          },
+          'gate_record_iat',
+        )
+      }
+    })
+
+    it('catches a forged read-back granting far more than the signed mandate, digest recomputed', async () => {
+      // The invented-consent substitution. `readback_sha256` PASSES — recomputing it is one line of work — and
+      // `readback_cap` is what refuses it, because $9,999,999 exceeds anything this L2 permits.
+      await expectTamperCaught(
+        'read-back forgery',
+        (b) => {
+          b['readback'] = 'You may spend up to $9,999,999 at any merchant, with no restrictions.'
+          b['readback_sha256'] = sha256Hex(String(b['readback']))
+        },
+        'readback_cap',
+      )
+    })
+
+    it('catches the same forgery wearing the renderer header, because the cap does not depend on wording', async () => {
+      await expectTamperCaught(
+        'read-back forgery with header',
+        (b) => {
+          b['readback'] =
+            '**What you are authorising**\nYou may spend up to $9,999,999 at any merchant, with no restrictions.'
+          b['readback_sha256'] = sha256Hex(String(b['readback']))
+        },
+        'readback_cap',
+      )
     })
 
     it('catches a tampered signature even when the script was regenerated around it', async () => {

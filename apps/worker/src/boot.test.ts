@@ -34,12 +34,12 @@ import { fakeBoss } from '../test/harness'
  * process environment would leak into every other file in the same process. The values are obviously fake and
  * none of them is a real credential: nothing here opens a socket, because `productionDeps` builds ports.
  */
-function fakeEnv(): Env {
+function fakeEnv(databaseUrl?: string): Env {
   return {
     APP_ENV: 'test',
     PUBLIC_BASE_URL: 'http://localhost:3000',
     NODE_ENV: 'test',
-    DATABASE_URL: 'postgres://cs:cs@127.0.0.1:55470/cs',
+    DATABASE_URL: databaseUrl ?? 'postgres://cs:cs@127.0.0.1:55470/cs',
     SESSION_SECRET: 'x'.repeat(48),
     PAYPAL_ENV: 'sandbox',
     PAYPAL_API_BASE: 'https://api-m.sandbox.paypal.com',
@@ -68,9 +68,19 @@ function fakeEnv(): Env {
   } as unknown as Env
 }
 
-function withEnv(): void {
-  setEnvForTesting(fakeEnv())
+function withEnv(databaseUrl?: string): void {
+  setEnvForTesting(fakeEnv(databaseUrl))
 }
+
+/**
+ * A `DATABASE_URL` that is guaranteed to refuse the connection.
+ *
+ * Port 1 is reserved and nothing listens on it, so the query fails on connect rather than hanging — which is
+ * the point. A test that wants to see the *failure* branch must not depend on whether some unrelated local
+ * Postgres happens to be running; that is how `WORKER-1` below came to assert `ok: false` and pass only while
+ * the developer's database was down.
+ */
+const UNREACHABLE_DATABASE_URL = 'postgres://cs:cs@127.0.0.1:1/cs'
 
 /* ------------------------------------------------------------------------------------------ */
 /* 1. The store and audit ports are filled in                                                       */
@@ -156,12 +166,30 @@ describe('productionDeps', () => {
   })
 
   it('WORKER-2 a missing environment variable still refuses to start, per spec §6', () => {
-    setEnvForTesting(null)
+    // `process.env` is swapped for an empty object rather than merely clearing the cache: `setEnvForTesting(null)`
+    // only makes `env()` re-read the *ambient* environment, so this assertion would otherwise pass or fail
+    // depending on the shell the suite happened to be launched from.
+    const saved = process.env
+    let thrown: unknown
     try {
-      expect(() => productionDeps()).toThrow()
+      process.env = {}
+      setEnvForTesting(null)
+      try {
+        productionDeps()
+      } catch (cause) {
+        thrown = cause
+      }
     } finally {
+      process.env = saved
       setEnvForTesting(null)
     }
+
+    expect(thrown, 'productionDeps() booted on an empty environment').toBeDefined()
+    // Spec §6 wants the diagnosis, not just a refusal: fixing a deployment one variable per restart is the
+    // thing `packages/core`'s `formatIssues` exists to avoid, so the names must be in the error.
+    const detail = JSON.stringify(thrown)
+    expect(detail).toContain('DATABASE_URL')
+    expect(detail).toContain('PAYPAL_CLIENT_ID')
   })
 })
 
@@ -177,20 +205,43 @@ describe('startWorker registers every handler, including the reservation release
     expect(started.value.registration.errors).toHaveLength(0)
     expect(started.value.registration.handlers).toHaveLength(7)
 
-    // `createJobRunner`'s unconfigured branch answers `{ skipped: true, reason: '<job> is not wired' }`, and
-    // the real handlers answer `{ ok: false, completed: true, code }` when the database is unreachable.
-    // Asserting that neither answer is the *skipped* shape is what proves nothing is silently dead — which
-    // is exactly how `release.reservations` was dead for so long.
+    // `createJobRunner`'s unconfigured branch answers `{ skipped: true, reason: '<job> is not wired' }`.
+    // Asserting that neither job produced that shape is what proves nothing is silently dead — which is
+    // exactly how `release.reservations` was dead for so long.
+    //
+    // Deliberately asserted against *whatever* the handler returned. `settleForQueue` returns `value` on
+    // success and `{ ok: false, completed: true, code }` on a non-retryable failure, so pinning the success
+    // shape here would make the test pass or fail depending on whether a local Postgres happened to be up.
+    // The failure branch is pinned deterministically in the next test instead.
     for (const job of [JOB_RELEASE_RESERVATIONS, JOB_BUDGET_RECONCILE]) {
       const handler = boss.handlers.get(job)
       expect(handler, `${job} has no registered handler`).toBeDefined()
       const settled = (await handler!({})) as Record<string, unknown>
       expect(settled, `${job} resolved as the unconfigured no-op`).not.toHaveProperty('skipped')
-      expect(settled, `${job} produced no result`).toHaveProperty('ok')
-      // And it produced a `Result` rather than throwing, so pg-boss classifies it instead of retrying for
-      // ever against a database it cannot reach.
-      expect(settled['ok']).toBe(false)
+      expect(settled, `${job} resolved to undefined, which is worse than a no-op`).toBeDefined()
+    }
+  })
+
+  it('WORKER-1 a failing ledger job settles as a Result rather than throwing, so pg-boss can classify it', async () => {
+    // Driven by an unreachable `DATABASE_URL` so the failure branch is chosen by the test rather than by
+    // whatever is running on the machine. This is the property that matters: pg-boss decides whether to retry
+    // from whether a handler *throws*, so a job that threw at a dead database would be retried for ever with
+    // no diagnostic. A `Result` lets `settleForQueue` log it once and move on.
+    withEnv(UNREACHABLE_DATABASE_URL)
+    const boss = fakeBoss()
+
+    const started = await startWorker({ ...productionDeps(), boss, crons: [] })
+    if (!started.ok) throw new Error(`${started.error.code}: ${started.error.message}`)
+
+    for (const job of [JOB_RELEASE_RESERVATIONS, JOB_BUDGET_RECONCILE]) {
+      const handler = boss.handlers.get(job)
+      expect(handler, `${job} has no registered handler`).toBeDefined()
+      const settled = (await handler!({})) as Record<string, unknown>
+      // Reaching this line at all is half the assertion: a throw here fails the test rather than escaping.
+      expect(settled['ok'], `${job} did not settle as a Result`).toBe(false)
+      expect(settled['completed']).toBe(true)
       expect(typeof settled['code']).toBe('string')
+      expect(typeof settled['reason']).toBe('string')
     }
   })
 
@@ -213,11 +264,15 @@ describe('startWorker registers every handler, including the reservation release
 
 describe('the composed ledger jobs', () => {
   it('§8.10 the reservation-release job is callable and reports a shape, not a bare throw', async () => {
-    withEnv()
+    withEnv(UNREACHABLE_DATABASE_URL)
     const deps = productionDeps()
-    // No database in this process, so it fails — and it must fail as a `Result`, because
-    // `settleForQueue` classifies a throw as "retry me" and a 5xx result as "finish me". A job that threw
-    // would be retried for ever against an unreachable database.
+    // It fails — and it must fail as a `Result`, because `settleForQueue` classifies a throw as "retry me"
+    // and a non-retryable result as "finish me". A job that threw would be retried for ever against an
+    // unreachable database.
+    //
+    // Note this also caught a real defect rather than confirming one: against a *reachable* database the
+    // sweep fails too, because `findStaleAttempts` binds a JS `Date` and `drizzle-orm@0.45.3` cannot encode
+    // one through its postgres-js session. See the README → "Contract issues".
     const outcome = await deps.releaseReservations!({})
     expect(outcome.ok).toBe(false)
     if (outcome.ok) return

@@ -1053,3 +1053,81 @@ Every one is a reporting surface that is honest about its own vocabulary and dis
 The remedy is not more assertions. It is that **each of these now has a test asserting the specific
 thing that must be true**, and D-034 standing rule — a test at a pinned-dependency boundary must
 consume a value that dependency actually produced — is the generalisation.
+
+## D-037 — The verifier now binds the Gate record to the chain, and says plainly what it cannot bind
+
+**Date:** 2026-10-06 · **Raised by:** senior QA audit 3 (QA3-VENDOR-1, `critical`) · **Spec item:** §8.18,
+§7.3, D18, EC-MER-6 · **Verified:** re-running the auditor own probes now reports the mismatched record
+caught and the read-back forgery failing `readback_cap_vs_mandate`
+
+**Decision:** Eight `gate_record_*` rows compare the decision record against separately-signed
+artefacts, one per field. `paypal_dispute_binding` anchors the bundle to the `disputes` row the page is
+served for. Three fields cannot be bound and are rendered as **`WARN`, never as a tick** — see below.
+
+**The defect.** `gateRecordCheck` verified the record signature and nothing else, so a genuine
+signature over the *wrong transaction* passed. `bundle_hash` and `custom_id` passed under substitution
+too — correctly, since both are functions of the document and a packet holder can recompute them. The
+anchor has to be something the holder cannot recompute, and `disputes.capture_id` / `order_id` is a
+different table from the document.
+
+| row | compared against | signed by |
+|---|---|---|
+| `gate_record_amount` | `checkout_jwt` → `cart.total.amount_minor` | merchant key |
+| `gate_record_currency` | `cart.total.currency_code` | merchant key |
+| `gate_record_payee` | `merchant.id`, else L3a → `payee.id` | merchant, else agent key |
+| `gate_record_chain` | `chain_valid` vs §3.1 I-1 | the Gate key |
+| `gate_record_vi_commit` | `bundle.vi_lib_commit` | the Gate key |
+| `gate_record_iat` | the `iat` window of all five chain tokens | four issuers |
+| `gate_record_attempt` | **nothing** | `WARN` |
+| `gate_record_mandate` | **nothing** | `WARN` |
+
+Amounts are compared with `fromPayPalValue`, the same function `packages/gate` writes them with, so the
+comparison is in integer minor units and cannot round. An unreadable amount is a **FAIL**, not a skip.
+Both `iat` directions fail — a record decided before the chain existed, and one decided after. The
+pre-existing freshness warning only covered "older than now".
+
+## The three things that cannot be bound, and why that is the honest answer
+
+**1. `readback` and `preferences` are covered by no signature.** `readback` is a `mandates` column
+written *after* signing, it is a `PACKET_ONLY_MEMBER` outside the §7.3 `custom_id` preimage, and
+`vi-client/src/types.ts:570` states that `prompt_summary` "is advisory and is not covered by the
+signature". **No change inside `packages/verifier` can manufacture that binding**, and the page says so
+with a permanent `readback_binding` WARN rather than a green tick.
+
+The smallest real fix, **reported and deliberately not made**: add `readback_sha256` to §7.3 core and
+have `packages/orders` read `mandates.readback` when deriving `custom_id`. Moving it into
+`HASHED_MEMBERS` in the verifier alone would **break D18** — `custom_id` is derived at order-creation
+time, when the read-back does not yet exist on `OrderDraft`, so every filed packet would then disagree
+with the string PayPal actually holds. That is a worse failure than an unbound field, and it is why the
+fix belongs in `orders` rather than here.
+
+**2. A forger writing a *smaller* invented allowance still defeats every check.** "Up to $150.00"
+against a real ceiling of $130.00 is caught by `readback_cap_vs_mandate`; "up to $90.00" is not
+caught by anything. `test/binding.test.ts` asserts that as a **negative case** — the substitution is
+not detected — and then asserts the page still refuses to call the read-back verified. A test that
+quietly dropped this case would have made the fix look complete.
+
+**3. `att` and `mdt` are named by nothing.** §7.3 names no attempt and no mandate, so substituting
+either is undetected. `WARN` on every packet. Smallest fix: put `att` into the merchant-signed
+price-lock claims — `apps/vi/src/vi_service/checkout_jwt.py` already has the id.
+
+**A `WARN` is the right output for an unbound field, not a compromise.** WP-18 established that a
+verifier which hides a known limitation is worse than no verifier, because it lends false confidence to
+the one reader the product exists to reassure. A permanent WARN says "nobody can prove this"; a tick
+would say "proven".
+
+## Two fixture bugs the new checks exposed
+
+The committed fixture signed its amount as `String(total_minor)` = `"13300"`, while `packages/gate`
+writes `toPayPalValue` = `"133.00"`. **No Gate has ever produced the format the fixture asserted**, and
+nothing noticed because nothing compared the record to the price lock. This is D-034 in its purest
+form: a fixture asserting a property of the code that the code never had.
+
+`FIXTURE_READBACK` was a paraphrase. It is now in `readback.ts` output form, with the `READBACK_HEADER`
+sentinel pinned against `packages/compiler` by relative path so the two cannot drift silently again.
+
+## What is still open
+
+The offline `verify.py` has no dispute row, so `paypal_dispute_binding` exists on the page only. The
+raw download could carry `disputeId` as one added member. And `gate_record_attempt` stays a `WARN` even
+after everything above, which is **correct rather than incomplete**.

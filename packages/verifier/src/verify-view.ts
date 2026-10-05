@@ -26,8 +26,12 @@
 
 import {
   csError,
+  formatMoney,
+  fromPayPalValue,
+  isCurrency,
   ok,
   type CsError,
+  type Currency,
   type DisputeId,
   type PacketId,
   type Result,
@@ -37,6 +41,7 @@ import {
   gateJwksMany,
   verifyDecisionRecord,
   type GateJwks,
+  type GateRecordPayload,
   type PublicJwk as GateJwk,
 } from '@countersign/gate'
 import {
@@ -58,10 +63,16 @@ import {
   l1DisclosedClaim,
   resolveSdJwt,
   textSha256Hex,
-  tokenKid,
   wireBundle,
 } from './bundle'
-import { buildRedactedPacketDocument, type RedactedPacketDocument } from './redact'
+import {
+  isCompilerReadback,
+  readChainAnchors,
+  readMonetaryCeiling,
+  readStatedCaps,
+  type ChainAnchors,
+} from './binding'
+import { buildRedactedPacketDocument, maskOpaqueId, type RedactedPacketDocument } from './redact'
 import type {
   CheckCategory,
   CheckSource,
@@ -145,6 +156,25 @@ export interface LoadedPacket {
   readonly status: string
   /** Public keys, from `jwks_keys`. Empty is a valid value and produces a `SKIPPED` check, not a crash. */
   readonly gateJwks: GateJwks
+  /**
+   * `disputes.capture_id` and `disputes.order_id` — the PayPal-side identity of **this** dispute.
+   *
+   * ### Why the verifier reads these at all
+   *
+   * §7.3 keeps `paypal` out of the `custom_id` preimage, because the order and capture ids do not exist when
+   * the order is created. That decision is correct and D18 depends on it — and it has a consequence nobody
+   * wrote down: **`paypal.order_id` and `paypal.capture_ids` are covered by no signature, and `bundle_hash` is
+   * a digest of the packet itself.** So a merchant holding a packet URL can repoint `paypal` at a different
+   * capture, recompute `bundle_hash` and `custom_id`, and every digest on the page agrees again.
+   *
+   * These two fields are the one anchor a repointing attack cannot reach, because they come from a **different
+   * row** — the `disputes` row this page is being served *for*, which is not part of the document the merchant
+   * can rewrite. `paypal_dispute_binding` compares them. `null` when the dispute row carries neither, which is
+   * a real state (`disputes.order_id` is null until the dispute is matched to an order) and produces a
+   * `SKIPPED` with that reason.
+   */
+  readonly disputeCaptureId: string | null
+  readonly disputeOrderId: string | null
 }
 
 /**
@@ -202,6 +232,8 @@ export async function loadVerifierPacket(
     stage: dispute.value?.stage ?? 'unknown',
     status: dispute.value?.status ?? 'unknown',
     gateJwks: gateJwksMany(gateEntries),
+    disputeCaptureId: dispute.value?.capture_id ?? null,
+    disputeOrderId: dispute.value?.order_id ?? null,
   })
 }
 
@@ -428,8 +460,34 @@ export async function offlineChecks(
   // --- 7. the price lock L3b committed to -------------------------------------------------------------
   out.push(checkoutBindingCheck(bundle))
 
-  // --- 8. our own signature on the decision record --------------------------------------------------
-  out.push(await gateRecordCheck(bundle, packet.gateJwks, nowSec))
+  // --- 8. our own signature on the decision record, and what it has to agree with --------------------
+  //
+  // The signature and the agreement are **separate** facts and get separate rows, on purpose. "Countersign
+  // signed this" answers "was the record edited"; it does not answer "is this record about *this* purchase". A
+  // valid signature over somebody else's attempt is still somebody else's attempt, and a page that collapsed
+  // the two questions into one green tick was the defect this section exists to close.
+  const anchors = readChainAnchors(bundle)
+  const record = await gateRecordVerdict(bundle, packet.gateJwks, nowSec)
+  out.push(gateRecordSignatureCheck(bundle, record))
+  out.push(
+    ...gateRecordBindingChecks(
+      record.verdict?.valid === true ? record.verdict.payload : null,
+      anchors,
+      bundle,
+    ),
+  )
+
+  // --- 8b. this packet, against the dispute it is filed under -----------------------------------------
+  out.push(paypalDisputeBindingCheck(bundle, packet))
+
+  // --- 8c. the consent read-back: is it the compiler's rendering, and does it match the signed mandate? ---
+  out.push(readbackRenderedCheck(bundle))
+  out.push(readbackCapCheck(bundle))
+  // Unconditional, and that is the point: the read-back is covered by no signature **in any packet**, so the
+  // row is a `WARN` whatever the document contains. A row that only appeared when the field was absent would
+  // stop being an answer to "is this the buyer's consent?" the moment the answer mattered.
+  out.push(readbackBindingCheck())
+  out.push(preferencesBindingCheck())
 
   // --- 9. the pinned library ------------------------------------------------------------------------
   const commit = readStringOrNull(bundle, 'vi_lib_commit')
@@ -774,6 +832,41 @@ function committedCheckoutHash(claims: Record<string, unknown>, depth = 0): stri
 }
 
 /**
+ * Verify the decision record **once**, so the signature row and the binding rows cannot disagree.
+ *
+ * A previous version called `verifyDecisionRecord` from inside the signature row and had nothing else to
+ * compare against. Two calls would mean two verdicts on one record, and the page could show "the signature is
+ * good" beside "the record names a different amount" with no way to tell whether the two came from the same
+ * evaluation. Resolving once makes that structurally impossible rather than a matter of care.
+ *
+ * `payload` is `null` whenever the record is absent, unreadable or unverifiable — and every binding row then
+ * reports `SKIPPED` with the reason, because a check that cannot run is not a check that passed.
+ */
+type RecordVerdict = Awaited<ReturnType<typeof verifyDecisionRecord>>
+
+/**
+ * Verify the decision record **once**, so the signature row and the binding rows cannot disagree.
+ *
+ * A previous version called `verifyDecisionRecord` from inside the signature row and had nothing else to
+ * compare against. Two calls would mean two verdicts on one record, and the page could show "the signature is
+ * good" beside "the record names a different amount" with no way to tell whether the two came from the same
+ * evaluation. Resolving once makes that structurally impossible rather than a matter of care.
+ *
+ * `payload` is `null` whenever the record is absent or unverifiable, and every binding row then reports
+ * `SKIPPED` with the reason — because a check that cannot run is not a check that passed, and the alternative
+ * is eight rows reading "the record agrees" about a record nobody could read.
+ */
+async function gateRecordVerdict(
+  bundle: Readonly<Record<string, unknown>>,
+  jwks: GateJwks,
+  nowSec: number,
+): Promise<{ readonly verdict: RecordVerdict | null; readonly jwks: GateJwks }> {
+  const record = readStringOrNull(bundle, 'gate_decision')
+  if (record === null || jwks.keys.length === 0) return { verdict: null, jwks }
+  return { verdict: await verifyDecisionRecord(record, { jwks, nowSec }), jwks }
+}
+
+/**
  * Our own signature on the Gate decision record, checked against `jwks_keys`.
  *
  * This is the one signature on the page that **we** control, which is exactly why it is worth showing: a
@@ -786,12 +879,17 @@ function committedCheckoutHash(claims: Record<string, unknown>, depth = 0): stri
  * A record signed eighteen months ago is not a forged record. `verifyDecisionRecord` reports `iat` outside
  * the skew as `fresh: false`, and that is a fact about the clock rather than about the signature, so it is a
  * `WARN`. Folding it into the verdict would make every historical packet read as an attack.
+ *
+ * ### What this row deliberately does **not** claim
+ *
+ * It says the signature is good. It does **not** say the record is about this purchase — that is
+ * {@link gateRecordBindingChecks}' job, and the two are separate rows because a valid signature over a
+ * different attempt, amount or payee is precisely the substitution this page used to wave through.
  */
-async function gateRecordCheck(
+function gateRecordSignatureCheck(
   bundle: Readonly<Record<string, unknown>>,
-  jwks: GateJwks,
-  nowSec: number,
-): Promise<VerifierCheck> {
+  resolved: { readonly verdict: RecordVerdict | null; readonly jwks: GateJwks },
+): VerifierCheck {
   const record = readStringOrNull(bundle, 'gate_decision')
   const authority = '§8.10 · AT-M10.5'
   if (record === null) {
@@ -805,7 +903,7 @@ async function gateRecordCheck(
       authority,
     )
   }
-  if (jwks.keys.length === 0) {
+  if (resolved.jwks.keys.length === 0) {
     return check(
       'gate_record',
       'signature',
@@ -818,16 +916,16 @@ async function gateRecordCheck(
       authority,
     )
   }
-  const kid = tokenKid(record)
-  const verdict = await verifyDecisionRecord(record, { jwks, nowSec })
-  if (!verdict.valid) {
+  const verdict = resolved.verdict
+  if (verdict === null || !verdict.valid) {
     return check(
       'gate_record',
       'signature',
       'The Gate decision record does not verify',
       'FAIL',
-      `Countersign’s own signature on this decision record did not verify: ${verdict.reason}. Either the ` +
-        'record was altered, or it was signed by a key that is not published.',
+      `Countersign’s own signature on this decision record did not verify: ` +
+        `${verdict === null ? 'the record could not be read' : verdict.reason}. Either the record was ` +
+        'altered, or it was signed by a key that is not published.',
       'local',
       `${authority} · AT-M18.1`,
     )
@@ -838,9 +936,10 @@ async function gateRecordCheck(
       'signature',
       'The Gate decision record verifies, and is older than the allowed skew',
       'WARN',
-      `The signature is good${kid === null ? '' : ` (key ${kid})`}, but the record was signed at ` +
-        `${verdict.payload.iat}, more than the permitted clock skew before now. An old decision is not a ` +
-        'forged one; this is a statement about the clock, not about the signature.',
+      `The signature is good (key ${verdict.kid}), but the record was signed at ${verdict.payload.iat}, more ` +
+        'than the permitted clock skew before now. An old decision is not a forged one; this is a statement ' +
+        'about the clock, not about the signature. Whether the record is about *this* purchase is answered ' +
+        'by the binding rows below.',
       'local',
       authority,
     )
@@ -850,13 +949,738 @@ async function gateRecordCheck(
     'signature',
     'The Gate decision record verifies',
     'PASS',
-    `Countersign’s signature on the decision record is good (key ${verdict.kid}), and all ` +
-      `${Object.keys(verdict.payload).length} signed fields are present. The record says the Gate decided ` +
-      `${verdict.payload.chain_valid ? 'ALLOW' : 'not ALLOW'} for ` +
-      `${verdict.payload.amount} ${verdict.payload.currency} to ${verdict.payload.payee}.`,
+    `Countersign’s signature on the decision record is good (key ${verdict.kid}), and all ten signed fields ` +
+      'are present. What that establishes is that the record has not been edited since the Gate signed it — ' +
+      'not that it is about this purchase. The rows below compare it with the signed chain, field by field.',
     'local',
     authority,
   )
+}
+
+/**
+ * Compare every field of the signed decision record with the artefacts that also carry a signature.
+ *
+ * ## The property this restores
+ *
+ * §3.1 I-1 is stated as *"a signed `ALLOW` for **this** attempt, **this** amount, **this** currency, **this**
+ * payee"*. Verifying the signature establishes only the first four words of nothing at all: it says the record
+ * is intact, and a perfectly intact record can be somebody else's. Each row below closes one field, and a
+ * failure **names its field**, because "the Gate record does not match" is not something a reader can act on.
+ *
+ * ## One row per field, and why not one row
+ *
+ * A single `gate_record_binding` row would report "the record does not match the chain" and leave a chargeback
+ * analyst to guess whether the amount, the payee or the currency was the part that moved. Seven rows means a
+ * failure identifies itself, which is the whole difference between a finding and a worry.
+ *
+ * ## `att` and `mdt`: reported as uncovered, not as passing
+ *
+ * The record names an attempt and a mandate, and **no signed artefact in §7.3's bundle names either.** The L1's
+ * `sub` is the user; the L2 carries no mandate id; L3a and L3b carry no attempt id; the price lock names only
+ * a `checkout_id`. So there is nothing to compare them against, and the honest status is `WARN` with the reason
+ * spelled out — never `PASS`. `README.md` records the smallest change that would let this row be a real check.
+ */
+function gateRecordBindingChecks(
+  payload: GateRecordPayload | null,
+  anchors: ChainAnchors,
+  bundle: Readonly<Record<string, unknown>>,
+): VerifierCheck[] {
+  const authority = '§8.10 · §3.1 I-1 · AT-M10.5 · AT-M18.1'
+  const out: VerifierCheck[] = []
+
+  if (payload === null) {
+    for (const [id, field] of [
+      ['gate_record_amount', 'the amount'],
+      ['gate_record_currency', 'the currency'],
+      ['gate_record_payee', 'the payee'],
+      ['gate_record_attempt', 'the attempt'],
+      ['gate_record_mandate', 'the mandate'],
+      ['gate_record_checks', 'the twelve checks'],
+      ['gate_record_vi_commit', 'the library version'],
+    ] as const) {
+      out.push(
+        check(
+          id,
+          'binding',
+          `Cannot compare ${field} against the chain`,
+          'SKIPPED',
+          'The decision record is absent or does not verify, so there is no signed statement to compare. ' +
+            'The row above says which of those it is.',
+          'local',
+          authority,
+        ),
+      )
+    }
+    return out
+  }
+
+  const priceLock = anchors.priceLock
+  const claimed = readRecordAmount(payload)
+
+  // --- amount ---------------------------------------------------------------------------------------
+  out.push(
+    priceLock === null
+      ? check(
+          'gate_record_amount',
+          'binding',
+          'No signed amount to compare the record against',
+          'SKIPPED',
+          'This bundle carries no readable price lock, and `paypal` is excluded from the `custom_id` preimage ' +
+            '(§7.3), so nothing signed states what this purchase was for.',
+          'local',
+          authority,
+        )
+      : claimed === null
+        ? check(
+            'gate_record_amount',
+            'binding',
+            'The Gate record states no readable amount',
+            'FAIL',
+            `The signed record carries amount "${payload.amount}" with currency "${payload.currency}", which is ` +
+              `not a plain decimal amount. The price lock in this bundle says ` +
+              `${formatMinor(priceLock.total)}. A record whose amount cannot be read cannot be checked, and an ` +
+              'uncheckable signed claim is not a passing one.',
+            'local',
+            authority,
+          )
+        : claimed.currency !== priceLock.total.currency
+          ? check(
+              'gate_record_amount',
+              'binding',
+              'The Gate record approves a different amount from the price lock',
+              'FAIL',
+              `The signed record approves ${formatMoney({ minor: claimed.minor, currency: claimed.currency })} ` +
+                `(as the string "${payload.amount}" ${payload.currency}), and the merchant-signed price lock in ` +
+                `this packet commits to ${formatMinor(priceLock.total)}. The Gate decided a different amount ` +
+                'from the one the buyer was shown.',
+              'local',
+              authority,
+            )
+          : claimed.minor !== priceLock.total.minor
+            ? check(
+                'gate_record_amount',
+                'binding',
+                'The Gate record approves a different amount from the price lock',
+                'FAIL',
+                `The signed record approves ${formatMoney({ minor: claimed.minor, currency: claimed.currency })} ` +
+                  `and the merchant-signed price lock in this packet commits to ` +
+                  `${formatMinor(priceLock.total)}. The Gate decided a different amount from the one the buyer ` +
+                  'was shown. Minor units, integers, no rounding anywhere (§0, EC-FX-6).',
+                'local',
+                authority,
+              )
+            : check(
+                'gate_record_amount',
+                'binding',
+                'The Gate record approves the amount the buyer was shown',
+                'PASS',
+                `The record approves ${formatMoney({ minor: claimed.minor, currency: claimed.currency })} and ` +
+                  `the merchant-signed price lock commits to ${formatMinor(priceLock.total)} — the same money, ` +
+                  'compared in integer minor units.',
+                'local',
+                authority,
+              ),
+  )
+
+  // --- currency -------------------------------------------------------------------------------------
+  out.push(
+    priceLock === null
+      ? bindingSkipped('gate_record_currency', 'the currency', 'no readable price lock', authority)
+      : payload.currency === priceLock.total.currency
+        ? check(
+            'gate_record_currency',
+            'binding',
+            'The Gate record approves the same currency as the price lock',
+            'PASS',
+            `Both say ${payload.currency}, and the L3a the agent signed says ` +
+              `${anchors.l3a?.payment.currency ?? '(unreadable)'}.`,
+            'local',
+            authority,
+          )
+        : check(
+            'gate_record_currency',
+            'binding',
+            'The Gate record approves a different currency from the price lock',
+            'FAIL',
+            `The signed record approves in ${payload.currency} while the merchant-signed price lock commits to ` +
+              `${formatMinor(priceLock.total)}. A currency is not a formatting difference: it is a different ` +
+              'amount of the buyer’s money.',
+            'local',
+            authority,
+          ),
+  )
+
+  // --- payee ----------------------------------------------------------------------------------------
+  const payeeFrom = priceLock?.merchantId ?? anchors.l3a?.payeeId ?? null
+  out.push(
+    payeeFrom === null
+      ? bindingSkipped(
+          'gate_record_payee',
+          'the payee',
+          'no signed merchant id to compare against',
+          authority,
+        )
+      : payload.payee !== payeeFrom
+        ? check(
+            'gate_record_payee',
+            'binding',
+            'The Gate record approves a different payee from the one the price lock names',
+            'FAIL',
+            `The signed record approves payment to "${payload.payee}", and this packet’s merchant-signed ` +
+              `price lock names "${payeeFrom}". The money was approved to go somewhere else.`,
+            'local',
+            authority,
+          )
+        : check(
+            'gate_record_payee',
+            'binding',
+            'The Gate record approves the merchant the buyer was shopping at',
+            'PASS',
+            `Both say "${payload.payee}", and that is the merchant in the price lock, so the Gate cleared ` +
+              'payment to the shop the cart was priced for.',
+            'local',
+            authority,
+          ),
+  )
+
+  // --- attempt and mandate: nothing signed names either ----------------------------------------------
+  out.push(
+    check(
+      'gate_record_attempt',
+      'binding',
+      'No signed artefact in this bundle names the attempt this record is for',
+      'WARN',
+      `The signed record says attempt "${payload.att}", and nothing in §7.3's bundle can confirm or contradict ` +
+        'it: the L1 names the user, the L2 names no mandate, the L3s name no attempt, and the price lock names ' +
+        'only a checkout id. So this field is **unverified**, not verified — see README.md, "What the Gate ' +
+        'record cannot be bound to", for the change that would let this row be a real check.',
+      'local',
+      authority,
+    ),
+  )
+  out.push(
+    check(
+      'gate_record_mandate',
+      'binding',
+      'No signed artefact in this bundle names the mandate this record is for',
+      'WARN',
+      `The signed record says mandate "${payload.mdt}", and as with the attempt id there is nothing signed in ` +
+        'this bundle to compare it against. Reported as uncovered rather than passing: a reader deciding whether ' +
+        'to rely on this packet is entitled to know which of its fields are outside every signature.',
+      'local',
+      authority,
+    ),
+  )
+
+  // --- chain_valid and vi_commit: compared with the chain, not with ourselves -------------------------
+  const commit = readStringOrNull(bundle, 'vi_lib_commit')
+  out.push(
+    payload.chain_valid
+      ? check(
+          'gate_record_chain',
+          'binding',
+          'The Gate decided the chain was valid',
+          'PASS',
+          "The signed record says chain_valid true, which is §3.1 I-1's precondition for money to have moved " +
+            'at all under this decision.',
+          'local',
+          authority,
+        )
+      : check(
+          'gate_record_chain',
+          'binding',
+          'The Gate did not find the chain valid',
+          'FAIL',
+          'The signed record carries chain_valid false. §3.1 I-1 says only an ALLOW on a valid chain reaches ' +
+            'PayPal, so a packet presenting this record is presenting a decision that authorised nothing.',
+          'local',
+          authority,
+        ),
+  )
+  out.push(
+    commit === null
+      ? bindingSkipped(
+          'gate_record_vi_commit',
+          'the library version',
+          'this bundle records no vi_lib_commit',
+          authority,
+        )
+      : payload.vi_commit === commit
+        ? check(
+            'gate_record_vi_commit',
+            'binding',
+            'The Gate decided using the library this packet names',
+            'PASS',
+            `Both record ${commit}, so the decision was made against the code an old packet is re-verified ` +
+              'against (§7.3, D2).',
+            'local',
+            authority,
+          )
+        : check(
+            'gate_record_vi_commit',
+            'binding',
+            'The Gate decided using a different library version than this packet names',
+            'FAIL',
+            `The signed record says ${payload.vi_commit} and this packet names ${commit}. A decision made by ` +
+              'different code cannot be re-verified by the code this packet claims produced it.',
+            'local',
+            authority,
+          ),
+  )
+
+  // --- time -----------------------------------------------------------------------------------------
+  out.push(iatBindingCheck(payload, anchors))
+
+  return out
+}
+
+/**
+ * `iat` against the chain's own window.
+ *
+ * The chain's five tokens carry `iat`s that were all signed, by four different keys. A Gate record whose `iat`
+ * falls outside that window was decided for a different transaction — the other half of the substitution the
+ * signature check cannot see, and the reason a record "for a superseded packet version" fails here rather than
+ * passing quietly.
+ *
+ * The window is deliberately **only** the chain's `iat`s and not `nowSec`: this file already reports
+ * `iat`-vs-now as `fresh` on the signature row, and folding a clock comparison in twice would make a
+ * year-old packet fail for a reason the reader would have to disentangle from the real finding.
+ */
+function iatBindingCheck(payload: GateRecordPayload, anchors: ChainAnchors): VerifierCheck {
+  const authority = '§8.10 · §7.3 · AT-M18.1'
+  const window = anchors.iatWindow
+  if (window === null) {
+    return check(
+      'gate_record_iat',
+      'binding',
+      'No signed token in this bundle carries a time',
+      'SKIPPED',
+      'None of the five tokens reported an `iat`, so there is no signed window for the record to fall inside.',
+      'local',
+      authority,
+    )
+  }
+  if (payload.iat < window.earliest) {
+    return check(
+      'gate_record_iat',
+      'binding',
+      'The Gate record was decided before the chain it claims to describe existed',
+      'FAIL',
+      `The record says iat ${payload.iat}, but every signed token in this packet was issued at or after ` +
+        `${window.earliest}. A decision cannot predate the mandate it authorised.`,
+      'local',
+      authority,
+    )
+  }
+  if (payload.iat > window.latest) {
+    return check(
+      'gate_record_iat',
+      'binding',
+      'The Gate record was decided after the chain it claims to describe was issued',
+      'FAIL',
+      `The record says iat ${payload.iat}, while the latest signed token in this packet was issued at ` +
+        `${window.latest}. A decision signed ${payload.iat - window.latest}s after the chain it names is a ` +
+        'record for a different transaction, not for this one.',
+      'local',
+      authority,
+    )
+  }
+  return check(
+    'gate_record_iat',
+    'binding',
+    "The Gate record was decided inside this chain's own window",
+    'PASS',
+    `The record says iat ${payload.iat}, and this packet's signed tokens span ${window.earliest}–` +
+      `${window.latest}.`,
+    'local',
+    authority,
+  )
+}
+
+/** The record's `amount` as money, or `null` when it is not a plain decimal in its own currency. */
+function readRecordAmount(
+  payload: GateRecordPayload,
+): { minor: bigint; currency: Currency } | null {
+  if (!isCurrency(payload.currency)) return null
+  try {
+    return fromPayPalValue(payload.amount, payload.currency)
+  } catch {
+    return null
+  }
+}
+
+function formatMinor(claim: { minor: bigint; currency: string }): string {
+  return isCurrency(claim.currency)
+    ? formatMoney({ minor: claim.minor, currency: claim.currency })
+    : `${claim.minor} minor units of ${claim.currency}`
+}
+
+function bindingSkipped(id: string, field: string, why: string, authority: string): VerifierCheck {
+  return check(
+    id,
+    'binding',
+    `Cannot compare ${field} against the chain`,
+    'SKIPPED',
+    `Skipped because this packet has ${why}. A check that could not run is not a check that passed, and this ` +
+      `page would rather say that than print a tick over ${field}.`,
+    'local',
+    authority,
+  )
+}
+
+/**
+ * Does this packet's `paypal` member name **the** capture and order this dispute is about?
+ *
+ * ## The attack, and why a digest cannot stop it
+ *
+ * §7.3 keeps `paypal` out of the `custom_id` preimage because the order and capture ids do not exist when the
+ * order is created. Re-hashing is therefore legitimate here: `bundle_hash` is over the bundle, so recomputing
+ * it after a substitution produces a document that is internally perfect.
+ *
+ * The anchor is `disputes.capture_id` / `disputes.order_id` — **a different row**, the one this page is served
+ * for. It is not part of the document, so an attacker holding a packet URL and the ability to rewrite
+ * `evidence_packets.bundle` cannot move it. §7.2 also makes those columns the match PayPal's own
+ * `custom_id`-derived dispute points at, which is exactly the identity being claimed here.
+ *
+ * Both directions are reported: a `capture_ids` list that does not *contain* the dispute's capture, and an
+ * `order_id` that is not the dispute's order.
+ */
+function paypalDisputeBindingCheck(
+  bundle: Readonly<Record<string, unknown>>,
+  packet: LoadedPacket,
+): VerifierCheck {
+  const authority = '§7.2 · §7.3 D18 · AT-M18.1'
+  const paypal = readRecord(bundle, 'paypal')
+  if (paypal === null) {
+    return check(
+      'paypal_dispute_binding',
+      'binding',
+      'This packet names no PayPal transaction',
+      'SKIPPED',
+      'The bundle has no `paypal` member, which is normal for a bundle assembled before the order existed — ' +
+        'but it also means there is nothing to compare with the dispute this page is filed under.',
+      'local',
+      authority,
+    )
+  }
+  // `== null` and not `=== null`, deliberately. This check's whole purpose is to distinguish "the dispute row
+  // says X" from "nothing was supplied to compare against", and a caller that omits the member entirely (a
+  // hand-built `LoadedPacket` in a probe or a test) would otherwise have `undefined` compared against a string
+  // and be reported as a mismatch. That is the check crying wolf about its own input — and a page whose
+  // findings include "you did not tell me enough" is a page whose findings get discounted.
+  const disputeOrderId = packet.disputeOrderId ?? null
+  const disputeCaptureId = packet.disputeCaptureId ?? null
+  if (disputeOrderId === null && disputeCaptureId === null) {
+    return check(
+      'paypal_dispute_binding',
+      'binding',
+      'The dispute this packet is filed under names no order or capture',
+      'SKIPPED',
+      '`disputes.order_id` and `disputes.capture_id` are both null, which §7.2 allows until the dispute is ' +
+        'matched to an order via `custom_id`. With nothing on the row, this page has no anchor to compare ' +
+        'against and does not pretend otherwise.',
+      'local',
+      authority,
+    )
+  }
+
+  const orderId = readStringOrNull(paypal, 'order_id')
+  const captures = readStringArray(paypal, 'capture_ids')
+  const problems: string[] = []
+
+  if (disputeOrderId !== null && orderId !== disputeOrderId) {
+    problems.push(
+      `the packet names order ${maskPaypalId(orderId)} while this dispute is about order ` +
+        `${maskPaypalId(disputeOrderId)}`,
+    )
+  }
+  if (disputeCaptureId !== null && !captures.includes(disputeCaptureId)) {
+    problems.push(
+      `the packet lists capture ` +
+        `${captures.length === 0 ? 'none' : captures.map(maskPaypalId).join(', ')} while this dispute is ` +
+        `about capture ${maskPaypalId(disputeCaptureId)}`,
+    )
+  }
+
+  return problems.length === 0
+    ? check(
+        'paypal_dispute_binding',
+        'binding',
+        'This packet is about the capture and order this dispute is for',
+        'PASS',
+        `The dispute row and the bundle agree on one order and one capture (${maskPaypalId(orderId)} and ` +
+          `${maskPaypalId(disputeCaptureId)}, masked). Both values come from the dispute, which is not ` +
+          'part of the document a packet holder can rewrite.',
+        'local',
+        authority,
+      )
+    : check(
+        'paypal_dispute_binding',
+        'binding',
+        'This packet is about a different PayPal transaction than the dispute it is filed under',
+        'FAIL',
+        `${problems.join('; ')}. A packet filed as evidence for one dispute and naming another transaction is ` +
+          'not evidence for this one, no matter how well its digests reproduce.',
+        'local',
+        authority,
+      )
+}
+
+/**
+ * An order or capture id, masked.
+ *
+ * **Both ids are masked in every sentence this page writes about them**, and that is not incidental
+ * tidiness. §8.18 states the packet id is the only identifier the page carries, and `test/verify.test.ts`
+ * asserts the rendered report contains neither the order id nor the capture id. Naming them in a failure
+ * message would reintroduce both into the document — and a check detail is rendered into the page, so a check
+ * that "only" helps a reader could leak the one identifier a reader had no business seeing.
+ *
+ * The mask keeps the first and last two characters, so a reader who holds both ids can still recognise that
+ * they differ, which is the whole reason the message exists.
+ */
+function maskPaypalId(value: string | null): string {
+  return maskOpaqueId(value) ?? '(none)'
+}
+
+/**
+ * Is the read-back the compiler's own rendering, rather than text someone typed?
+ *
+ * §8.8 renders the read-back from a template keyed by constraint type, and `readBack()` emits
+ * `READBACK_HEADER` as its first line, always. A stored read-back that does not begin with it was not produced
+ * by that renderer — so it is not a rendering of **this** mandate, and the buyer may never have seen it.
+ *
+ * `WARN`, not `FAIL`, and the distinction is the honest one. A read-back produced by an older Countersign
+ * would also fail this, and we cannot tell the two apart from the document alone. What we can say without
+ * overreaching is the sentence above, and it is worth saying: **no signature covers this field**, so the only
+ * available question is whether it is self-consistent with the rest of the document. `readback_capped` is that
+ * question; `readback_binding` is the statement that it is not an authentication.
+ */
+function readbackRenderedCheck(bundle: Readonly<Record<string, unknown>>): VerifierCheck {
+  const authority = '§8.8 · §12 EC-MER-6'
+  const value = bundle['readback']
+  if (value === undefined) {
+    // `readback_hash` and `required_members` already FAIL for the omission, with the EC-MER-6 wording. Saying
+    // it a third time would be noise on a page whose whole value is that each row says something new.
+    return check(
+      'readback_rendered',
+      'binding',
+      'There is no read-back to render',
+      'SKIPPED',
+      'This packet has no `readback` member. The omission is already reported by `readback_hash` and ' +
+        '`required_members`.',
+      'local',
+      authority,
+    )
+  }
+  return isCompilerReadback(value)
+    ? check(
+        'readback_rendered',
+        'binding',
+        'The read-back is the compiler’s rendering of a mandate',
+        'PASS',
+        'It begins with §8.8’s fixed first line, which `readback.ts` emits unconditionally. That shows it came ' +
+          'from the renderer rather than from a text box — not that it is *this* mandate’s, which no ' +
+          'signature in the bundle can establish.',
+        'local',
+        authority,
+      )
+    : check(
+        'readback_rendered',
+        'binding',
+        'The read-back is not the compiler’s rendering of any mandate',
+        'WARN',
+        '§8.8 renders every read-back from a template whose first line is always "**What you are ' +
+          'authorising**", so text that does not begin with it was not produced by that renderer. It may be ' +
+          'the rendering of a Countersign version we cannot recognise from the document alone; what is certain ' +
+          'is that nothing here binds it to this purchase.',
+        'local',
+        authority,
+      )
+}
+
+/**
+ * Does the read-back claim a larger allowance than the mandate the buyer signed?
+ *
+ * This is the strongest statement the read-back admits to without a signature, and it is deliberately narrow:
+ *
+ * - the ceiling is the **largest** monetary limit in the signed L2, so a per-payment cap and a total cap both
+ *   compare against a bound no legitimate read-back can exceed;
+ * - money is identified by its **currency symbol**, which is how `formatMoney` writes it, so the check depends
+ *   on the *format* of money rather than on the phrasing of a sentence — the forged text passes a
+ *   keyword-driven parser precisely because it changes the wording;
+ * - a figure that cannot be read is **not** a pass and **not** a failure — `readback_binding` below is what
+ *   covers the gap.
+ *
+ * The forged text used to defeat this page — *"You may spend up to $9,999,999 at any merchant"* — states a cap
+ * 499 850 times the signed ceiling, so it fails here whether or not it carries the renderer's header.
+ *
+ * ### Where this check stops, stated plainly
+ *
+ * A forger who writes a *smaller* invented allowance ("up to $150.00" against a $200.00 mandate) defeats this
+ * row entirely. **That is not a defect in the check; it is the absence of a signature.** Nothing readable in
+ * the text distinguishes an invented permission from a real one when no signature says which is which, and a
+ * check claiming otherwise would be asserting precisely the guarantee the audit found missing. So this row is a
+ * **ceiling**, and {@link readbackBindingCheck} is the row that tells a reader a ceiling is all there is.
+ */
+function readbackCapCheck(bundle: Readonly<Record<string, unknown>>): VerifierCheck {
+  const authority = '§8.8 · §12 EC-MER-6 · §3.1 I-1'
+  const ceiling = readMonetaryCeiling(bundle)
+  const value = bundle['readback']
+  if (value === undefined) {
+    return check(
+      'readback_cap_vs_mandate',
+      'binding',
+      'There is no read-back to compare with the mandate',
+      'SKIPPED',
+      'This packet has no `readback` member; `readback_hash` reports the omission.',
+      'local',
+      authority,
+    )
+  }
+  if (ceiling.kind === 'none') {
+    return check(
+      'readback_cap_vs_mandate',
+      'binding',
+      'The signed mandate states no spending limit to compare a read-back against',
+      'SKIPPED',
+      'No `amount_range` or `budget` constraint with a `max` was found in the signed L2, so there is no ' +
+        'ceiling a stated cap could exceed. This says nothing about whether the text is the buyer’s.',
+      'local',
+      authority,
+    )
+  }
+  if (ceiling.kind === 'ambiguous') {
+    return check(
+      'readback_cap_vs_mandate',
+      'binding',
+      'The mandate caps more than one currency',
+      'SKIPPED',
+      `The signed L2 caps ${ceiling.currencies.join(' and ')}, and a currency symbol in the text (` +
+        '`$` is used by three of them) cannot be attributed to one of them without guessing. Refusing to ' +
+        'guess is the point: a check that guessed here would report a clean packet on a read-back that is not ' +
+        'the buyer’s.',
+      'local',
+      authority,
+    )
+  }
+  const stated = readStatedCaps(value, ceiling.currency)
+  if (stated.length === 0) {
+    return check(
+      'readback_cap_vs_mandate',
+      'binding',
+      'The read-back states no money figure this page can compare',
+      'SKIPPED',
+      'Every amount §8.8 renders carries a currency symbol, so the presence of none means this text was not ' +
+        'written by the renderer — or was written in words. Either way there is no figure to compare against ' +
+        'the signed ceiling, and the text may still not be the buyer’s. See `readback_binding`, which is the ' +
+        'row that says so.',
+      'local',
+      authority,
+    )
+  }
+  const over = stated.filter((minor) => minor > ceiling.max)
+  const allowed = formatMoney({ minor: ceiling.max, currency: ceiling.currency })
+  return over.length === 0
+    ? check(
+        'readback_cap_vs_mandate',
+        'binding',
+        'Every allowance the read-back states is inside the signed mandate',
+        'PASS',
+        `The signed L2 permits at most ${allowed}, and the largest money figure in the text is ` +
+          `${formatMoney({ minor: stated.reduce((a, b) => (a > b ? a : b)), currency: ceiling.currency })} ` +
+          `across ${stated.length} figure${stated.length === 1 ? '' : 's'}. This bounds the text from above; ` +
+          'it does not establish that the buyer was shown it — `readback_binding` is the row that says so.',
+        'local',
+        authority,
+      )
+    : check(
+        'readback_cap_vs_mandate',
+        'binding',
+        'The read-back grants more than the signed mandate allows',
+        'FAIL',
+        `The text states ${over
+          .map((m) => formatMoney({ minor: m, currency: ceiling.currency }))
+          .join(
+            ' and ',
+          )}, and the signed mandate permits at most ${allowed}. A consent text cannot grant ` +
+          'more authority than the mandate it describes — so either this is not the text the buyer approved, ' +
+          'or the mandate on file is not the one they signed.',
+        'local',
+        authority,
+      )
+}
+
+/**
+ * The row that says, in words, what no digest on this page can: **no signature covers the read-back.**
+ *
+ * This is the finding of an audit that went looking for it, and it is the reason this row is `WARN` on every
+ * packet rather than a check that could pass.
+ *
+ * - `readback_sha256` is stored **inside the bundle it covers**. Recomputing it is one line of work for anyone
+ *   holding the document, which makes it a defence against *accidental* corruption and against a buyer who
+ *   edits text without re-hashing. It is not a defence against the party we care about.
+ * - `readback` is a `PACKET_ONLY_MEMBER` (`bundle.ts`), so §7.3 excludes it from the `custom_id` preimage, and
+ *   the L2 does not carry it either — `vi_client/src/types.ts` states that `prompt_summary` "is advisory and
+ *   is not covered by the signature", and the read-back is rendered from that intent rather than signed with
+ *   it.
+ *
+ * So this page cannot say "the buyer read this", and printing a tick that implied it would be the worst thing
+ * it could do: a green page is exactly what a substituted read-back needs. `README.md` records the smallest
+ * change that would let this row become a real check, and why it needs a change outside this package.
+ */
+function readbackBindingCheck(): VerifierCheck {
+  const authority = '§12 EC-MER-6 · §7.3 · D18'
+  return check(
+    'readback_binding',
+    'signature',
+    'No signature in this packet covers the read-back',
+    'WARN',
+    'The read-back’s digest is published inside the document it covers, so recomputing it is one line of ' +
+      'work — that detects a hash mismatch, not a substituted text. And §7.3 keeps `readback` out of the ' +
+      '`custom_id` preimage, so no signature in this bundle commits to these words. **Treat the read-back as ' +
+      'unauthenticated**: this page can tell you it was not edited after its hash was taken, and cannot tell ' +
+      'you the buyer was ever shown it.',
+    'local',
+    authority,
+  )
+}
+
+/**
+ * `preferences` have exactly the same problem as the read-back, and §8.8 says so itself.
+ *
+ * The preference paragraph in every read-back reads "We read … as a preference, not a limit. These are not
+ * signed and do not bound what the agent may buy." That is the compiler telling the truth about its own
+ * output, and this row is the same statement about the packet: a matching `preferences_sha256` is internal
+ * consistency, not provenance.
+ */
+function preferencesBindingCheck(): VerifierCheck {
+  return check(
+    'preferences_binding',
+    'signature',
+    'No signature in this packet covers the preferences',
+    'WARN',
+    '§8.8 states that `preferences` is not a Verifiable Intent constraint and is not signed. The block and its ' +
+      'digest are consistent with each other, which rules out a hash mismatch, and nothing more. A merchant ' +
+      'could publish a preferences block the buyer never gave, and every digest here would still agree.',
+    'local',
+    '§12 EC-MER-6 · §8.8',
+  )
+}
+
+function readRecord(
+  bundle: Readonly<Record<string, unknown>>,
+  key: string,
+): Record<string, unknown> | null {
+  const value = bundle[key]
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function readStringArray(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key]
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string')
 }
 
 /**

@@ -25,6 +25,7 @@
  * | File | Owns | The trap it exists to avoid |
  * |---|---|---|
  * | `bundle.ts` | canonicalisation, both digests, SD-JWT decoding, the **raw download** document | Two implementations of JCS would be two digests for one document. |
+ * | `binding.ts` | what the **signed** artefacts assert: the price lock's total and merchant, L3a's payee, the chain's `iat` window, the L2's spending ceiling | A digest is a function of the document, so it cannot bind it. Only a signature the forger cannot produce can. |
  * | `redact.ts` | the **redacted page** document and `assertRedactionHolds` | "Redacted" that is only hidden by CSS leaves the raw L1 in the page's JSON. |
  * | `verify-view.ts` | the per-check rows, the report model, the URL helper, **AT-M18.2's** limiter | A single green tick would have to hide D-009 and D19. |
  * | `verify-py.ts` | the generated offline script | A code block is not evidence, and a script with no embedded digest proves nothing. |
@@ -32,6 +33,11 @@
  *
  * ## What this package will not do
  *
+ * - **No green tick on a field no signature covers.** `readback` and `preferences` are §7.3
+ *   `PACKET_ONLY_MEMBER`s, outside the `custom_id` preimage and absent from the signed L2. `readback_binding`
+ *   and `preferences_binding` report that as a `WARN` on every packet, and §8.10's `att`/`mdt` likewise — see
+ *   `README.md`, "What cannot be bound to anything". A page that cannot establish a field says so; a page that
+ *   ticks it is worse than one that admits the gap, because the tick is what an adversary needs.
  * - **No LLM, anywhere.** There is no model member on {@link VerifierDeps}, and adding one would mean the
  *   page's conclusions were generated rather than computed.
  * - **No money arithmetic.** Amounts cross as integer minor units and are only ever rendered (§0, EC-FX-6).
@@ -85,6 +91,20 @@ export {
   type RawBundleInput,
   type SdJwtDisclosure,
 } from './bundle'
+
+// --- the anchors: what the signed artefacts in a bundle actually assert ---------------------------------
+export {
+  isCompilerReadback,
+  READBACK_HEADER,
+  readChainAnchors,
+  readMonetaryCeiling,
+  readStatedCaps,
+  type ChainAnchors,
+  type L3aAnchor,
+  type MoneyClaim,
+  type MonetaryCeiling,
+  type PriceLockAnchor,
+} from './binding'
 
 // --- EC-PRIV-3 the redaction ----------------------------------------------------------------------
 export {
