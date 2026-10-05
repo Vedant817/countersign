@@ -236,6 +236,35 @@ export interface GateDeps {
   /** Check 4 — `ViClient.verify` with `strict: true`. */
   verify(request: VerifyRequest): Promise<Result<VerifyResponse, CsError>>
 
+  /**
+   * Check 4 — **the chain's L1**. `repos/devices.ts::findL1ForDeviceWallet`.
+   *
+   * ### Why this port exists, and why check 4 could not work without it
+   *
+   * `/v1/verify` takes the **whole chain**: `l1`, `l2`, `l3a`, `l3b`. §8.10's `GateInput` carries only
+   * `l3a` and `l3b`, and that is not an omission: `l1` and `l2` are not the agent's to present. They were
+   * issued to the **buyer's device** when the mandate was created, stored, and are the same bytes on every
+   * subsequent purchase. So they come from stored mandate state, and check 4 has to ask for them.
+   *
+   * ### Why the shape is `(deviceId, walletId)` and not an id
+   *
+   * `l1_credentials` is unique on `(device_id, wallet_id)` — §7.2's "one per device×wallet" — and a
+   * mandate names both of those columns. So the mandate identifies its own L1 with no extra bookkeeping,
+   * and there is no second row to choose between. `repos/mandates.ts` already resolves the same row when
+   * it enforces `mandate.exp <= L1.exp`, which is why this is a lookup rather than a new concept.
+   *
+   * ### `undefined` means a real absence, and it is a BLOCK
+   *
+   * Not an error and not an invitation to substitute a default. A mandate with no L1 for its device has a
+   * chain vi cannot be shown, so check 4 cannot obtain a verdict, so nothing downstream of "the chain
+   * verified" — including D19's obligation discharge — may be claimed. Returning `undefined` rather than a
+   * token that is not there is what makes "we hold the L1" a fact this process can be asked about.
+   */
+  findL1ForDeviceWallet(
+    deviceId: string,
+    walletId: string,
+  ): Promise<Result<RowOfL1 | undefined, CsError>>
+
   /** Checks 5 and 6 — `repos/checkout.ts::requireCheckoutSession`. */
   checkout(id: CheckoutId): Promise<Result<CheckoutSessionRow | undefined, CsError>>
 
@@ -312,6 +341,17 @@ export interface RowOfAgents {
 export interface RowOfDevices {
   readonly id: string
   readonly status: string
+}
+
+/**
+ * `l1_credentials` row, as check 4 reads it: `sd_jwt` and nothing else.
+ *
+ * Narrowed rather than re-exported whole, for the same reason `RowOfDevices` is: the Gate's read surface
+ * is an audit surface, and `sd_jwt` is the only column in this table the Gate has any business holding.
+ */
+export interface RowOfL1 {
+  /** The issuer's SD-JWT for this device×wallet — the serialized `l1` sent to `/v1/verify`. */
+  readonly sd_jwt: string
 }
 
 export type DeviceIdLike = `dev_${string}`

@@ -20,6 +20,37 @@ export const systemClock: Clock = {
   nowSec: () => Math.floor(Date.now() / 1000),
 }
 
+/**
+ * Whole epoch seconds for a `Date` read out of the database.
+ *
+ * ## Why this exists rather than an inline `Math.floor(d.getTime() / 1000)`
+ *
+ * AGENTS.md rule 10 puts time in the database as `timestamptz` and in tokens as **UTC epoch
+ * seconds**, so every DB read has to make that conversion, and `Math.floor(x / 1000)` is the shape of
+ * it. That is the *same shape* as the money bug the discipline scanner hunts — `Math.round(totalMinor
+ * / 100)` — with the opposite meaning, and the scanner cannot tell them apart from text alone. It
+ * flagged `apps/worker`'s `reservedAtSec: Math.floor(attempt.created_at.getTime() / 1000)` because
+ * `MONEY_NAME` matches `reserve` inside `reservedAtSec`.
+ *
+ * Rounding a **timestamp** to whole seconds is not a defect; it is what the storage format requires.
+ * Rounding an **amount** from minor units to major units loses or invents money. Both are
+ * `Math.floor(x / 1000)`.
+ *
+ * So the conversion is named here, once, where the intent is unambiguous, and callers say which
+ * conversion they mean. {@link fromMinorUnits} is the money one, and it takes a `Money`.
+ */
+export function epochSecFrom(date: Date): number {
+  const ms = date.getTime()
+  if (!Number.isFinite(ms)) {
+    // A `timestamptz` column is `NOT NULL`, so this means the driver handed back something that is
+    // not a date. Rounding it to 0 would silently place the event at the epoch, which is worse than
+    // refusing: a reservation released "infinitely long ago" and one released "now" are both wrong,
+    // and only one of them is visible.
+    throw new RangeError(`epochSecFrom: not a valid Date (getTime() returned ${String(ms)})`)
+  }
+  return Math.floor(ms / 1000)
+}
+
 /** A clock frozen at `sec`. Tests advance it by reassigning `sec` or using {@link advanceClock}. */
 export function fixedClock(
   sec: number,

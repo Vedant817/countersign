@@ -33,7 +33,17 @@ import {
 
 import { evaluate, describeDecision, pendingObligations } from '../src/index'
 import { CHECK_ORDER } from '../src/checks'
-import { CART_MINOR, MANDATE_ID, NOW_SEC, input, makeWorld } from './fixtures'
+import {
+  CART_MINOR,
+  CAP_MINOR,
+  MANDATE_ID,
+  NOW_SEC,
+  disclosed,
+  input,
+  makeWorld,
+  recurrenceConstraint,
+  viSkipsBudget,
+} from './fixtures'
 import type { GateDecision } from '../src/types'
 
 /** `verify.constraints.skipped` exactly as `apps/vi` emits it, annotated and all. */
@@ -136,16 +146,7 @@ describe('pendingNetworkEnforcement over the wire shapes apps/vi emits', () => {
 
 describe('a non-empty obligation is work, not information', () => {
   it('check 4 records it even when the chain is perfectly valid', async () => {
-    const world = await makeWorld({
-      verify: {
-        constraints: {
-          satisfied: true,
-          violations: [],
-          checked: ['mandate.payment.amount_range'],
-          skipped: asViEmits(['mandate.payment.budget']),
-        },
-      },
-    })
+    const world = await makeWorld({ verify: viSkipsBudget(CAP_MINOR) })
 
     const decision = await decide(world)
 
@@ -162,17 +163,15 @@ describe('a non-empty obligation is work, not information', () => {
   it('`constraints.satisfied: true` cannot make check 8 skip the budget', async () => {
     // The failure mode, stated as a test: a Gate that read `satisfied` as covering the budget would ALLOW
     // the $999.00 cart the injection asked for, because vi would have said everything it checked was fine.
+    //
+    // Here the *account* cap is the tighter one — a signed $200.00 against a `budget_accounts` cap of
+    // $20.00 — so the refusal comes from `reserveIn` and the code is the one §8.10 lists. This is the
+    // complement of QA-gate-1, where the signature was the tighter one. Both must refuse; the test says
+    // which of the two limits was the binding one so a regression cannot quietly swap them.
     const world = await makeWorld({
-      // $20.00 cap against a $30.00 cart, so check 8 has to refuse.
+      // $20.00 account cap against a $30.00 cart, so check 8 has to refuse.
       capMinor: 2_000n,
-      verify: {
-        constraints: {
-          satisfied: true,
-          violations: [],
-          checked: ['mandate.payment.amount_range'],
-          skipped: asViEmits(['mandate.payment.budget']),
-        },
-      },
+      verify: viSkipsBudget(20_000n),
     })
 
     const decision = await decide(world)
@@ -180,27 +179,61 @@ describe('a non-empty obligation is work, not information', () => {
     // vi said "satisfied" — and check 8 still refused, because vi never looked at the budget.
     expect(decision.reasons.map((r) => r.code)).toContain('GATE_BUDGET_EXCEEDED')
     expect(decision.checks.find((c) => c.n === 8)!.passed).toBe(false)
+    expect(decision.checks.find((c) => c.n === 8)!.detail).toContain('budget_accounts.cap_minor')
   })
 
-  it('an obligation survives into the signed record, so a dispute can see it', async () => {
+  it('an obligation nobody can discharge is a BLOCK, not a note in the record', async () => {
+    // vi owes us `mandate.payment.recurrence`; the chain discloses no recurrence constraint and neither
+    // does our cache. The old code reported check 11 **not applicable** — a non-blocking row by design —
+    // while the decision record carried the obligation and the decision was ALLOW. Nobody enforced
+    // anything, and the evidence said so in a field nobody reads (QA-gate-2).
     const world = await makeWorld({
-      signWithRealKey: true,
       verify: {
         constraints: {
           satisfied: true,
           violations: [],
           checked: [],
-          skipped: asViEmits(['mandate.payment.recurrence']),
+          skipped: [{ type: 'mandate.payment.recurrence', reason: 'network-enforced' }],
         },
+        disclosed: disclosed([]),
       },
     })
+
     const decision = await decide(world)
 
-    // The record carries `checks_hash` over all twelve results, and the decision carries the obligation
-    // list. A `RECURRENCE` row reported *not applicable* (no such constraint disclosed) alongside a
-    // `recurrence` obligation is the combination a reader needs to see.
+    expect(decision.decision).toBe('BLOCK')
     expect(decision.pendingNetworkEnforcement).toEqual(['mandate.payment.recurrence'])
-    expect(decision.checks.find((c) => c.n === 11)!.notApplicable).toBe(true)
+    const row = decision.checks.find((c) => c.n === 11)!
+    // `notApplicable` is non-blocking (`evaluate.ts::resolveOutcome`), so the row must NOT claim it.
+    expect(row.notApplicable).toBeUndefined()
+    expect(row.passed).toBe(false)
+    expect(decision.reasons.map((r) => r.code)).toContain('VI_CONSTRAINT_VIOLATION')
+  })
+
+  it('a discharged obligation is visible as one, so `passed: true` next to an obligation is self-explaining', async () => {
+    // The complement of the case above, and the reason to assert it: a `RECURRENCE` row reading
+    // `passed: true` while `pendingNetworkEnforcement` lists `mandate.payment.recurrence` used to be
+    // ambiguous — was it enforced, or was it skipped and nobody said? The detail now names the
+    // obligation it discharged and the source it read the window from.
+    const world = await makeWorld({
+      verify: {
+        constraints: {
+          satisfied: true,
+          violations: [],
+          checked: [],
+          skipped: [{ type: 'mandate.payment.recurrence', reason: 'network-enforced' }],
+        },
+        disclosed: disclosed([recurrenceConstraint({ number: 5 })]),
+      },
+    })
+
+    const decision = await decide(world)
+
+    expect(decision.decision).toBe('ALLOW')
+    expect(decision.pendingNetworkEnforcement).toEqual(['mandate.payment.recurrence'])
+    const detail = decision.checks.find((c) => c.n === 11)!.detail!
+    expect(detail).toContain('D19 obligation discharged for mandate.payment.recurrence')
+    expect(detail).toContain('verified chain')
   })
 })
 

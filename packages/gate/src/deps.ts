@@ -44,6 +44,7 @@ import type {
   CheckoutSessionRow,
   DeviceRow,
   Exec,
+  L1Row,
   MandateRow,
   ProductRow,
   WalletCapRow,
@@ -52,6 +53,7 @@ import type {
   countRecentAttempts,
   createAttempt,
   findAttemptByL3Jti,
+  findL1ForDeviceWallet,
   findProductsBySku,
   listAttemptsForMandate,
   requireCheckoutSession,
@@ -61,7 +63,7 @@ import type {
 import type { BudgetBalance, BudgetStore, WalletCapPeriod } from '@countersign/db'
 import type { NewBudgetAccountRow, NewBudgetEntry } from '@countersign/db'
 import type { VerifyRequest, VerifyResponse, ViClient } from '@countersign/vi-client'
-import { normaliseSkipped } from '@countersign/vi-client'
+import { normaliseSkipped, verifyRequestSchema } from '@countersign/vi-client'
 import { merchantKeySetFromJwks } from './decision-record'
 import type {
   AttemptState,
@@ -71,6 +73,7 @@ import type {
   NewAttemptForGate,
   RowOfAgents,
   RowOfDevices,
+  RowOfL1,
 } from './types'
 
 /* ------------------------------------------------------------------------------------------ */
@@ -97,6 +100,15 @@ export interface GateRepoHandles {
     id: string,
     exec?: Exec,
   ) => Promise<Result<DeviceRow | undefined, CsError>>
+  /**
+   * `repos/devices.ts::findL1ForDeviceWallet` — check 4's `l1`.
+   *
+   * Already exported by `@countersign/db` and already used by `repos/mandates.ts` to enforce
+   * `mandate.exp <= L1.exp`, so this adds no query and no new concept: the Gate asks for the same row the
+   * mandate-creation path asked for. §7.2's unique index on `(device_id, wallet_id)` is what makes the
+   * two-key lookup a lookup rather than a search.
+   */
+  readonly findL1ForDeviceWallet: typeof findL1ForDeviceWallet
   /** `repos/checkout.ts::requireCheckoutSession` — checks 5, 6, 7 and 10. */
   readonly requireCheckoutSession: typeof requireCheckoutSession
   /** `repos/products.ts::findProductsBySku` — check 10. */
@@ -231,6 +243,18 @@ export function gateDepsFromRepos(handles: GateRepoHandles): GateDeps {
       return ok(narrow)
     },
 
+    // Check 4's L1. Narrowed to `sd_jwt` for the same reason `device` is narrowed to `{id, status}`:
+    // the Gate holds the serialized token and nothing else from this table. An absent row stays
+    // `undefined` so `chainTokens` can refuse by name instead of sending a token it does not have.
+    findL1ForDeviceWallet: async (deviceId, walletId) => {
+      const found = await handles.findL1ForDeviceWallet(deviceId, walletId)
+      if (!found.ok) return found
+      const row: L1Row | undefined = found.value
+      if (!row) return ok(undefined)
+      const narrow: RowOfL1 = { sd_jwt: row.sd_jwt }
+      return ok(narrow)
+    },
+
     verify: (request: VerifyRequest) => handles.vi.verify(request),
 
     checkout: (id) => handles.requireCheckoutSession(id),
@@ -307,6 +331,7 @@ export const DEFAULT_GATE_DEPS: Readonly<Record<keyof GateDeps, 'required' | 'op
     transaction: 'required',
     agent: 'required',
     device: 'required',
+    findL1ForDeviceWallet: 'required',
     verify: 'required',
     checkout: 'required',
     merchantKeys: 'required',
@@ -602,6 +627,17 @@ export interface InMemoryGateWorldSeed {
   readonly mandate?: Partial<MandateRow>
   readonly agent?: Partial<RowOfAgents>
   readonly device?: Partial<RowOfDevices>
+  /**
+   * The `l1_credentials` row check 4 reads, as `sd_jwt`. `null` models a device×wallet with **no** L1 —
+   * the real absence, not a malformed token — and is what check 4 must refuse by name.
+   *
+   * It exists because the in-memory world's `verify` is a stub, and a stub happily accepts whatever it is
+   * handed. That is how `l1: ''` / `l2: ''` shipped: every gate test passed, and the production binding —
+   * the one that runs `ViClient.verify`'s request validation — was never executed. So this row and
+   * `mandate.l2_serialized` are now the only things standing between a gate test and the same
+   * client-side refusal production got, and a test that wants the refusal can ask for it here.
+   */
+  readonly l1?: RowOfL1 | null
   readonly session?: Partial<CheckoutSessionRow>
   readonly products?: readonly ProductRow[]
   readonly budget?: { readonly cap: Money }
@@ -681,6 +717,8 @@ export interface InMemoryGateWorld {
   readonly replays: string[]
   readonly setProducts: (rows: readonly ProductRow[]) => void
   readonly setAttemptStates: (states: AttemptState[]) => void
+  /** Remove or replace the L1 mid-decision. `null` models the row ceasing to exist. */
+  readonly setL1: (row: RowOfL1 | null) => void
   readonly balance: () => Promise<Result<BudgetBalance, CsError>>
   /** The reserved / spent / cap / version the Gate left behind. */
   readonly snapshot: () => {
@@ -798,6 +836,11 @@ export function createInMemoryGateWorld(seed: InMemoryGateWorldSeed = {}): InMem
   let products: ProductRow[] = [...(seed.products ?? [])]
   let attemptStates: AttemptState[] = (seed.attempts ?? []).map((a) => a.state as AttemptState)
   const seenJtis = new Set<string>((seed.attempts ?? []).map((a) => a.l3_jti))
+  // `null` — not `undefined` — is the modelled *absence*, so `seed.l1: null` and "no seed given" are the
+  // same thing here and neither can be confused with a row whose `sd_jwt` is empty. The default is a
+  // non-empty stand-in rather than `''` for the reason above: a world that shipped `''` would have made
+  // this defect invisible for another release.
+  let l1: RowOfL1 | null = seed.l1 === undefined ? { sd_jwt: 'l1-sd-jwt' } : seed.l1
 
   const insertedAttempts: CheckoutAttemptRow[] = []
   const suspensions: Array<{ mandateId: MandateId; reason: string }> = []
@@ -935,8 +978,48 @@ export function createInMemoryGateWorld(seed: InMemoryGateWorldSeed = {}): InMem
     device: async (id) =>
       ok(id === deviceId ? { id: deviceId, status: seed.device?.status ?? 'ACTIVE' } : undefined),
 
-    verify: async (request) =>
-      ok(await verifyWithSignatureCheck({ l3a: request.l3a ?? '', l3b: request.l3b ?? '' })),
+    findL1ForDeviceWallet: async (requestedDevice, requestedWallet) =>
+      // The device×wallet pair must match, exactly as §7.2's unique index requires. A lookup that ignored
+      // either half would let one device's credential stand in for another's.
+      ok(
+        requestedDevice === deviceId && requestedWallet === walletId && l1 !== null
+          ? l1
+          : undefined,
+      ),
+
+    verify: async (request) => {
+      // ### The real client's own pre-flight, run here on purpose
+      //
+      // `ViClient.verify` validates its request through `verifyRequestSchema` **before the first fetch**
+      // (`vi-client/src/client.ts::call`), and that schema declares `l1` and `l2` as `boundedString(…)`,
+      // i.e. `min(1)`. This double used to skip straight to its answer, which is precisely how
+      // `checks.ts` shipped `l1: ''` / `l2: ''`: every gate test called a stub that accepts an empty
+      // chain, so the production binding was never exercised and a defect that BLOCKed every decision in
+      // the product was invisible in the suite.
+      //
+      // Validating here makes every gate test a guard against that class of bug. It is a *faithful*
+      // addition, not a stricter one: the failure is the same `CS_VALIDATION` `err` the real client
+      // returns, with no fetch attempted, so a test that trips it is learning exactly what production
+      // would have learned.
+      const checked = verifyRequestSchema.safeParse(request)
+      if (!checked.success) {
+        return err(
+          csError(
+            'CS_VALIDATION',
+            `POST /v1/verify request failed validation: ${checked.error.issues
+              .slice(0, 8)
+              .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+              .join('; ')}`,
+            {
+              issues: checked.error.issues
+                .slice(0, 8)
+                .map((i) => ({ path: i.path.join('.'), message: i.message })),
+            },
+          ),
+        )
+      }
+      return ok(await verifyWithSignatureCheck({ l3a: request.l3a ?? '', l3b: request.l3b ?? '' }))
+    },
 
     checkout: async (id) => (id === checkoutId ? ok(session) : ok(undefined)),
 
@@ -1015,6 +1098,9 @@ export function createInMemoryGateWorld(seed: InMemoryGateWorldSeed = {}): InMem
     replays,
     setProducts: (rows) => {
       products = [...rows]
+    },
+    setL1: (row) => {
+      l1 = row
     },
     setAttemptStates: (states) => {
       attemptStates = [...states]

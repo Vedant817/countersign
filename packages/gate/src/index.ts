@@ -26,10 +26,10 @@
  * | 5 | Checkout JWT hash == L3b `checkout_hash`, signed by a current-or-retired merchant kid | `checkout_sessions` + `jwks` | `VI_CHAIN_INVALID` |
  * | 6 | `price_lock_exp > now`, totals == L3a amount, currency equal | `checkout_sessions` + L3a claims | `GATE_PRICE_LOCK_EXPIRED` / `CS_CURRENCY_MISMATCH` |
  * | 7 | L3 `jti` unused | the `checkout_attempts` insert | `GATE_REPLAY` |
- * | 8 | Budget: `FOR UPDATE`, `reserved+spent+amount ≤ cap`, insert RESERVE | `BudgetStore` | `GATE_BUDGET_EXCEEDED` |
+ * | 8 | Budget: `FOR UPDATE`, `reserved+spent+amount ≤ min(signed L2 budget, cap)`, insert RESERVE | `BudgetStore` + the verified chain's `disclosed.l2` | `GATE_BUDGET_EXCEEDED` (+ `VI_CONSTRAINT_VIOLATION`) |
  * | 9 | Wallet cap for the period, across all mandates | `wallet_caps` + `budget_entries` | `GATE_WALLET_CAP` |
  * | 10 | Stock for every line | `products` | `GATE_OUT_OF_STOCK` |
- * | 11 | Recurrence windows, if present | `budget_entries` + the signed L2 | `VI_CONSTRAINT_VIOLATION` |
+ * | 11 | Recurrence windows, if present | `budget_entries` + the verified chain's `disclosed.l2` + the `mandates.constraints` cache | `VI_CONSTRAINT_VIOLATION` |
  * | 12 | Velocity: >5 attempts / 10 min, or >3 BLOCKs in a row → `REVIEW` + `SUSPENDED` | `checkout_attempts` | `GATE_BLOCKED` |
  *
  * ## The D19 obligation, in one paragraph
@@ -44,11 +44,27 @@
  * while a signed cap sits unevaluated, and a Gate written that way fails **open**, in favour of spending.
  * docs/DECISIONS.md **D-019** is the long version, and the type system enforces the short one.
  *
+ * ## An obligation nobody can discharge is a BLOCK, not a note
+ *
+ * Recording an obligation is not discharging it. So the numbers themselves are read from the **verified
+ * chain** — `VerifyResponse.disclosed.l2`, the payload vi decoded out of the `sd-jwt+kb` the buyer's
+ * device key signed while verifying the very chain check 4 already asked about. There is no extra
+ * network call: it is a field on the response in hand. `mandates.constraints` and
+ * `budget_accounts.cap_minor` are still *read*, because each is a limit the buyer is bound by, but they
+ * are caches: where they disagree with the signature the **smaller** number is enforced.
+ *
+ * And if a constraint vi named as network-enforced cannot be read at all, `obligationUnmet` returns a
+ * `VI_CONSTRAINT_VIOLATION` and the decision is `BLOCK`. A `REVIEW` was considered and rejected: §8.10's
+ * table gives no `REVIEW` for an unenforceable signed budget, and a check that can be waved through is a
+ * check that eventually will be.
+ *
  * ## What lives here
  *
  * - `evaluate.ts` — `evaluate(i, deps)`: one clock read, twelve checks, compensation, one signed record.
  * - `checks.ts` — checks 1–7 and 10–11, plus `CHECK_ORDER`, the one list of the twelve.
  * - `budget-guard.ts` — checks 8 and 9, in one transaction, and the reservation release.
+ * - `signed-constraints.ts` — the buyer's **signed** budget and recurrence, read from the verified
+ *   chain, and the `min`-of-every-limit rule that makes a cache unable to loosen a signature.
  * - `velocity.ts` — check 12's arithmetic and the `SUSPENDED` consequence.
  * - `decision-record.ts` — the nine-field JWS, `checks_hash`, the JWKS, and local verification.
  * - `deps.ts` — the `GateDeps` contract, an in-memory store that models `FOR UPDATE`, and the wiring
@@ -71,9 +87,12 @@ export {
 } from './evaluate'
 
 export {
+  BUDGET_OBLIGATIONS,
   CHECK_ORDER,
   CHECK_FAILURE_CODES,
+  RECURRENCE_OBLIGATIONS,
   cartLines,
+  chainTokens,
   check1MandateActive,
   check10Stock,
   check11Recurrence,
@@ -89,8 +108,10 @@ export {
   decisionCurrency,
   l3aAmount,
   loadSession,
+  obligationUnmet,
   pendingObligations,
   reasonCodes,
+  recurrenceObligationsMet,
   type CheckContext,
   type CheckHooks,
   type CheckResult,
@@ -106,6 +127,30 @@ export {
   handleFor,
   GATE_BLOCK_RELEASE,
 } from './budget-guard'
+
+// --- the signed constraints D19 makes the Gate enforce ------------------------------------------
+export {
+  AGENT_RECURRENCE_CONSTRAINT_TYPE,
+  BUDGET_CONSTRAINT_TYPE,
+  CONSTRAINT_SOURCE,
+  NO_DISCLOSED_CONSTRAINTS,
+  RECURRENCE_CONSTRAINT_TYPE,
+  capSourceLabel,
+  checkCapCurrencies,
+  describeSources,
+  disclosedConstraints,
+  effectiveBudgetCap,
+  mergeRecurrenceConstraints,
+  readSignedBudget,
+  type BudgetCapCandidate,
+  type BudgetCapSource,
+  type BudgetReading,
+  type ConstraintSource,
+  type DisclosedConstraints,
+  type EffectiveBudgetCap,
+  type RecurrenceReading,
+  type SignedBudget,
+} from './signed-constraints'
 
 export {
   assessVelocity,
@@ -158,6 +203,7 @@ export {
   type ReservationHandle,
   type RowOfAgents,
   type RowOfDevices,
+  type RowOfL1,
   type VelocityVerdict,
 } from './types'
 

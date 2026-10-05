@@ -28,7 +28,7 @@ import {
   type Currency,
   type MandateId,
 } from '@countersign/core'
-import type { CheckoutSessionRow, ProductRow } from '@countersign/db'
+import type { CheckoutSessionRow, JsonValue, ProductRow } from '@countersign/db'
 
 import { gateJwks, recordSigner } from '../src/decision-record'
 import {
@@ -327,6 +327,139 @@ export function product(
 
 /** One $30.00 line, which is what the session is priced from by default. */
 export const DEFAULT_PRODUCTS: readonly ProductRow[] = [product('NW-001', CART_MINOR)]
+
+/* ------------------------------------------------------------------------------------------ */
+/* The signed constraints, as vi discloses them                                                    */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * A `mandate.payment.budget` constraint exactly as it appears in the signed L2.
+ *
+ * `max` is a **JSON number** of integer minor units, because that is the shape `vi-client`'s
+ * `budgetConstraintSchema` accepts (`z.number().int()`). The Gate converts it to `bigint` through
+ * core's `bigintFromJson`; nothing here does the conversion, so a test cannot accidentally smuggle a
+ * rounded double into a money assertion.
+ */
+export function budgetConstraint(
+  maxMinor: bigint | number,
+  currency: Currency = 'USD',
+): Record<string, JsonValue> {
+  const max = typeof maxMinor === 'bigint' ? Number(maxMinor) : maxMinor
+  if (!Number.isSafeInteger(max)) {
+    throw new Error(`budgetConstraint: ${maxMinor} is outside the safe integer range`)
+  }
+  return { type: 'mandate.payment.budget', currency, max, min: null }
+}
+
+/** A `mandate.payment.recurrence` constraint as it appears in the signed L2. */
+export function recurrenceConstraint(
+  overrides: Record<string, JsonValue> = {},
+): Record<string, JsonValue> {
+  return {
+    type: 'mandate.payment.recurrence',
+    frequency: 'MNTH',
+    start_date: DATE_BEFORE,
+    end_date: DATE_AFTER,
+    number: 1,
+    ...overrides,
+  }
+}
+
+/**
+ * `VerifyResponse.disclosed.l2` with these constraints inside the payment mandate's disclosure.
+ *
+ * ## The shape is the whole point
+ *
+ * This mirrors `apps/vi`'s `verify.py`: `disclosed.l2` is the resolved L2 payload, the mandates live in
+ * `delegate_payload`, and each carries the `constraints` array vi itself walks to decide which types
+ * were "network-enforced". So a test that puts the buyer's ceiling here is putting it in **the token**,
+ * not in a column — which is the distinction the whole D19 fix turns on. A test that puts it only in
+ * `mandate.constraints` is putting it in our cache, and the Gate must then be the *only* thing stopping
+ * the overspend.
+ */
+export function disclosedL2(constraints: readonly unknown[]): Record<string, unknown> {
+  return {
+    iss: 'https://issuer.example',
+    iat: NOW_SEC - 3_600,
+    exp: NOW_SEC + 86_400,
+    delegate_payload: [
+      { vct: 'mandate.checkout.open.1', constraints: [] },
+      { vct: 'mandate.payment.open.1', constraints: [...constraints] },
+    ],
+  }
+}
+
+/**
+ * A complete `VerifyResponse.disclosed` whose `l2` carries these constraints.
+ *
+ * A helper rather than `{l2: …}` inline, because `DisclosedReport` requires all four layers and a test
+ * that omits three of them should not need a cast to say "the L2 is the interesting one".
+ */
+export function disclosed(constraints: readonly unknown[]): {
+  l1: Record<string, unknown>
+  l2: Record<string, unknown>
+  l3a: Record<string, unknown>
+  l3b: Record<string, unknown>
+} {
+  return { l1: {}, l2: disclosedL2(constraints), l3a: {}, l3b: {} }
+}
+
+/** One `constraints.skipped` entry: the object form `apps/vi` emits after D-019. */
+function skipsBudget(): readonly { type: string; reason: string }[] {
+  return [
+    {
+      type: 'mandate.payment.budget',
+      reason:
+        'Network-enforced constraint. Not evaluated by verifiable_intent; ' +
+        "Countersign's Gate enforces it (spec D19). NOT satisfied by this response.",
+    },
+  ]
+}
+
+/**
+ * The whole D19 budget seed: vi reports the obligation **and** the chain discloses the ceiling.
+ *
+ * The two travel together on purpose. A test cannot say "the buyer signed a budget nobody evaluated"
+ * without also saying what the ceiling is, so a fixture cannot casually describe the state where the
+ * obligation exists and the signed number does not — which is the state the Gate must refuse, and which
+ * {@link viSkipsBudgetButDisclosesNoCeiling} builds on purpose when that is the thing under test.
+ *
+ * `maxMinor` is the ceiling **in the token**, and it is deliberately not defaulted: the point of the fix
+ * is that the number the buyer signed is what the Gate enforces, and a defaulted fixture would let a
+ * test pass without ever naming it.
+ */
+export function viSkipsBudget(maxMinor: bigint | number, currency: Currency = 'USD') {
+  return {
+    constraints: {
+      satisfied: true,
+      violations: [],
+      checked: ['mandate.payment.amount_range'],
+      skipped: skipsBudget(),
+    },
+    disclosed: disclosed([budgetConstraint(maxMinor, currency)]),
+  }
+}
+
+/**
+ * The obligation with **no** readable ceiling in the chain — the fail-closed state.
+ *
+ * `mandate.payment.budget` is in `skipped` and `disclosed.l2` carries the payment mandate with an empty
+ * `constraints` array, so the obligation is real and the number is genuinely absent. §8.8 would not
+ * normally produce this pair, which is exactly why it is worth a test: a vi-service that dropped the
+ * disclosure, a chain whose `constraints` were redacted, or any future regression in this package's
+ * reader all land here, and the answer has to be "nothing was charged".
+ */
+export function viSkipsBudgetButDisclosesNoCeiling() {
+  return {
+    constraints: {
+      satisfied: true,
+      violations: [],
+      checked: ['mandate.payment.amount_range'],
+      skipped: skipsBudget(),
+    },
+    disclosed: disclosed([]),
+  }
+}
 
 /* ------------------------------------------------------------------------------------------ */
 /* The world                                                                                     */

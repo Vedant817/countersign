@@ -1,0 +1,264 @@
+{
+  "_meta": {
+    "capture_mechanism": "apps/vi/tests/conftest.py::ChainBuilder driving /v1/l1/issue, /v1/l2/prepare, /v1/l2/finalize, /v1/checkout-jwt, /v1/l3/create, then POST /v1/verify",
+    "captured_at_utc": "2026-10-05",
+    "captured_with": "apps/vi's real routes through fastapi.testclient.TestClient with a fixed clock (no sockets, no PayPal, no credentials)",
+    "how_to_regenerate": "cd apps/vi && .venv/Scripts/python.exe <capture script>, which rebuilds this file from the route response. See packages/gate/README.md.",
+    "signed_budget_json_path": "verify_response.disclosed.l2.delegate_payload[1].constraints[2] (vct=mandate.payment.open.1)",
+    "signed_budget_max_minor": 13000,
+    "signed_budget_min_is_omitted": true,
+    "vi_lib_commit": "356c29635f1c44df7de02edb58699ca9f29bece6",
+    "what_this_file_is_for": "signed-constraints.ts reads the buyer's signed spending ceiling out of VerifyResponse.disclosed.l2.delegate_payload[*].constraints. Before this capture existed, that path was only asserted against a hand-built object, which cannot distinguish a reader that matches real vi output from one that matches the author's idea of it. Everything under `verify_response` is byte-for-byte what POST /v1/verify returned."
+  },
+  "verify_request": {
+    "checkout_jwt": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Im1lcmNoYW50LWtleS0xIn0.eyJpc3MiOiJodHRwczovL25vcnRod2luZC5jb3VudGVyc2lnbi50ZXN0Iiwic3ViIjoiY2FydF9jaGVja291dCIsImlhdCI6MTc5MTIyMzA2NiwiZXhwIjoxNzkxMjIzOTY2LCJtZXJjaGFudCI6eyJpZCI6Im1yY19ub3J0aHdpbmQiLCJuYW1lIjoiTm9ydGh3aW5kIE91dGZpdHRlcnMiLCJ3ZWJzaXRlIjoiaHR0cHM6Ly9ub3J0aHdpbmQuY291bnRlcnNpZ24udGVzdCJ9LCJjYXJ0Ijp7Im1lcmNoYW50Ijp7ImlkIjoibXJjX25vcnRod2luZCIsIm5hbWUiOiJOb3J0aHdpbmQgT3V0Zml0dGVycyIsIndlYnNpdGUiOiJodHRwczovL25vcnRod2luZC5jb3VudGVyc2lnbi50ZXN0In0sIml0ZW1zIjpbeyJza3UiOiJTS1UtVFJBSUwtNDIiLCJ0aXRsZSI6IlRyYWlsIFJ1bm5lciIsInF1YW50aXR5IjoxLCJ1bml0X21pbm9yIjoxMjAwMCwibGluZV9taW5vciI6MTIwMDB9XSwic3VidG90YWwiOnsiYW1vdW50X21pbm9yIjoxMjAwMCwiY3VycmVuY3lfY29kZSI6IlVTRCJ9LCJzaGlwcGluZyI6eyJhbW91bnRfbWlub3IiOjUwMCwiY3VycmVuY3lfY29kZSI6IlVTRCJ9LCJ0YXgiOnsiYW1vdW50X21pbm9yIjo4MDAsImN1cnJlbmN5X2NvZGUiOiJVU0QifSwidG90YWwiOnsiYW1vdW50X21pbm9yIjoxMzMwMCwiY3VycmVuY3lfY29kZSI6IlVTRCJ9fSwiY2hlY2tvdXRfaWQiOiJjaGtfdGVzdF8xIn0.SKVs43ne4WwiHVL3VY1rGe1ngNrDJNfmMcd05JTMa243SdojBNHNMByhbrUkzI132as2oF4uncks6sta3WEnyg",
+    "l1": "eyJhbGciOiJFUzI1NiIsInR5cCI6InNkK2p3dCIsImtpZCI6Imlzc3Vlci1rZXktMSJ9.eyJpc3MiOiJodHRwczovL3d3dy5tYXN0ZXJjYXJkLmNvbSIsInN1YiI6InVzcl90ZXN0X3VzZXIiLCJpYXQiOjE3OTEyMjMwNjYsImV4cCI6MTgyMjc1OTA2NiwidmN0IjoiaHR0cHM6Ly9jcmVkZW50aWFscy5tYXN0ZXJjYXJkLmNvbS9jYXJkIiwiY25mIjp7Imp3ayI6eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6IjRMd1dlLXRWTmdiSUZRc1o1M2h5ckdKaHVuRVhGamlTY0RlanVscFROQ2siLCJ5IjoiOGZ6bGp4TDB2dVlnYlVfbGtNMVFwbGJwOG9MTE1UWHEwTWN3QkV5Y0RKZyJ9fSwicGFuX2xhc3RfZm91ciI6IjAwMDAiLCJzY2hlbWUiOiJQYXlQYWwiLCJjYXJkX2lkIjoiNTI4ZmQyZDI2ZDNhOTQ1M2Y1OGUxZThkNmFlMjQwMTczZDZmMjE1ZjM2NDgzYWY1ZDg3NzE3NmZhNWMxMWY1NiIsIl9zZCI6WyJzbmZtYS1BUjl3T3dtNWRmSFplQVV5Q0xPWWhZakR3YXVWUUZ6UzNpYlljIl0sIl9zZF9hbGciOiJzaGEtMjU2In0.RrBFFWy8IdMMgH9bixPn4ObJidM9Nbkm8RnEZheNxariH1BNgwP_jBX0puLtLFF2V_q8Pu0FSLtEUV-cdPppLw~WyJFMnpxWjljcFFpWUttUl9NZU4yQjV3IiwiZW1haWwiLCJidXllckBjb3VudGVyc2lnbi50ZXN0Il0~",
+    "l2": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImtiLXNkLWp3dCtrYiIsImtpZCI6ImRldl9rZXlfdGVzdF8xIn0.eyJub25jZSI6Im5vbmNlLXRlc3QtMSIsImF1ZCI6Imh0dHBzOi8vYWdlbnQuY291bnRlcnNpZ24udGVzdCIsImlhdCI6MTc5MTIyMzA2Niwic2RfaGFzaCI6IktKWGQ4TUxpS2sxSW9jWlg3aWQ3Qk9oTVRYZDlTM0praGZEZ2xTWVJhQWMiLCJkZWxlZ2F0ZV9wYXlsb2FkIjpbeyIuLi4iOiIxeVBJaGxkdzZSSk0zRldBQWtfX1ptYlZGdlFObGhEUVNwTkozWHpmNkdRIn0seyIuLi4iOiIxQmpkdmN0NzA5TEhYLXBucFJtTmdzYTB1NGhtT0VHNExkbUhyNFp2RmJJIn1dLCJfc2RfYWxnIjoic2hhLTI1NiIsIl9zZCI6WyJuNFl2Zk1WRnFoM0xreHdvX3dxdmZMRWo5OGtzVnZXdHN1bFFSRE4zRzlvIiwiX0lfSEdURE83V2F4UEJuXzI4VVNtYm80Vm5HVTBudWREOTJHN0ZhR0ZsYyIsIjF5UElobGR3NlJKTTNGV0FBa19fWm1iVkZ2UU5saERRU3BOSjNYemY2R1EiLCIxQmpkdmN0NzA5TEhYLXBucFJtTmdzYTB1NGhtT0VHNExkbUhyNFp2RmJJIl0sImV4cCI6MTc5MTMwOTQ2Nn0.LI1eKhxRCS-vIWHAJJDyv3Xa5JFORv_tSQrjRKOukIAUV3S7iPxhxl4osWjmJcn6qJTJXnyRCtz_4ifl8yFg0Q~WyJtNXNONW1UNExtMVE5eFQyVmdSTElRIix7ImlkIjoibXJjX25vcnRod2luZCIsIm5hbWUiOiJOb3J0aHdpbmQgT3V0Zml0dGVycyIsIndlYnNpdGUiOiJodHRwczovL25vcnRod2luZC5jb3VudGVyc2lnbi50ZXN0In1d~WyJZd2tnTkhuUDhvS05SbTRBMVQ2WTN3Iix7ImlkIjoiU0tVLVRSQUlMLTQyIiwidGl0bGUiOiJUcmFpbCBSdW5uZXIifV0~WyJHT0RmSlh6dk83a2t0Q2E3NFlPMV9RIix7InZjdCI6Im1hbmRhdGUuY2hlY2tvdXQub3Blbi4xIiwiY25mIjp7Imp3ayI6eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwieCI6IkdmRXhZZDVBTElqUmx1aE5rMGVNaWt6S3JTYzZqb3o5N01EM00tSUZ0QTAiLCJ5IjoiNHg1c0kwTVhsMk95VVZaOXZzZjE1QTVNbUpxUEhqMy05SWdLRkEwNlctSSIsImtpZCI6ImFndF84ZDZlOGRhYjg1Mzg0MDA1In19LCJjb25zdHJhaW50cyI6W3sidHlwZSI6Im1hbmRhdGUuY2hlY2tvdXQuYWxsb3dlZF9tZXJjaGFudHMiLCJhbGxvd2VkIjpbeyIuLi4iOiJuNFl2Zk1WRnFoM0xreHdvX3dxdmZMRWo5OGtzVnZXdHN1bFFSRE4zRzlvIn1dfSx7InR5cGUiOiJtYW5kYXRlLmNoZWNrb3V0LmxpbmVfaXRlbXMiLCJpdGVtcyI6W3siaWQiOiJsaS0xIiwiYWNjZXB0YWJsZV9pdGVtcyI6W3siLi4uIjoiX0lfSEdURE83V2F4UEJuXzI4VVNtYm80Vm5HVTBudWREOTJHN0ZhR0ZsYyJ9XSwicXVhbnRpdHkiOjF9XSwibWF0Y2hfbW9kZSI6Im1pbmltdW0ifV19XQ~WyJtN1IwV1Vjc21uMWRpWFQxOGhGU0N3Iix7InZjdCI6Im1hbmRhdGUucGF5bWVudC5vcGVuLjEiLCJjbmYiOnsiandrIjp7Imt0eSI6IkVDIiwiY3J2IjoiUC0yNTYiLCJ4IjoiR2ZFeFlkNUFMSWpSbHVoTmswZU1pa3pLclNjNmpvejk3TUQzTS1JRnRBMCIsInkiOiI0eDVzSTBNWGwyT3lVVlo5dnNmMTVBNU1tSnFQSGozLTlJZ0tGQTA2Vy1JIiwia2lkIjoiYWd0XzhkNmU4ZGFiODUzODQwMDUifX0sImNvbnN0cmFpbnRzIjpbeyJ0eXBlIjoibWFuZGF0ZS5wYXltZW50LmFtb3VudF9yYW5nZSIsImN1cnJlbmN5IjoiVVNEIiwibWluIjowLCJtYXgiOjIwMDAwfSx7InR5cGUiOiJtYW5kYXRlLnBheW1lbnQuYWxsb3dlZF9wYXllZXMiLCJhbGxvd2VkIjpbeyIuLi4iOiJuNFl2Zk1WRnFoM0xreHdvX3dxdmZMRWo5OGtzVnZXdHN1bFFSRE4zRzlvIn1dfSx7InR5cGUiOiJtYW5kYXRlLnBheW1lbnQuYnVkZ2V0IiwiY3VycmVuY3kiOiJVU0QiLCJtYXgiOjEzMDAwfSx7InR5cGUiOiJtYW5kYXRlLnBheW1lbnQucmVjdXJyZW5jZSIsImZyZXF1ZW5jeSI6Ik1OVEgiLCJzdGFydF9kYXRlIjoiMjAyNS0wMS0wMSIsImVuZF9kYXRlIjoiMjAyNS0xMi0zMSIsIm51bWJlciI6MTJ9LHsidHlwZSI6Im1hbmRhdGUucGF5bWVudC5hZ2VudF9yZWN1cnJlbmNlIiwiZnJlcXVlbmN5IjoiTU5USCIsInN0YXJ0X2RhdGUiOiIyMDI1LTAxLTAxIiwiZW5kX2RhdGUiOiIyMDI1LTEyLTMxIiwibWF4X29jY3VycmVuY2VzIjo4fSx7InR5cGUiOiJtYW5kYXRlLnBheW1lbnQucmVmZXJlbmNlIiwiY29uZGl0aW9uYWxfdHJhbnNhY3Rpb25faWQiOiIxeVBJaGxkdzZSSk0zRldBQWtfX1ptYlZGdlFObGhEUVNwTkozWHpmNkdRIn1dLCJwYXltZW50X2luc3RydW1lbnQiOnsidHlwZSI6InBheXBhbF92YXVsdCIsImlkIjoiNTI4ZmQyZDI2ZDNhOTQ1M2Y1OGUxZThkNmFlMjQwMTczZDZmMjE1ZjM2NDgzYWY1ZDg3NzE3NmZhNWMxMWY1NiIsImRlc2NyaXB0aW9uIjoiUGF5UGFsIFx1MDBiN1x1MDBiN1x1MDBiN1x1MDBiNyAxMjM0In19XQ~",
+    "l3a": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImtiLXNkLWp3dCIsImtpZCI6ImFndF84ZDZlOGRhYjg1Mzg0MDA1In0.eyJub25jZSI6ImwzLW5vbmNlLXRlc3QtMSIsImF1ZCI6Imh0dHBzOi8vbmV0d29yay5jb3VudGVyc2lnbi50ZXN0Iiwic2RfaGFzaCI6IlRTNEJfWVBXclgyT1psWnVVY3VVd1lPQWp3c1BSNmhqM2pXSmtNN0V2bDgiLCJpYXQiOjE3OTEyMjMwNjYsImRlbGVnYXRlX3BheWxvYWQiOlt7Ii4uLiI6IjNJYkdXWnM2TEl2a3h3aUJIbkRyVWdsUUVrcV82U0tQMjRUYkhQRFp0VDgifSx7Ii4uLiI6ImZfYWpPS2UyZVpneHB2c2twVk5OX1dpckVuOEdMN1ZEcmM2V2REb0d2YWsifV0sIl9zZF9hbGciOiJzaGEtMjU2IiwiaXNzIjoiaHR0cHM6Ly9hZ2VudC5jb3VudGVyc2lnbi5leGFtcGxlIiwiZXhwIjoxNzkxMjIzMzY2fQ.ljyFKLMFA5y5XOqIuFO7veuUJ3M-vgdLDfvH8yiFkvnxZUSICIggU4uL5u1xDW6W64W4Ya8krtQCa0lyNCr8zQ~WyItdjlnalNoYi1Tckpkdi1oa3IyRUNnIix7ImlkIjoibXJjX25vcnRod2luZCIsIm5hbWUiOiJOb3J0aHdpbmQgT3V0Zml0dGVycyIsIndlYnNpdGUiOiJodHRwczovL25vcnRod2luZC5jb3VudGVyc2lnbi50ZXN0In1d~WyJnVEZyaVJZNWdNaEw4SHp4UzZRdzhRIix7InZjdCI6Im1hbmRhdGUucGF5bWVudC4xIiwidHJhbnNhY3Rpb25faWQiOiI0NGFGaHF5dFotS3dySDZaaXJGV2ctTjA0cUpTa1BpSVNOaXd0OWxFLWVRIiwicGF5ZWUiOnsiaWQiOiJtcmNfbm9ydGh3aW5kIiwibmFtZSI6Ik5vcnRod2luZCBPdXRmaXR0ZXJzIiwid2Vic2l0ZSI6Imh0dHBzOi8vbm9ydGh3aW5kLmNvdW50ZXJzaWduLnRlc3QifSwicGF5bWVudF9hbW91bnQiOnsiY3VycmVuY3kiOiJVU0QiLCJhbW91bnQiOjEzMzAwfSwicGF5bWVudF9pbnN0cnVtZW50Ijp7InR5cGUiOiJwYXlwYWxfdmF1bHQiLCJpZCI6IjUyOGZkMmQyNmQzYTk0NTNmNThlMWU4ZDZhZTI0MDE3M2Q2ZjIxNWYzNjQ4M2FmNWQ4NzcxNzZmYTVjMTFmNTYiLCJkZXNjcmlwdGlvbiI6IlBheVBhbCBcdTAwYjdcdTAwYjdcdTAwYjdcdTAwYjcgMTIzNCJ9fV0~",
+    "l3b": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImtiLXNkLWp3dCIsImtpZCI6ImFndF84ZDZlOGRhYjg1Mzg0MDA1In0.eyJub25jZSI6ImwzLW5vbmNlLXRlc3QtMSIsImF1ZCI6Imh0dHBzOi8vbm9ydGh3aW5kLmNvdW50ZXJzaWduLnRlc3QiLCJzZF9oYXNoIjoiS1M3Ynh6eksyd1AwZ0ZRTk1keTk4d1d0M01YOHRMbENaRC04ZXh3UUh2SSIsImlhdCI6MTc5MTIyMzA2NiwiZGVsZWdhdGVfcGF5bG9hZCI6W3siLi4uIjoibUVpRFBVUmM1Y0F4OGdkSXBBVzZnNzZBNXlCejlCdzg5cUF3THJOMHNYTSJ9XSwiX3NkX2FsZyI6InNoYS0yNTYiLCJpc3MiOiJodHRwczovL2FnZW50LmNvdW50ZXJzaWduLmV4YW1wbGUiLCJleHAiOjE3OTEyMjMzNjZ9.DL1hx_cfkMp9ZeoVgVTxbRQDV5RdSE1s2b6_gVyhNCfeSoVy_yxiq_UjTenPFrn-qUlz2Or2GfUSpbYbgrU7Pw~WyJnTU9vbC01OVhlSHBRb3JuU2N6Y0hnIix7InZjdCI6Im1hbmRhdGUuY2hlY2tvdXQuMSIsImNoZWNrb3V0X2p3dCI6ImV5SmhiR2NpT2lKRlV6STFOaUlzSW5SNWNDSTZJa3BYVkNJc0ltdHBaQ0k2SW0xbGNtTm9ZVzUwTFd0bGVTMHhJbjAuZXlKcGMzTWlPaUpvZEhSd2N6b3ZMMjV2Y25Sb2QybHVaQzVqYjNWdWRHVnljMmxuYmk1MFpYTjBJaXdpYzNWaUlqb2lZMkZ5ZEY5amFHVmphMjkxZENJc0ltbGhkQ0k2TVRjNU1USXlNekEyTml3aVpYaHdJam94TnpreE1qSXpPVFkyTENKdFpYSmphR0Z1ZENJNmV5SnBaQ0k2SW0xeVkxOXViM0owYUhkcGJtUWlMQ0p1WVcxbElqb2lUbTl5ZEdoM2FXNWtJRTkxZEdacGRIUmxjbk1pTENKM1pXSnphWFJsSWpvaWFIUjBjSE02THk5dWIzSjBhSGRwYm1RdVkyOTFiblJsY25OcFoyNHVkR1Z6ZENKOUxDSmpZWEowSWpwN0ltMWxjbU5vWVc1MElqcDdJbWxrSWpvaWJYSmpYMjV2Y25Sb2QybHVaQ0lzSW01aGJXVWlPaUpPYjNKMGFIZHBibVFnVDNWMFptbDBkR1Z5Y3lJc0luZGxZbk5wZEdVaU9pSm9kSFJ3Y3pvdkwyNXZjblJvZDJsdVpDNWpiM1Z1ZEdWeWMybG5iaTUwWlhOMEluMHNJbWwwWlcxeklqcGJleUp6YTNVaU9pSlRTMVV0VkZKQlNVd3RORElpTENKMGFYUnNaU0k2SWxSeVlXbHNJRkoxYm01bGNpSXNJbkYxWVc1MGFYUjVJam94TENKMWJtbDBYMjFwYm05eUlqb3hNakF3TUN3aWJHbHVaVjl0YVc1dmNpSTZNVEl3TURCOVhTd2ljM1ZpZEc5MFlXd2lPbnNpWVcxdmRXNTBYMjFwYm05eUlqb3hNakF3TUN3aVkzVnljbVZ1WTNsZlkyOWtaU0k2SWxWVFJDSjlMQ0p6YUdsd2NHbHVaeUk2ZXlKaGJXOTFiblJmYldsdWIzSWlPalV3TUN3aVkzVnljbVZ1WTNsZlkyOWtaU0k2SWxWVFJDSjlMQ0owWVhnaU9uc2lZVzF2ZFc1MFgyMXBibTl5SWpvNE1EQXNJbU4xY25KbGJtTjVYMk52WkdVaU9pSlZVMFFpZlN3aWRHOTBZV3dpT25zaVlXMXZkVzUwWDIxcGJtOXlJam94TXpNd01Dd2lZM1Z5Y21WdVkzbGZZMjlrWlNJNklsVlRSQ0o5ZlN3aVkyaGxZMnR2ZFhSZmFXUWlPaUpqYUd0ZmRHVnpkRjh4SW4wLlNLVnM0M25lNFd3aUhWTDNWWTFyR2UxbmdOckRKTmZtTWNkMDVKVE1hMjQzU2RvakJOSE5NQnloYnJVa3pJMTMyYXMyb0Y0dW5ja3M2c3RhM1dFbnlnIiwiY2hlY2tvdXRfaGFzaCI6IjQ0YUZocXl0Wi1Ld3JINlppckZXZy1OMDRxSlNrUGlJU05pd3Q5bEUtZVEifV0~",
+    "strict": true
+  },
+  "verify_response": {
+    "at_time_check": null,
+    "at_time_not_honoured": false,
+    "at_time_reason": null,
+    "chain_valid": true,
+    "checks_performed": [
+      "open_checkout_contains_line_items",
+      "open_payment_has_payment_instrument",
+      "open_payment_contains_reference",
+      "l2_reference_binding",
+      "l1_card_id_cross_check",
+      "pair_0_identity_binding",
+      "l3a_(payment)_structural_chain",
+      "pair_0_identity_binding",
+      "l3b_(checkout)_structural_chain",
+      "l3_cross_reference"
+    ],
+    "checks_skipped": [
+      "l2_aud (no expected value provided)",
+      "l2_nonce (no expected value provided)",
+      "l3a_(payment)_aud (no expected value provided)",
+      "l3a_(payment)_nonce (no expected value provided)",
+      "l3b_(checkout)_aud (no expected value provided)",
+      "l3b_(checkout)_nonce (no expected value provided)"
+    ],
+    "clock_skew_seconds": 300,
+    "constraints": {
+      "checked": [
+        "mandate.payment.amount_range",
+        "mandate.payment.allowed_payees",
+        "mandate.payment.reference",
+        "mandate.checkout.allowed_merchants",
+        "mandate.checkout.line_items"
+      ],
+      "satisfied": true,
+      "skipped": [
+        {
+          "reason": "Network-enforced constraint. Not evaluated by verifiable_intent; Countersign's Gate enforces it (spec D19). NOT satisfied by this response.",
+          "type": "mandate.payment.budget"
+        },
+        {
+          "reason": "Network-enforced constraint. Not evaluated by verifiable_intent; Countersign's Gate enforces it (spec D19). NOT satisfied by this response.",
+          "type": "mandate.payment.recurrence"
+        },
+        {
+          "reason": "Network-enforced constraint. Not evaluated by verifiable_intent; Countersign's Gate enforces it (spec D19). NOT satisfied by this response.",
+          "type": "mandate.payment.agent_recurrence"
+        }
+      ],
+      "violations": []
+    },
+    "disclosed": {
+      "l1": {
+        "_sd": ["snfma-AR9wOwm5dfHZeAUyCLOYhYjDwauVQFzS3ibYc"],
+        "_sd_alg": "sha-256",
+        "card_id": "528fd2d26d3a9453f58e1e8d6ae240173d6f215f36483af5d877176fa5c11f56",
+        "cnf": {
+          "jwk": {
+            "crv": "P-256",
+            "kty": "EC",
+            "x": "4LwWe-tVNgbIFQsZ53hyrGJhunEXFjiScDejulpTNCk",
+            "y": "8fzljxL0vuYgbU_lkM1Qplbp8oLLMTXq0McwBEycDJg"
+          }
+        },
+        "email": "buyer@countersign.test",
+        "exp": 1822759066,
+        "iat": 1791223066,
+        "iss": "https://www.mastercard.com",
+        "pan_last_four": "0000",
+        "scheme": "PayPal",
+        "sub": "usr_test_user",
+        "vct": "https://credentials.mastercard.com/card"
+      },
+      "l2": {
+        "_sd": [
+          "n4YvfMVFqh3Lkxwo_wqvfLEj98ksVvWtsulQRDN3G9o",
+          "_I_HGTDO7WaxPBn_28USmbo4VnGU0nudD92G7FaGFlc",
+          "1yPIhldw6RJM3FWAAk__ZmbVFvQNlhDQSpNJ3Xzf6GQ",
+          "1Bjdvct709LHX-pnpRmNgsa0u4hmOEG4LdmHr4ZvFbI"
+        ],
+        "_sd_alg": "sha-256",
+        "aud": "https://agent.countersign.test",
+        "delegate_payload": [
+          {
+            "cnf": {
+              "jwk": {
+                "crv": "P-256",
+                "kid": "agt_8d6e8dab85384005",
+                "kty": "EC",
+                "x": "GfExYd5ALIjRluhNk0eMikzKrSc6joz97MD3M-IFtA0",
+                "y": "4x5sI0MXl2OyUVZ9vsf15A5MmJqPHj3-9IgKFA06W-I"
+              }
+            },
+            "constraints": [
+              {
+                "allowed": [
+                  {
+                    "...": "n4YvfMVFqh3Lkxwo_wqvfLEj98ksVvWtsulQRDN3G9o"
+                  }
+                ],
+                "type": "mandate.checkout.allowed_merchants"
+              },
+              {
+                "items": [
+                  {
+                    "acceptable_items": [
+                      {
+                        "...": "_I_HGTDO7WaxPBn_28USmbo4VnGU0nudD92G7FaGFlc"
+                      }
+                    ],
+                    "id": "li-1",
+                    "quantity": 1
+                  }
+                ],
+                "match_mode": "minimum",
+                "type": "mandate.checkout.line_items"
+              }
+            ],
+            "vct": "mandate.checkout.open.1"
+          },
+          {
+            "cnf": {
+              "jwk": {
+                "crv": "P-256",
+                "kid": "agt_8d6e8dab85384005",
+                "kty": "EC",
+                "x": "GfExYd5ALIjRluhNk0eMikzKrSc6joz97MD3M-IFtA0",
+                "y": "4x5sI0MXl2OyUVZ9vsf15A5MmJqPHj3-9IgKFA06W-I"
+              }
+            },
+            "constraints": [
+              {
+                "currency": "USD",
+                "max": 20000,
+                "min": 0,
+                "type": "mandate.payment.amount_range"
+              },
+              {
+                "allowed": [
+                  {
+                    "...": "n4YvfMVFqh3Lkxwo_wqvfLEj98ksVvWtsulQRDN3G9o"
+                  }
+                ],
+                "type": "mandate.payment.allowed_payees"
+              },
+              {
+                "currency": "USD",
+                "max": 13000,
+                "type": "mandate.payment.budget"
+              },
+              {
+                "end_date": "2025-12-31",
+                "frequency": "MNTH",
+                "number": 12,
+                "start_date": "2025-01-01",
+                "type": "mandate.payment.recurrence"
+              },
+              {
+                "end_date": "2025-12-31",
+                "frequency": "MNTH",
+                "max_occurrences": 8,
+                "start_date": "2025-01-01",
+                "type": "mandate.payment.agent_recurrence"
+              },
+              {
+                "conditional_transaction_id": "1yPIhldw6RJM3FWAAk__ZmbVFvQNlhDQSpNJ3Xzf6GQ",
+                "type": "mandate.payment.reference"
+              }
+            ],
+            "payment_instrument": {
+              "description": "PayPal \u00b7\u00b7\u00b7\u00b7 1234",
+              "id": "528fd2d26d3a9453f58e1e8d6ae240173d6f215f36483af5d877176fa5c11f56",
+              "type": "paypal_vault"
+            },
+            "vct": "mandate.payment.open.1"
+          }
+        ],
+        "exp": 1791309466,
+        "iat": 1791223066,
+        "nonce": "nonce-test-1",
+        "sd_hash": "KJXd8MLiKk1IocZX7id7BOhMTXd9S3JkhfDglSYRaAc"
+      },
+      "l3a": {
+        "_sd_alg": "sha-256",
+        "aud": "https://network.countersign.test",
+        "delegate_payload": [
+          {
+            "id": "mrc_northwind",
+            "name": "Northwind Outfitters",
+            "website": "https://northwind.countersign.test"
+          },
+          {
+            "payee": {
+              "id": "mrc_northwind",
+              "name": "Northwind Outfitters",
+              "website": "https://northwind.countersign.test"
+            },
+            "payment_amount": {
+              "amount": 13300,
+              "currency": "USD"
+            },
+            "payment_instrument": {
+              "description": "PayPal \u00b7\u00b7\u00b7\u00b7 1234",
+              "id": "528fd2d26d3a9453f58e1e8d6ae240173d6f215f36483af5d877176fa5c11f56",
+              "type": "paypal_vault"
+            },
+            "transaction_id": "44aFhqytZ-KwrH6ZirFWg-N04qJSkPiISNiwt9lE-eQ",
+            "vct": "mandate.payment.1"
+          }
+        ],
+        "exp": 1791223366,
+        "iat": 1791223066,
+        "iss": "https://agent.countersign.example",
+        "nonce": "l3-nonce-test-1",
+        "sd_hash": "TS4B_YPWrX2OZlZuUcuUwYOAjwsPR6hj3jWJkM7Evl8"
+      },
+      "l3b": {
+        "_sd_alg": "sha-256",
+        "aud": "https://northwind.countersign.test",
+        "delegate_payload": [
+          {
+            "checkout_hash": "44aFhqytZ-KwrH6ZirFWg-N04qJSkPiISNiwt9lE-eQ",
+            "checkout_jwt": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Im1lcmNoYW50LWtleS0xIn0.eyJpc3MiOiJodHRwczovL25vcnRod2luZC5jb3VudGVyc2lnbi50ZXN0Iiwic3ViIjoiY2FydF9jaGVja291dCIsImlhdCI6MTc5MTIyMzA2NiwiZXhwIjoxNzkxMjIzOTY2LCJtZXJjaGFudCI6eyJpZCI6Im1yY19ub3J0aHdpbmQiLCJuYW1lIjoiTm9ydGh3aW5kIE91dGZpdHRlcnMiLCJ3ZWJzaXRlIjoiaHR0cHM6Ly9ub3J0aHdpbmQuY291bnRlcnNpZ24udGVzdCJ9LCJjYXJ0Ijp7Im1lcmNoYW50Ijp7ImlkIjoibXJjX25vcnRod2luZCIsIm5hbWUiOiJOb3J0aHdpbmQgT3V0Zml0dGVycyIsIndlYnNpdGUiOiJodHRwczovL25vcnRod2luZC5jb3VudGVyc2lnbi50ZXN0In0sIml0ZW1zIjpbeyJza3UiOiJTS1UtVFJBSUwtNDIiLCJ0aXRsZSI6IlRyYWlsIFJ1bm5lciIsInF1YW50aXR5IjoxLCJ1bml0X21pbm9yIjoxMjAwMCwibGluZV9taW5vciI6MTIwMDB9XSwic3VidG90YWwiOnsiYW1vdW50X21pbm9yIjoxMjAwMCwiY3VycmVuY3lfY29kZSI6IlVTRCJ9LCJzaGlwcGluZyI6eyJhbW91bnRfbWlub3IiOjUwMCwiY3VycmVuY3lfY29kZSI6IlVTRCJ9LCJ0YXgiOnsiYW1vdW50X21pbm9yIjo4MDAsImN1cnJlbmN5X2NvZGUiOiJVU0QifSwidG90YWwiOnsiYW1vdW50X21pbm9yIjoxMzMwMCwiY3VycmVuY3lfY29kZSI6IlVTRCJ9fSwiY2hlY2tvdXRfaWQiOiJjaGtfdGVzdF8xIn0.SKVs43ne4WwiHVL3VY1rGe1ngNrDJNfmMcd05JTMa243SdojBNHNMByhbrUkzI132as2oF4uncks6sta3WEnyg",
+            "vct": "mandate.checkout.1"
+          }
+        ],
+        "exp": 1791223366,
+        "iat": 1791223066,
+        "iss": "https://agent.countersign.example",
+        "nonce": "l3-nonce-test-1",
+        "sd_hash": "KS7bxzzK2wP0gFQNMdy98wWt3MX8tLlCZD-8exwQHvI"
+      }
+    },
+    "errors": [],
+    "keys": {
+      "agent_kid": "agt_8d6e8dab85384005",
+      "device_jkt": "bK7duK6fENflX2E0kCEZK9-4M4rgPnMiatoL3Gs44Xk",
+      "device_kid": "dev_key_test_1",
+      "issuer_kid": "issuer-key-1",
+      "merchant_kid": "merchant-key-1"
+    },
+    "verified_at": 1791223066
+  }
+}

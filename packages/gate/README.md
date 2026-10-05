@@ -6,7 +6,7 @@ spec **§8.9** (M9, WP-09). Spec **D19**.
 ```bash
 pnpm --filter @countersign/gate typecheck
 pnpm --filter @countersign/gate lint
-pnpm --filter @countersign/gate test     # 157 tests, no database, no network, no credentials
+pnpm --filter @countersign/gate test     # 187 tests, no database, no network, no credentials
 ```
 
 ## What this package is
@@ -37,26 +37,26 @@ Two properties of the package as a whole are load-bearing, and both are enforced
 `CHECK_ORDER` in `checks.ts` is the single list; `evaluate` iterates it and a decision always has twelve
 rows (`hasEveryCheck` says so).
 
-| #   | Check                                                                                 | Data it reads                           | Fails with                                         |
-| --- | ------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------------------------- |
-| 1   | Mandate `ACTIVE`, not revoked, `exp > now − skew`                                     | `mandates`                              | `GATE_REVOKED` / `VI_EXPIRED`                      |
-| 2   | Agent `ACTIVE`, L3 key == the L2-bound key                                            | `agents` + the L3a `kid`                | `GATE_AGENT_SUSPENDED`                             |
-| 3   | Device `ACTIVE` (not `LOST`/`REVOKED`)                                                | `devices`                               | `GATE_REVOKED`                                     |
-| 4   | vi `/v1/verify` **strict**: `chain_valid` and `constraints.satisfied`                 | `ViClient.verify`                       | `VI_CHAIN_INVALID` / `VI_CONSTRAINT_VIOLATION`     |
-| 5   | Checkout JWT hash == L3b `checkout_hash`, signed by a current-or-retired merchant kid | `checkout_sessions` + the merchant JWKS | `VI_CHAIN_INVALID`                                 |
-| 6   | `price_lock_exp > now`, totals == L3a amount, currency equal                          | `checkout_sessions` + L3a claims        | `GATE_PRICE_LOCK_EXPIRED` / `CS_CURRENCY_MISMATCH` |
-| 7   | L3 `jti` unused — unique insert, not a `SELECT`                                       | the `checkout_attempts` insert          | `GATE_REPLAY`                                      |
-| 8   | Budget: `FOR UPDATE`, `reserved + spent + amount ≤ cap`, insert RESERVE               | `BudgetStore`                           | `GATE_BUDGET_EXCEEDED`                             |
-| 9   | Wallet cap for the period, across **all** mandates                                    | `wallet_caps` + `budget_entries`        | `GATE_WALLET_CAP`                                  |
-| 10  | Stock for every line                                                                  | `products`                              | `GATE_OUT_OF_STOCK`                                |
-| 11  | Recurrence / `agent_recurrence` windows, if present                                   | `budget_entries` + the signed L2        | `VI_CONSTRAINT_VIOLATION`                          |
-| 12  | Velocity: > 5 attempts / 10 min, or > 3 BLOCKs in a row → `REVIEW` + `SUSPENDED`      | `checkout_attempts`                     | `GATE_BLOCKED`                                     |
+| #   | Check                                                                                 | Data it reads                                                            | Fails with                                         |
+| --- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------- |
+| 1   | Mandate `ACTIVE`, not revoked, `exp > now − skew`                                     | `mandates`                                                               | `GATE_REVOKED` / `VI_EXPIRED`                      |
+| 2   | Agent `ACTIVE`, L3 key == the L2-bound key                                            | `agents` + the L3a `kid`                                                 | `GATE_AGENT_SUSPENDED`                             |
+| 3   | Device `ACTIVE` (not `LOST`/`REVOKED`)                                                | `devices`                                                                | `GATE_REVOKED`                                     |
+| 4   | vi `/v1/verify` **strict**: `chain_valid` and `constraints.satisfied`                 | `ViClient.verify`                                                        | `VI_CHAIN_INVALID` / `VI_CONSTRAINT_VIOLATION`     |
+| 5   | Checkout JWT hash == L3b `checkout_hash`, signed by a current-or-retired merchant kid | `checkout_sessions` + the merchant JWKS                                  | `VI_CHAIN_INVALID`                                 |
+| 6   | `price_lock_exp > now`, totals == L3a amount, currency equal                          | `checkout_sessions` + L3a claims                                         | `GATE_PRICE_LOCK_EXPIRED` / `CS_CURRENCY_MISMATCH` |
+| 7   | L3 `jti` unused — unique insert, not a `SELECT`                                       | the `checkout_attempts` insert                                           | `GATE_REPLAY`                                      |
+| 8   | Budget: `FOR UPDATE`, `reserved + spent + amount ≤ min(signed L2 ceiling, cap)`       | `BudgetStore` + the verified chain                                       | `GATE_BUDGET_EXCEEDED` / `VI_CONSTRAINT_VIOLATION` |
+| 9   | Wallet cap for the period, across **all** mandates                                    | `wallet_caps` + `budget_entries`                                         | `GATE_WALLET_CAP`                                  |
+| 10  | Stock for every line                                                                  | `products`                                                               | `GATE_OUT_OF_STOCK`                                |
+| 11  | Recurrence / `agent_recurrence` windows, if present                                   | `budget_entries` + the verified chain + the `mandates.constraints` cache | `VI_CONSTRAINT_VIOLATION`                          |
+| 12  | Velocity: > 5 attempts / 10 min, or > 3 BLOCKs in a row → `REVIEW` + `SUSPENDED`      | `checkout_attempts`                                                      | `GATE_BLOCKED`                                     |
 
 The order is the spec's, and the spec's order is cheap-first and side-effect-last: 1–7 are reads or one
 unique insert, so the only check that takes a lock and writes (8) comes after everything that can rule an
 attempt out without touching the database.
 
-## Six things that are not obvious
+## Seven things that are not obvious
 
 ### 1. Checks 8 and 9 run in **one transaction**, and the transaction can refuse to commit
 
@@ -98,7 +98,7 @@ Gate and not the absence of a database. `test/budget.test.ts` runs the same race
 `serialiseLocks: false` and asserts the opposite outcome — a fake that has no lock must fail the race
 test, or the test proves nothing.
 
-### 3. `notApplicable` is `passed: false`, never `passed: true`
+### 3. `notApplicable` is `passed: false`, never `passed: true` — and an obligation that cannot be read is not `notApplicable` at all
 
 Spec **D19**: the pinned Verifiable Intent library lists `mandate.payment.budget`, `.recurrence` and
 `.agent_recurrence` as _network-enforced and not evaluated_. `apps/vi` reports them in
@@ -114,7 +114,100 @@ and it does **not** claim to have passed. The one thing this package must never 
 `passed: true` it did not earn, which is why the "skipped" shape is a compile error and
 `notApplicable` is a distinct field rather than a convention. `test/d19.test.ts` pins it.
 
-### 4. One clock read, taken once
+### 4. The signed constraint is authoritative, and our columns cannot loosen it
+
+`notApplicable` being non-blocking is exactly why the last two bugs were so bad. Both were the same
+mistake — reading **our own columns** where the buyer's signature was required:
+
+|               | What was read                       | What the buyer signed                           | Decision                                                                           |
+| ------------- | ----------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **QA-gate-1** | `budget_accounts.cap_minor` = 20000 | `mandate.payment.budget.max` = **2000**         | `ALLOW` a 3000 cart                                                                |
+| **QA-gate-2** | `mandates.constraints` (empty)      | `recurrence MNTH number:1`, 2 commits in window | `ALLOW`, and check 11 claimed _"the signed L2 discloses no recurrence constraint"_ |
+
+The signed values are read from **`VerifyResponse.disclosed.l2`** — the payload vi decoded out of the
+`sd-jwt+kb` the buyer's device key signed, during the `verify_chain` call check 4 had **already made**.
+There is no extra network call: it is a field on the response in hand. If a change ever needed a round
+trip to learn the buyer's ceiling, it would be reading the wrong source.
+
+| Source           | What it is                                     | Standing                        |
+| ---------------- | ---------------------------------------------- | ------------------------------- |
+| `signed_l2`      | `disclosed.l2.delegate_payload[*].constraints` | **the token; authoritative**    |
+| `mandate_column` | `mandates.constraints`, our JSONB cache        | a cache, and still a real limit |
+| `account_cap`    | `budget_accounts.cap_minor`, the locked row    | a cache, and still a real limit |
+
+The enforceable limit is **`min` of all of them**, not "prefer the token". Each is a limit the buyer is
+bound by, and a Gate that enforced the looser of two real limits is the only one a buyer could call _"you
+spent more than I agreed to"_. A tie is credited to the signature, so the detail names the source with the
+most authority, and every candidate appears in the message — a dispute asks which number stopped it, not
+merely that some limit did.
+
+The signed comparison runs against the balance `reserveIn` computed **inside** its own `FOR UPDATE`. That
+is the only place the numbers are race-free, and it is why there is still no second implementation of the
+cap arithmetic in this package: `budget-guard.ts` never re-derives `reserved + spent + amount ≤ cap_minor`,
+it asks whether the balance that already exists survives a ceiling the signature states. The cost is that
+the RESERVE row briefly exists inside the transaction, and `evaluate` rolls it back.
+
+**An obligation that cannot be discharged is a `BLOCK`, never an `ALLOW`.** If vi reported
+`mandate.payment.budget` as network-enforced and the ceiling cannot be read from the chain — malformed
+constraint, two currencies, a disclosure that never arrived — then nobody enforced the buyer's limit, and
+the only remaining outcomes are refusing or spending without it. `obligationUnmet` returns
+`VI_CONSTRAINT_VIOLATION` and check 8 (or 11) refuses **before writing anything**. `REVIEW` was considered
+and rejected: §8.10's table gives no `REVIEW` for an unenforceable signed budget, and a check that can be
+waved through is a check that eventually will be.
+
+`test/signed-budget.test.ts` is the file. It opens with the QA repro verbatim, and ends with a property
+test: **1,000 random (signed ceiling, cart) pairs, and the Gate never allows a purchase larger than the
+ceiling the buyer signed** — with the account cap generated to be always looser, so a `BLOCK` can only be
+attributed to the signature.
+
+#### The path is asserted against a real response, not against our own idea of one
+
+`test/signed-budget.test.ts` builds its fixtures by hand, and a hand-built fixture **cannot** tell a
+reader that matches real vi-service output from one that matches the author's imagination of it. That is
+the whole risk in a `strictObject` schema reading a foreign wire format, so the path is pinned against a
+**committed real capture** instead.
+
+`test/fixtures/vi-verify-budget-capture.json` is the body `POST /v1/verify` actually returned, produced by
+driving `apps/vi`'s real routes (`/v1/l1/issue` → `/v1/l2/prepare` → `/v1/l2/finalize` →
+`/v1/checkout-jwt` → `/v1/l3/create` → `POST /v1/verify`) through `fastapi.testclient` with a fixed clock —
+no sockets, no PayPal, no credentials. Every token in it was signed by `verifiable_intent` at
+`356c29635f1c44df7de02edb58699ca9f29bece6`, and the same mechanism WP-18 used for
+`packages/verifier/test/fixtures/chain.json`.
+
+The signed ceiling lives at **`verify_response.disclosed.l2.delegate_payload[1].constraints[2]`**, quoted
+verbatim from the capture:
+
+```json
+{ "currency": "USD", "max": 13000, "type": "mandate.payment.budget" }
+```
+
+Three facts about that object are load-bearing, and each is asserted:
+
+- **`min` is absent, not `null`.** `PaymentBudgetConstraint.to_dict()` _omits_ an unset optional rather
+  than emitting null, so `budgetConstraintSchema`'s `.default(null)` is what makes the omission legal. A
+  fixture that quietly grew `"min": null` would stop exercising that path.
+- **No constraint entry in the response is an SD-hash reference.** `create_layer2_autonomous` substitutes
+  `{"...": hash}` for _merchant and item values_ — entries of an `allowed` / `acceptable_items` array —
+  and never for a whole constraint. That is why the inline walk in `disclosedConstraints` is sufficient
+  rather than merely convenient, and it is asserted rather than assumed. If it were ever otherwise,
+  `readSignedBudget` reports `found: false` and the obligation guard BLOCKs.
+- **`pendingNetworkEnforcement` reports all three network-enforced types** from that same response, so the
+  obligation the reader discharges and the numbers it reads come from one response, not two.
+
+`test/real-vi-capture.test.ts` runs the reader against it, and then drives `evaluate` with it: a $30.00
+cart against the signed $130.00 ceiling and a $200.00 account cap **ALLOWs** with check 8 naming the
+signature as the binding cap, and the same capture with a $140.00 cart **BLOCKs** with
+`GATE_BUDGET_EXCEEDED`. The account cap is deliberately looser than the signature in the passing case, so
+an ALLOW cannot be attributed to the cache.
+
+`recurrence` and `agent_recurrence` are pinned in the same file, with the exact key names the library
+emits: `frequency` / `start_date` / `end_date` / **`number`** for `recurrence`, and
+`frequency` / `start_date` / `end_date` / **`max_occurrences`** for `agent_recurrence`. The two differ on
+precisely the occurrence key, and reading the wrong one leaves `max_occurrences` `null` — which
+`evaluateRecurrence` treats as "the date window is the whole limit", the loosest possible reading of a
+signed cap. There is a test for exactly that confusion.
+
+### 5. One clock read, taken once
 
 `deps.clock.nowSec()` is called exactly once, before check 1, and every expiry comparison in the decision
 uses that value (§12.5 EC-TIME-4). With a per-check `now`, a price lock could expire between check 6 and
@@ -122,7 +215,7 @@ check 12 and produce a decision that was true at no single instant — and this 
 evidence packet filed with PayPal. `evaluate` has exactly one call site for `deps.clock`; a second one
 would be a test failure.
 
-### 5. Check 12 runs last, and runs anyway
+### 6. Check 12 runs last, and runs anyway
 
 It is the only check with a **side effect** (it moves the mandate to `SUSPENDED`) and the only one that
 must run even when an earlier check already failed — because the pattern it exists to detect is a flood
@@ -139,7 +232,7 @@ Getting this lenient lets an agent hammer a mandate; getting it strict suspends 
 purchases in ten minutes, which is a normal human shopping pattern. `VELOCITY` in `types.ts` is the
 named, asserted source of both numbers.
 
-### 6. The signed record is a **nine-field** JWS over a projection of the twelve
+### 7. The signed record is a **nine-field** JWS over a projection of the twelve
 
 ```
 { gdc, att, mdt, amount, currency, payee, checks_hash, chain_valid, vi_commit, iat }
@@ -227,18 +320,19 @@ JWT exists to prevent.
 
 ## Tests
 
-| File               | What it covers                                                                               |
-| ------------------ | -------------------------------------------------------------------------------------------- |
-| `checks.test.ts`   | AT-M10.1 — one test per check, ALLOW and BLOCK, and the twelve-order invariant               |
-| `budget.test.ts`   | AT-M10.2 — the 20-way race, the property `floor(cap / cart)`, the no-lock control, EC-MA-1   |
-| `race.test.ts`     | AT-M10.2 again, from the transaction's side: lock contention, and "never exceeds the cap"    |
-| `replay.test.ts`   | AT-M10.4 — a revoke between checks 1 and 8 leaves `reserved === 0n` and no ledger entry      |
-| `record.test.ts`   | AT-M10.5 — the record verifies against the JWKS; the nine fields; EC-KEY-2                   |
-| `fuzz.test.ts`     | AT-M10.6 — 2,000 bit-flips, 0 ALLOWs, with the `sameSignedContent` discipline                |
-| `merchant.test.ts` | AT-M9.1–AT-M9.4 — catalog, cart arithmetic, the price lock, the last-unit race, `tools/list` |
-| `velocity.test.ts` | check 12's arithmetic, both off-by-ones, the `SUSPENDED` consequence                         |
-| `d19.test.ts`      | the D19 obligation over both wire shapes, wired to checks 8 and 11                           |
-| `fixtures.ts`      | one world, real Ed25519 keys, no database, no network                                        |
+| File                    | What it covers                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `checks.test.ts`        | AT-M10.1 — one test per check, ALLOW and BLOCK, and the twelve-order invariant                                |
+| `budget.test.ts`        | AT-M10.2 — the 20-way race, the property `floor(cap / cart)`, the no-lock control, EC-MA-1                    |
+| `race.test.ts`          | AT-M10.2 again, from the transaction's side: lock contention, and "never exceeds the cap"                     |
+| `replay.test.ts`        | AT-M10.4 — a revoke between checks 1 and 8 leaves `reserved === 0n` and no ledger entry                       |
+| `record.test.ts`        | AT-M10.5 — the record verifies against the JWKS; the nine fields; EC-KEY-2                                    |
+| `fuzz.test.ts`          | AT-M10.6 — 2,000 bit-flips, 0 ALLOWs, with the `sameSignedContent` discipline                                 |
+| `merchant.test.ts`      | AT-M9.1–AT-M9.4 — catalog, cart arithmetic, the price lock, the last-unit race, `tools/list`                  |
+| `velocity.test.ts`      | check 12's arithmetic, both off-by-ones, the `SUSPENDED` consequence                                          |
+| `d19.test.ts`           | the D19 obligation over both wire shapes, wired to checks 8 and 11                                            |
+| `signed-budget.test.ts` | **QA-gate-1 and QA-gate-2** verbatim, the tighter-cap case both ways, fail-closed, and the 1,000-run property |
+| `fixtures.ts`           | one world, real Ed25519 keys, no database, no network                                                         |
 
 ## Known limits
 
@@ -251,7 +345,35 @@ JWT exists to prevent.
   mean telling the buyer nothing, which §8.10's contract forbids.
 - **`notApplicable` needs a human reading the record.** The record distinguishes "passed" from "nothing
   to enforce", and a reader who only looks at `passed` will over-count. `describeDecision` prints the
-  failing rows; the JSON is the artefact, and it is honest, but it is not self-explaining.
+  failing rows; the JSON is the artefact, and it is honest, but it is not self-explaining. A check that
+  _did_ discharge a D19 obligation says so in its detail, so `passed: true` next to a non-empty
+  `pendingNetworkEnforcement` is self-explaining rather than merely consistent.
+- **The signed budget's `min` is read and never enforced.** A `budget` constraint states a floor the
+  mandate is expected to reach, and refusing a purchase for _not_ having spent enough yet would punish the
+  buyer for the agent being slow. It is carried in `SignedBudget.min` for a future minimum-spend feature.
+  The ceiling is the whole of what this package enforces.
+- **The Gate trusts `disclosed.l2` because check 4 verified the chain.** `check4ChainVerify` reads
+  `chain_valid` from the same `/v1/verify` response, so a caller that supplied a `GateDeps.verify` which
+  returned a fabricated `disclosed.l2` alongside `chain_valid: true` would defeat this. That is a
+  `GateDeps` wiring problem rather than a logic one — `deps.ts::gateDepsFromRepos` binds it to
+  `ViClient.verify` — but it is the assumption the signed ceiling rests on.
+- **Check 4 cannot yet obtain a real verify response: it sends `l1: ''` and `l2: ''`.** `checks.ts`'s
+  `request` object hard-codes empty strings for both, while `verifyRequestSchema` declares them
+  `boundedString(...)` = `z.string().min(1)`. So `ViClient.verify` fails the **client-side** request
+  check and returns `err(CS_VALIDATION)` **without making a fetch at all**, and check 4 records
+  `verify call failed: CS_VALIDATION`.
+
+  This is fail-closed and predates the D19 fix (it is in `27f3e12`, WP-10), and it is not what this file
+  is about — but it means **`disclosed.l2` is currently unreachable in production**, so the signed ceiling
+  is enforced against `budget_accounts.cap_minor` and `mandates.constraints` alone in every real
+  deployment. The D19 reader is correct and covered by a real capture; it simply never sees a live
+  response. Fixing it needs `mandates.l2_serialized` and `l1_credentials.sd_jwt`, which means a new
+  `GateDeps` port in `types.ts` plus its binding in `deps.ts` and a `CheckStateMandate` member — and
+  §8.10's `GateInput` carries no `l1`/`l2`, so this is a spec-shaped change rather than a local edit.
+
+  **No test in this package can catch it**, because `deps.ts`'s in-memory world implements `verify`
+  without a request schema — the accepting-double hazard, reached from the other direction: the double is
+  not merely lenient about signatures, it never inspects the request at all.
 
 ## A finding in `packages/db`, pinned rather than fixed
 

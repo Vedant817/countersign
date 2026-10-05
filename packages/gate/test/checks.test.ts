@@ -28,6 +28,7 @@ import { evaluate } from '../src/evaluate'
 import {
   AGENT_ID,
   CART_MINOR,
+  CAP_MINOR,
   DATE_AFTER,
   DATE_BEFORE,
   CHECKOUT_ID,
@@ -41,6 +42,7 @@ import {
   makeWorld,
   product,
   signedCheckoutJwt,
+  viSkipsBudget,
 } from './fixtures'
 
 /* ------------------------------------------------------------------------------------------ */
@@ -290,27 +292,20 @@ describe('check 4 — vi /v1/verify strict', () => {
 
   it('D19: records what vi skipped as an obligation, and still enforces the budget under it', async () => {
     const world = await makeWorld({
-      verify: {
-        constraints: {
-          satisfied: true,
-          violations: [],
-          checked: ['mandate.payment.amount_range'],
-          skipped: [
-            {
-              type: 'mandate.payment.budget',
-              reason:
-                'Network-enforced constraints. Not evaluated by verifiable_intent; ' +
-                "Countersign's Gate enforces it (spec D19). NOT satisfied by this response.",
-            },
-          ],
-        },
-      },
+      // vi owes us `mandate.payment.budget` **and** the chain discloses the signed ceiling. Both halves
+      // matter: the obligation is what makes the Gate the enforcer (D19), and the disclosed number is
+      // what lets it be one. See `viSkipsBudget` — the two cannot be declared apart, because a Gate that
+      // records an obligation it cannot read has to refuse, not allow.
+      verify: viSkipsBudget(CAP_MINOR),
     })
     const decision = await decide(world)
 
     expect(decision.pendingNetworkEnforcement).toEqual(['mandate.payment.budget'])
     // `satisfied: true` did NOT let check 8 off the hook: the reservation still happened.
     expect(world.snapshot().reserved).toBe(CART_MINOR)
+    // And it happened against the ceiling the buyer signed, not against a column that happened to agree.
+    expect(check(decision, 8).detail).toContain('the signed L2')
+    expect(decision.decision).toBe('ALLOW')
   })
 
   it('D19: the same obligation, written the way apps/vi actually emits it, is still an obligation', async () => {

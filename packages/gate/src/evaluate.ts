@@ -63,6 +63,7 @@ import {
 } from './checks'
 import { check8Budget, check9WalletCap, compensateReservation } from './budget-guard'
 import { checksHash } from './decision-record'
+import { NO_DISCLOSED_CONSTRAINTS } from './signed-constraints'
 import { assessVelocity, reviewReason, suspendForVelocity, velocityBlocked } from './velocity'
 import type { GateDecision, GateDeps, GateInput, GateOutcome, GateReason } from './types'
 
@@ -419,6 +420,7 @@ function freshState(): CheckState {
     velocity: null,
     chainValid: false,
     pending: [],
+    signedConstraints: NO_DISCLOSED_CONSTRAINTS,
   }
 }
 

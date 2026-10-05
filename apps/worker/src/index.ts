@@ -32,12 +32,57 @@
  * with a missing `DATABASE_URL` fails **loudly and immediately** (spec §6) rather than starting a worker that
  * will 500 on its first tick an hour later.
  */
-import { env, systemClock, type CsError, type Logger, type Result } from '@countersign/core'
+import {
+  env,
+  epochSecFrom,
+  err,
+  formatIst,
+  logger as rootLogger,
+  ok,
+  systemClock,
+  toCsError,
+  type AttemptId,
+  type Clock,
+  type CsError,
+  type Logger,
+  type MandateId,
+  type Result,
+} from '@countersign/core'
+import {
+  drizzleStore,
+  findStaleAttempts,
+  listEntries,
+  reconcileIn,
+  type CheckoutAttemptRow,
+} from '@countersign/db'
+import {
+  expireStaleReservations,
+  RELEASE_REASONS,
+  RESERVATION_TTL_SECONDS,
+  reservationEntryId,
+  type OpenReservation,
+} from '@countersign/ledger'
 import { PayPalClient } from '@countersign/paypal'
-import { defaultThrottle, defineWebhookDeps, type WebhookDeps } from '@countersign/webhooks'
+import {
+  defaultThrottle,
+  defineWebhookDeps,
+  WEBHOOK_AUDIT_CHAIN,
+  type CaptureOutcomeHooks,
+  type JobHandler,
+  type WebhookDeps,
+  type WebhookQueue,
+} from '@countersign/webhooks'
 
+import { budgetAccountIds, dbWebhookAudit, dbWebhookStore, isReconcileCandidate } from './adapters'
 import { createJobRunner, createPgBossQueue, registerJobs, type PgBossLike } from './job-runner'
 import { CRON_SPECS, isPlausibleCron, type CronSpec } from './schedule'
+
+export { dbWebhookAudit, dbWebhookStore, isReconcileCandidate }
+
+/** This process's logger. `module: 'worker'`, so a Render log line is attributable. */
+function loggerChild(module: string): Logger {
+  return rootLogger.child({ module })
+}
 
 export {
   classifyForQueue,
@@ -84,6 +129,23 @@ export interface Worker {
 export interface WorkerDeps {
   /** The whole `WebhookDeps`. Whoever composes the process decides the store, the clock and the queue. */
   readonly webhooks: WebhookDeps
+  /**
+   * §8.11's ledger movement, for a capture whose rank advances.
+   *
+   * Optional, and absent in production for now: `CaptureOutcomeHooks` is a port
+   * (`job-runner.ts::RunnerDeps`) and `apps/web`'s capture path owns the decision about what a capture
+   * outcome means. Forwarded here because {@link startWorker} builds the runner and would otherwise drop it.
+   */
+  readonly hooks?: CaptureOutcomeHooks
+  /**
+   * §8.10: release reservations whose 30 minutes ran out with no order.
+   *
+   * **This is the job that stops a buyer's signed budget being held for ever**, and it needs only
+   * `DATABASE_URL`. It is wired in {@link productionDeps} and forwarded here.
+   */
+  readonly releaseReservations?: JobHandler
+  /** §7.2: the nightly "balances must equal the sum of entries" check. */
+  readonly reconcileBudget?: JobHandler
   readonly logger?: Logger
   /** Overrides the schedule table. A test can run one cron; production uses {@link CRON_SPECS}. */
   readonly crons?: readonly CronSpec[]
@@ -127,7 +189,16 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
   }
 
   const boss = deps.boss ?? (await createPgBossQueue({ connectionString: env().DATABASE_URL }))
-  const runner = createJobRunner({ webhooks: deps.webhooks, logger })
+  // Every optional handler is forwarded explicitly. A `RunnerDeps` member the boot path silently dropped
+  // would show up as a cron that logs "job has no handler wired" every five minutes, which is exactly the
+  // quiet failure that let `release.reservations` go missing in the first place.
+  const runner = createJobRunner({
+    webhooks: deps.webhooks,
+    logger,
+    ...(deps.hooks ? { hooks: deps.hooks } : {}),
+    ...(deps.releaseReservations ? { releaseReservations: deps.releaseReservations } : {}),
+    ...(deps.reconcileBudget ? { reconcileBudget: deps.reconcileBudget } : {}),
+  })
 
   const registration = await registerJobs(boss, runner, crons)
   if (registration.errors.length > 0) {
@@ -301,18 +372,266 @@ export async function main(): Promise<number> {
  * Split out of {@link main} so the throwing is contained: `env()` throws on a missing variable (spec §6), and
  * `main` turns that into exit 78 rather than letting an unhandled rejection become a stack trace.
  *
- * The store and the audit sink are **not** constructed here. `packages/db` exports the repository functions
- * but no `WebhookStore` adapter, and `WebhookAudit` has no production implementation yet - both are recorded
- * in `README.md` → "Contract issues". That is a real gap, not a stub to paper over: it is the one thing
- * between this process and running against a live database.
+ * ### What changed, and why it used to throw
+ *
+ * This used to end in `throw new Error('production wiring is incomplete: WebhookStore and WebhookAudit
+ * adapters are not implemented.')`. That was a refusal to boot with exit 78 for a process whose entire job
+ * is durable side effects, and the two adapters it named now exist in `adapters.ts`. A worker that boots and
+ * does three of four jobs is strictly more useful than one that refuses to boot — and on Render this is the
+ * difference between a running service and a crash-looping one.
+ *
+ * ### What still refuses, and what it refuses *not* to do
+ *
+ * {@link productionDeps} reads `env()` first and lets that throw, because spec §6 requires it and because a
+ * misconfigured deployment must not look alive. Beyond that, **nothing refuses to boot.** Where a piece of
+ * wiring cannot be built without a credential, the *specific job* that needs it is not registered, and the
+ * reason names the missing variable — see {@link releaseReservationsJob}.
+ *
+ * The four things the crons need:
+ *
+ * | Job | Needs | Without it |
+ * |---|---|---|
+ * | `wh.process`, `wh.verify`, `wh.reconcile`, `wh.auth-expiry`, `wh.disputes` | PayPal credentials + `DATABASE_URL` | refuse to boot — these are the bulk of the process |
+ * | `release.reservations` | `DATABASE_URL` only (§8.10's rule is a `budget_entries` release) | runs, via the composed job below |
+ * | `budget.reconcile` | `DATABASE_URL` only | runs, via the composed job below |
+ *
+ * ### The two ledger jobs are composed here rather than imported
+ *
+ * `release.reservations` is §8.10's "reservations expire after 30 min without an order (a worker job releases
+ * them)" — the job that stops a buyer's signed budget being held for ever. Its implementation is
+ * `findStaleAttempts` (a query `packages/db` has) composed with `expireStaleReservations`
+ * (`@countersign/ledger`'s arithmetic) and an already-released filter. `packages/orchestrator` implements
+ * exactly that, with tests; **`apps/worker/package.json` does not declare that workspace dependency**, and
+ * `package.json` is outside this work package's file list, so the composition is written here instead of
+ * imported. It is ~30 lines of rename-and-forward and the duplication is deliberate and temporary — see the
+ * README's "Contract issues" for the one-line change that removes it.
  */
-async function productionDeps(): Promise<WorkerDeps> {
+export function productionDeps(): WorkerDeps {
   // Read the environment first, so a missing variable fails here rather than at the first job tick.
   env()
-  throw new Error(
-    'production wiring is incomplete: WebhookStore and WebhookAudit adapters are not implemented. ' +
-      'See apps/worker/README.md -> Contract issues.',
-  )
+  const logger = loggerChild('worker')
+  const clock = systemClock
+
+  const webhooks = createWebhooksFromEnv(queueForWebhooks(), {
+    store: dbWebhookStore({ logger }),
+    audit: dbWebhookAudit(WEBHOOK_AUDIT_CHAIN),
+    logger,
+  })
+
+  return {
+    webhooks,
+    logger,
+    releaseReservations: releaseReservationsJob(clock, logger),
+    reconcileBudget: budgetReconcileJob(logger),
+  }
+}
+
+/**
+ * The queue handle {@link createWebhooksFromEnv} needs.
+ *
+ * A `WebhookQueue` built over the same `pg-boss` connection the worker starts, wrapped so this process's
+ * queue operations report a `CsError` rather than throwing. The worker itself starts its own boss in
+ * `startWorker`; this is only the **producer** side, which `apps/web`'s webhook route also needs and which
+ * §8.12 step 4 calls for.
+ */
+function queueForWebhooks(): WebhookQueue {
+  return {
+    async send(name, data, opts) {
+      const boss = await bossForProducer()
+      const id = await boss.send(name, (data ?? {}) as object, opts ?? {})
+      // pg-boss returns `null` for a singleton it deliberately suppressed. That is `WH_DUPLICATE`, not a
+      // success, and collapsing it to a string would make a dropped duplicate look like an enqueue.
+      return id === null
+        ? {
+            ok: false,
+            error: {
+              code: 'WH_DUPLICATE',
+              message: `pg-boss suppressed a duplicate singleton for ${name}`,
+              userMessage: 'That webhook was already queued.',
+              retryable: false,
+            },
+          }
+        : { ok: true, value: id }
+    },
+    async work() {
+      // The worker registers its own handlers through `registerJobs`. This member exists only so
+      // `WebhookQueue` is satisfied; reaching it from a producer would be a wiring mistake.
+      return {
+        ok: false,
+        error: {
+          code: 'CS_INTERNAL',
+          message: 'work() is registered by startWorker, not by the webhook producer queue',
+          userMessage: 'The server is misconfigured. Please tell the operator.',
+          retryable: false,
+        },
+      }
+    },
+    async schedule() {
+      return {
+        ok: false,
+        error: {
+          code: 'CS_INTERNAL',
+          message: 'schedules are registered by startWorker from CRON_SPECS',
+          userMessage: 'The server is misconfigured. Please tell the operator.',
+          retryable: false,
+        },
+      }
+    },
+    async start() {
+      return { ok: true, value: undefined }
+    },
+    async stop() {
+      // The producer queue shares the worker's boss, so stopping it here would stop job consumption.
+      return { ok: true, value: undefined }
+    },
+  }
+}
+
+/** The lazily-created boss both `startWorker` and the webhook producer use. */
+let producerBoss: Promise<PgBossLike> | null = null
+function bossForProducer(): Promise<PgBossLike> {
+  producerBoss ??= createPgBossQueue({ connectionString: env().DATABASE_URL })
+  return producerBoss
+}
+
+/**
+ * §8.10's 30-minute reservation release.
+ *
+ * Composed from `findStaleAttempts` and `expireStaleReservations`, with the **already-released filter**
+ * in front of the write — because `releaseIn` inserts a `budget_entries` row whose primary key is the
+ * derived `releaseEntryId(attemptId, mandateId)`, so a second run hits the primary key and comes back
+ * `CS_CONFLICT`. Without the filter this cron would report an error every five minutes for ever, which is
+ * how a working job looks broken to an operator.
+ *
+ * Requires only `DATABASE_URL`. That matters: it is the job that gives a buyer's budget back, so it must not
+ * be the job that stops when a PayPal credential is absent.
+ */
+function releaseReservationsJob(clock: Clock, logger: Logger): JobHandler {
+  // The whole body is wrapped, and that is not defensive padding: pg-boss decides whether to retry from
+  // whether a handler **throws**, so a job that threw at an unreachable database would be retried for ever
+  // with no diagnostic. A `Result` is what lets `settleForQueue` classify it and log it once.
+  return async () => {
+    try {
+      return await sweepReservations(clock, logger)
+    } catch (cause) {
+      return err(toCsError(cause, 'CS_INTERNAL'))
+    }
+  }
+}
+
+async function sweepReservations(clock: Clock, logger: Logger): Promise<Result<unknown, CsError>> {
+  const nowSec = clock.nowSec()
+  const ttlSeconds = RESERVATION_TTL_SECONDS
+  const store = drizzleStore()
+  const candidates = await findStaleAttempts(new Date((nowSec - ttlSeconds) * 1000))
+  if (!candidates.ok) return candidates
+
+  const pending: OpenReservation[] = []
+  let alreadyReleased = 0
+  const byMandate = new Map<MandateId, CheckoutAttemptRow[]>()
+  for (const attempt of candidates.value) {
+    const mandateId = attempt.mandate_id as MandateId
+    const list = byMandate.get(mandateId)
+    if (list === undefined) byMandate.set(mandateId, [attempt])
+    else list.push(attempt)
+  }
+  for (const [mandateId, group] of byMandate) {
+    const entries = await listEntries(mandateId)
+    if (!entries.ok) return entries
+    const settled = new Set(
+      entries.value
+        .filter((e) => e.kind === 'RELEASE' && e.attempt_id !== null)
+        .map((e) => e.attempt_id as string),
+    )
+    for (const attempt of group) {
+      if (settled.has(attempt.id as AttemptId)) {
+        alreadyReleased += 1
+        continue
+      }
+      pending.push({
+        attemptId: attempt.id as AttemptId,
+        mandateId,
+        amount: { minor: attempt.amount_minor, currency: attempt.currency },
+        reservedAtSec: epochSecFrom(attempt.created_at),
+        entryId: reservationEntryId(attempt.id as AttemptId, mandateId),
+      })
+    }
+  }
+
+  const outcome = await expireStaleReservations(store, {
+    candidates: pending,
+    nowSec,
+    ttlSeconds,
+    reason: RELEASE_REASONS.noOrder,
+  })
+  if (!outcome.ok) return outcome
+
+  const swept = outcome.value.expired.length
+  logger?.info('release.reservations finished', {
+    module: 'worker',
+    candidates: candidates.value.length,
+    released: swept,
+    already_released: alreadyReleased,
+    still_held: outcome.value.stillHeld.length,
+    failed: outcome.value.errors.length,
+    now_utc: new Date(nowSec * 1000).toISOString(),
+    now_ist: formatIst(nowSec),
+  })
+  return ok({
+    candidates: candidates.value.length,
+    released: swept,
+    already_released: alreadyReleased,
+    still_held: outcome.value.stillHeld.length,
+    failed: outcome.value.errors.length,
+  })
+}
+
+/**
+ * §7.2's nightly "balances must equal the sum of entries".
+ *
+ * **Reports drift; never repairs it.** `packages/db`'s `reconcileIn` is the check, and a job that silently
+ * rewrote `budget_accounts` would make the next drift report meaningless — the cache would always agree with
+ * itself.
+ */
+function budgetReconcileJob(logger: Logger): JobHandler {
+  // Same guard as the sweep above, for the same reason: a handler that throws is retried by pg-boss for ever.
+  return async () => {
+    try {
+      return await runBudgetReconcile(logger)
+    } catch (cause) {
+      return err(toCsError(cause, 'CS_INTERNAL'))
+    }
+  }
+}
+
+async function runBudgetReconcile(logger: Logger): Promise<Result<unknown, CsError>> {
+  const ids = await budgetAccountIds()
+  if (!ids.ok) return ids
+  const store = drizzleStore()
+  const drifted: string[] = []
+  for (const mandateId of ids.value) {
+    const report = await reconcileIn(store, mandateId)
+    // One unreadable account must not hide the rest, so a failure is counted rather than thrown; the whole
+    // point of this job is to be the place where drift is *visible*.
+    if (!report.ok) {
+      logger?.error('budget.reconcile could not read an account', {
+        module: 'worker',
+        mandate_id: mandateId,
+        code: report.error.code,
+        message: report.error.message,
+      })
+      continue
+    }
+    if (!report.value.ok) drifted.push(mandateId)
+  }
+  logger?.info('budget.reconcile finished', {
+    module: 'worker',
+    accounts_checked: ids.value.length,
+    drift: drifted.length,
+    drifted_mandates: drifted.slice(0, 20),
+    note: 'reported only; a repair is a human decision',
+  })
+  return ok({ accounts_checked: ids.value.length, drift: drifted.length, drifted })
 }
 
 /** Run {@link main} and exit with its code. The only place `process.exit` is called from this file. */

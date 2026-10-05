@@ -79,7 +79,28 @@ const RULES = [
     // `Math.round(totalMinor / 100)` is the bug we are hunting.
     re: /\bMath\.(round|trunc|floor|ceil)\s*\(/g,
     requireLine: MONEY_NAME,
-    exemptLine: /backoff|retry|percent|ratio|\bcount\b|delay|jitter|percentile/i,
+    // Only flagged on a line that talks about money: `Math.floor(sec)` in the clock is correct,
+    // `Math.round(totalMinor / 100)` is the bug we are hunting.
+    //
+    // The exemption list is deliberately split into two kinds of exemption, because they are not
+    // the same claim:
+    //
+    //  - NON-MONEY SHAPE: backoff, retry, percent, jitter, count, delay. Rounding one of these is
+    //    obviously not money and no reading of the line makes it money.
+    //  - TIME: `AtSec`, `epoch`, `_at`, `Ms`, `millis`, `seconds`, `created_at`, `expiry`. AGENTS.md
+    //    rule 10 puts time in the database as `timestamptz` and in tokens as UTC epoch seconds, so
+    //    `Math.floor(date.getTime() / 1000)` is the *required* conversion. It is the same shape as
+    //    the money bug with the opposite meaning: rounding a timestamp to whole seconds loses
+    //    sub-second precision nobody needs, while rounding minor units invents or destroys money.
+    //
+    // The time exemption was added because the scanner flagged `apps/worker`'s
+    // `reservedAtSec: Math.floor(attempt.created_at.getTime() / 1000)` — `MONEY_NAME` matches
+    // `reserve` inside `reservedAtSec`, so a *timestamp field named after a reservation* looked
+    // like an amount. This is a safety net, not the fix: `apps/worker` now calls
+    // `epochSecFrom()` from `@countersign/core`, so the conversion is named once where its intent
+    // is unambiguous.
+    exemptLine:
+      /backoff|retry|percent|ratio|\bcount\b|delay|jitter|percentile|AtSec|epoch|_at\b|\bMs\b|millis|seconds|created_at|expiry/i,
     why: 'Rounding a money double loses or invents minor units. Keep amounts as bigint and allocate explicitly with allocate().',
   },
   {
