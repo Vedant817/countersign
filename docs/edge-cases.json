@@ -1128,7 +1128,8 @@
       "declaredTest": "U",
       "userFacing": "\"2 sentences lack a source. Fix or use the template\"",
       "specLine": 1451,
-      "status": "todo"
+      "status": "done",
+      "notes": "checkCitations only accepts a claim id present in the deterministic ClaimSource set derived from the signed chain, so a merchant editing the note cannot introduce an unsupported claim - the edited sentence either loses its marker or carries an id with no source, both BLOCKED. Test: packages/defender/test/citation.test.ts."
     },
     {
       "id": "EC-MER-6",
@@ -1142,7 +1143,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1452,
-      "status": "todo"
+      "status": "done",
+      "notes": "The read-back and preferences are rendered by the deterministic renderer, not the model, and packet byte-identity is asserted - so omitting either is a change to the renderer rather than something a drafter can do. preferences is router-only input and never read from the chain (spec 8.8), so it cannot be dropped from the signed record. Tests: packages/defender/test/evidence-doc.test.ts, test/citation.test.ts."
     },
     {
       "id": "EC-MER-7",
@@ -1305,7 +1307,8 @@
       "declaredTest": "U",
       "userFacing": "n/a",
       "specLine": 1468,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The citation checker handles a second dispute on the same capture, and the packet id namespaces the two so neither can overwrite the others evidence. What is unbuilt is the dispute_actions row recording both filings, which is WP-15e."
     },
     {
       "id": "EC-DSP-11",
@@ -1319,7 +1322,8 @@
       "declaredTest": "S",
       "userFacing": "n/a",
       "specLine": 1469,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The router returns MESSAGE_ONLY for a cancelled dispute rather than filing, and nothing is uploaded in that posture. The cancellation webhook and the S-18 state transition are WP-15e/WP-17e."
     },
     {
       "id": "EC-DSP-12",
@@ -1334,7 +1338,7 @@
       "userFacing": "n/a",
       "specLine": 1470,
       "status": "done",
-      "notes": "planEvidence proposes only values in the corrected EVIDENCE_TYPES enum, and every case is checked against packages/paypal at test time, so we never propose evidence PayPal would reject. notes is a string capped at 2000 per the D-012 correction. packages/defender/test/planner.test.ts."
+      "notes": "truncateNotes returns an explicit TruncationReport naming the notice rather than silently cutting mid-sentence, against PayPal documented 2000-char cap on evidence.notes (D-012). A URL other than PUBLIC_BASE_URL + /v/{packetId} is BLOCKED, including a bare domain and a tracking-parameterised variant. Tests: packages/defender/test/citation.test.ts, test/qr-decode.test.ts."
     },
     {
       "id": "EC-PP-1",
@@ -1480,7 +1484,8 @@
       "declaredTest": "E",
       "userFacing": "Download link",
       "specLine": 1508,
-      "status": "todo"
+      "status": "wip",
+      "notes": "The redaction a data export depends on is proven on the rendered output rather than the inputs: the extracted-PDF test greps the decoded text for an email, a full card number, an over-long payer_id and any NEVER_SERIALISE key. The export route is WP-19."
     },
     {
       "id": "EC-PRIV-3",

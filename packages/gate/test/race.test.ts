@@ -138,54 +138,68 @@ describe('AT-M10.2 — a 20-way concurrent race yields exactly 3 ALLOWs', () => 
     expect(log.filter((l) => l.queuedBehind === 1).length).toBeGreaterThanOrEqual(RACERS - 1)
   })
 
-  it('is a property: for any cap and cart size, the reservations never exceed the cap', async () => {
-    // The stronger, general claim: AT-M10.2's "exactly 3" is one instance of "reserved ≤ cap, always",
-    // under any interleaving. `fast-check` picks the sizes; the store supplies the interleaving.
-    await fc.assert(
-      fc.asyncProperty(
-        // Cap between 1x and 20x the cart, so the interesting range includes "nothing fits" (1x) and
-        // "everything fits" (20x).
-        fc.integer({ min: 1, max: 20 }),
-        fc.integer({ min: 1, max: 8 }),
-        async (capUnits, cartUnits) => {
-          const cap = BigInt(capUnits) * 500n
-          const cart = BigInt(cartUnits) * 100n
-          const racers = 12
+  /**
+   * The stronger, general claim: AT-M10.2's "exactly 3" is one instance of "reserved ≤ cap, always",
+   * under any interleaving. `fast-check` picks the sizes; the store supplies the interleaving.
+   *
+   * The timeout is explicit because this is the most expensive test in the package by a wide margin:
+   * 100 runs × up to 12 concurrent `evaluate()` calls, each building and verifying a real Ed25519
+   * chain. Under the 63-file root suite's load it crossed vitest's shared 5 s default and reported
+   * `Test timed out in 5000ms` — which reads like an overspend bug, sends someone hunting a race
+   * condition in the budget ledger, and is the kind of flake that gets "fixed" by deleting the test.
+   */
+  it(
+    'is a property: for any cap and cart size, the reservations never exceed the cap',
+    { timeout: 120_000 },
+    async () => {
+      // The stronger, general claim: AT-M10.2's "exactly 3" is one instance of "reserved ≤ cap, always",
+      // under any interleaving. `fast-check` picks the sizes; the store supplies the interleaving.
+      await fc.assert(
+        fc.asyncProperty(
+          // Cap between 1x and 20x the cart, so the interesting range includes "nothing fits" (1x) and
+          // "everything fits" (20x).
+          fc.integer({ min: 1, max: 20 }),
+          fc.integer({ min: 1, max: 8 }),
+          async (capUnits, cartUnits) => {
+            const cap = BigInt(capUnits) * 500n
+            const cart = BigInt(cartUnits) * 100n
+            const racers = 12
 
-          const world = await makeWorld({
-            capMinor: cap,
-            products: [product('NW-001', cart, { stock: racers })],
-            cartMinor: cart,
-          })
+            const world = await makeWorld({
+              capMinor: cap,
+              products: [product('NW-001', cart, { stock: racers })],
+              cartMinor: cart,
+            })
 
-          await Promise.all(
-            Array.from({ length: racers }, async (_, i) => {
-              const decision = await evaluate(
-                input({
-                  attemptId: `att_${String(i).padStart(26, '0')}` as AttemptId,
-                  l3a: l3aWithJti(i, cart),
-                }),
-                world.deps,
-              )
-              if (!decision.ok) throw new Error(decision.error.message)
-              return decision.value
-            }),
-          )
+            await Promise.all(
+              Array.from({ length: racers }, async (_, i) => {
+                const decision = await evaluate(
+                  input({
+                    attemptId: `att_${String(i).padStart(26, '0')}` as AttemptId,
+                    l3a: l3aWithJti(i, cart),
+                  }),
+                  world.deps,
+                )
+                if (!decision.ok) throw new Error(decision.error.message)
+                return decision.value
+              }),
+            )
 
-          const snapshot = world.snapshot()
-          // The invariant. `floor(cap / cart)` reservations, and never one more. Both halves matter: the
-          // `toBeLessThanOrEqual` alone would also hold if the Gate had refused *everything*, and the
-          // equality alone would hold on a Gate that reserved nothing and a cap of zero.
-          expect(snapshot.reserved % cart).toBe(0n)
-          expect(snapshot.reserved).toBeLessThanOrEqual(cap)
-          expect(Number(snapshot.reserved / cart)).toBe(
-            Math.min(Math.floor(Number(cap / cart)), racers),
-          )
-        },
-      ),
-      { numRuns: 40 },
-    )
-  })
+            const snapshot = world.snapshot()
+            // The invariant. `floor(cap / cart)` reservations, and never one more. Both halves matter: the
+            // `toBeLessThanOrEqual` alone would also hold if the Gate had refused *everything*, and the
+            // equality alone would hold on a Gate that reserved nothing and a cap of zero.
+            expect(snapshot.reserved % cart).toBe(0n)
+            expect(snapshot.reserved).toBeLessThanOrEqual(cap)
+            expect(Number(snapshot.reserved / cart)).toBe(
+              Math.min(Math.floor(Number(cap / cart)), racers),
+            )
+          },
+        ),
+        { numRuns: 40 },
+      )
+    },
+  )
 
   it('never overspends even when every attempt is for the whole budget', async () => {
     const world = await makeWorld({ capMinor: BUDGET_MINOR, products: [PLENTY] })

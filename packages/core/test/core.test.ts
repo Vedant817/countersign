@@ -328,7 +328,16 @@ describe('AT-M1.5 identifiers are prefixed and typed', () => {
     expect([older, newer].sort(byNewest)).toEqual([newer, older])
   })
 
-  it('is collision-free over 20k ids', () => {
+  /**
+   * 20,000 ULIDs, which is a real collision test rather than a token gesture — 80 bits of entropy in
+   * the random half, so a birthday collision here would mean the entropy is not being drawn.
+   *
+   * The timeout is explicit because it does real work: under the 63-file root suite's CPU load this
+   * crossed vitest's shared 5 s default and reported `Test timed out in 5000ms` instead of a failed
+   * assertion. A timeout in an id test reads like broken entropy, and sends someone hunting a
+   * duplicate-id bug that does not exist.
+   */
+  it('is collision-free over 20k ids', { timeout: 60_000 }, () => {
     const seen = new Set<string>()
     for (let i = 0; i < 20_000; i++) seen.add(ulid())
     expect(seen.size).toBe(20_000)

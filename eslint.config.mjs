@@ -59,6 +59,21 @@ const GATE_LLM_BAN = [
  * A file-scoped ban is still a real control: it fails in an editor while you write the line, which a CI
  * test cannot do. `packages/defender/test/router.test.ts` asserts the same boundary structurally, so
  * removing this rule does not silently open the hole.
+ *
+ * **`citation-check.ts` is on this list for a different reason, and the reason is stronger.**
+ * §8.15 says "the model plans and drafts, and a deterministic checker decides whether the text is
+ * allowed to be filed", and §18 question 27 asks how the LLM is stopped from inventing facts in
+ * evidence. Those are two different jobs and they need two different guarantees:
+ *
+ * - `rules` / `router` / `rationale` must not import a model **because they must not choose a posture** —
+ *   the model gets no vote.
+ * - `citation-check` must not import a model **because it must not approve a claim** — a checker that
+ *   asked a model "is this well supported?" would be a rubber stamp with extra steps, and the failure it
+ *   would hide (a sentence asserting something nobody signed) is the exact failure the product exists to
+ *   prevent. Judge question 27's answer has to be a rule, not an opinion.
+ *
+ * `citation-check.ts` imports only `@countersign/core`, `./rules` and `./types`. If that ever changes to
+ * include a model runtime, the ban fires here and in the editor.
  */
 const ROUTER_LLM_BAN = [
   {
@@ -67,6 +82,7 @@ const ROUTER_LLM_BAN = [
       'packages/defender/src/router.ts',
       'packages/defender/src/rationale.ts',
       'packages/defender/src/types.ts',
+      'packages/defender/src/citation-check.ts',
     ],
     rules: {
       'no-restricted-imports': [
@@ -76,10 +92,11 @@ const ROUTER_LLM_BAN = [
             {
               group: LLM_RUNTIME_BAN,
               message:
-                'This file decides the dispute posture and must stay a pure function. Spec §8.15 is a ' +
-                'rules table and §8.16 requires 100% on the 40-case eval, which is only reachable ' +
-                'because nothing here is generated. The model may plan evidence and draft notes in ' +
-                'planner.ts / drafter.ts — it may not choose whether to contest. ' +
+                'This file decides the dispute posture or approves a drafted claim, and must stay a pure ' +
+                'function. Spec §8.15 is a rules table and §8.16 requires 100% on the 40-case eval, which ' +
+                'is only reachable because nothing here is generated. The model may plan evidence and ' +
+                'draft notes in planner.ts / drafter.ts — it may not choose whether to contest, and it ' +
+                'may not decide whether a sentence is allowed to be filed. ' +
                 'See docs/DECISIONS.md D-023.',
             },
           ],
