@@ -25,7 +25,6 @@ export const SECRET_ENV_KEYS = [
   'PAYPAL_ACCESS_TOKEN',
   'PAYPAL_WEBHOOK_ID',
   'PAYPAL_BUYER_PASSWORD',
-  'OPENAI_API_KEY',
   'SESSION_SECRET',
   'VI_SERVICE_TOKEN',
   'VI_KEK',
@@ -102,7 +101,22 @@ export const envSchema = z
     PAYPAL_MCP_URL: z.string().url().default('https://mcp.sandbox.paypal.com/http'),
     PAYPAL_MCP_MODE: z.enum(['remote', 'local']).default('remote'),
 
-    OPENAI_API_KEY: z.string().min(1),
+    /**
+     * Optional, and deliberately so.
+     *
+     * It was required, and **nothing in the repository reads it** — the drafter and the agent take a
+     * model through dependency injection, not through the environment. The practical cost was that
+     * `parseEnv` refused every process without it, so the whole project refused to boot without an
+     * OpenAI key, and the deterministic half of the product — the Gate, the router, the compiler's
+     * read-back, the order path, the public verifier — could not be demonstrated by anyone who did not
+     * have one. A model is the one dependency this project is explicitly designed to work without:
+     * WP-15e's `FileDeps.llm` is optional and `templateNote()` passes the citation checker by
+     * construction.
+     *
+     * So the key is read where a model is actually constructed, and `/status` reports its absence as
+     * "not configured" rather than treating it as a boot failure.
+     */
+    OPENAI_API_KEY: z.string().min(1).optional(),
     LLM_MAIN_MODEL: z.string().min(1).default('gpt-6.1-sol'),
     LLM_CHEAP_MODEL: z.string().min(1).default('gpt-6-luna'),
 
@@ -126,9 +140,16 @@ export const envSchema = z
 
     SENTRY_DSN: z.string().optional(),
   })
-  .strict()
+  // NOT `.strict()`. See `parseEnv` for why strictness was removed and what replaced it — the
+  // behaviour `.strict()` gave us is preserved where it matters and dropped where it was noise.
+  .passthrough()
 
 export type Env = z.infer<typeof envSchema>
+
+/** Every key this project declares. Derived from the schema, so a new variable is never forgotten. */
+// Sorted *before* freezing. `Object.freeze(a).sort()` throws — `Array.prototype.sort` writes into the
+// receiver, and the receiver is frozen.
+export const ENV_KEYS: readonly string[] = Object.freeze(Object.keys(envSchema.shape).sort())
 
 /**
  * Env that is allowed to be absent. Used by tooling (seed, tests, the sandbox probe scripts) that
@@ -136,6 +157,64 @@ export type Env = z.infer<typeof envSchema>
  * credentials but not OpenAI.
  */
 export const partialEnvSchema = envSchema.partial()
+
+/**
+ * Damerau-Levenshtein distance, capped at 2, so a near-miss is cheap to detect and impossible to
+ * report by accident.
+ *
+ * The bound is what makes this usable: a developer's shell holds hundreds of variables
+ * (`GIT_BRANCH`, `USERNAME`, `SESSIONNAME`, npm's `_`/`npm_config_*` family), so an unbounded
+ * "is this close to one of ours" check finds matches everywhere. Unbounded similarity is worse than
+ * none, because it produces a hard error about the wrong variable.
+ */
+function withinTwoEdits(a: string, b: string): boolean {
+  if (a === b) return true
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a]
+  // Anything already more than two apart in length cannot be within two edits.
+  if (long.length - short.length > 2) return false
+  // `noUncheckedIndexedAccess` is on, so every cell is `number | undefined`. The rows are dense by
+  // construction, but a `?? 0` here would be a lie dressed as a default — so the widths are asserted
+  // instead and the reads use a helper that cannot return undefined.
+  const row = (n: number): number[] => Array.from({ length: n }, (_, i) => i)
+  const at = (r: readonly number[], i: number): number => {
+    const v = r[i]
+    if (v === undefined) throw new Error(`edit-distance row too short at ${i}/${r.length}`)
+    return v
+  }
+  let prev: number[] = row(short.length + 1)
+  for (let i = 1; i <= long.length; i += 1) {
+    const cur: number[] = [i]
+    for (let j = 1; j <= short.length; j += 1) {
+      const cost = long[i - 1] === short[j - 1] ? 0 : 1
+      cur[j] = Math.min(at(cur, j - 1) + 1, at(prev, j) + 1, at(prev, j - 1) + cost)
+    }
+    prev = cur
+    if (Math.min(...cur) > 2) return false
+  }
+  return at(prev, short.length) <= 2
+}
+
+const KNOWN = new Set(ENV_KEYS)
+
+/**
+ * Split the keys `parseEnv` does not recognise into **typos we must refuse** and **unrelated shell
+ * noise we must ignore**.
+ *
+ * Returns `null` when nothing needs reporting.
+ */
+function suspiciousKeys(source: NodeJS.ProcessEnv): { key: string; didYouMean: string }[] | null {
+  const suspicious: { key: string; didYouMean: string }[] = []
+  for (const key of Object.keys(source)) {
+    if (key === '' || KNOWN.has(key)) continue
+    // Case is not a typo here: Windows and macOS both populate `Path`/`USERPROFILE`/`TMPDIR` with
+    // capitalisation no author would have chosen, and failing boot over that is absurd.
+    const upper = key.toUpperCase()
+    if (KNOWN.has(upper)) continue
+    const near = ENV_KEYS.find((k) => withinTwoEdits(upper, k))
+    if (near) suspicious.push({ key, didYouMean: near })
+  }
+  return suspicious.length > 0 ? suspicious : null
+}
 
 function formatIssues(e: z.ZodError): CsError {
   const issues = e.issues.map((i) => ({ path: i.path.join('.'), message: i.message, code: i.code }))
@@ -153,12 +232,48 @@ function formatIssues(e: z.ZodError): CsError {
 /**
  * Parse an env record. Throws a `CsError` (never a raw `ZodError`) so callers can render one
  * consistent message, and lists every offending key at once rather than one per restart.
+ *
+ * ## Why this is not `.strict()`
+ *
+ * `.strict()` conflated two failures that deserve opposite answers:
+ *
+ * | Situation | Correct behaviour | What `.strict()` did |
+ * |---|---|---|
+ * | `DATABSE_URL` — a typo in one of ours | **refuse to boot.** The variable that was supposed to hold the database password is not holding anything, and the alternative is connecting to nothing with a cheerful log line | refused ✅ |
+ * | `GIT_BRANCH`, `USERNAME`, `SESSIONNAME`, `npm_config_*` — the developer's shell | **ignore it.** None of these is ours and none of them is a typo | refused ❌ |
+ *
+ * The second row is QA-env-1, confirmed by execution: adding `GIT_BRANCH` to an otherwise perfect
+ * environment produced `Invalid environment: : Unrecognized key: "GIT_BRANCH"` and the worker
+ * refused with exit 78. A developer cannot run the project in a normal shell, and the message
+ * enumerates eighty of their own unrelated variables — which hides the one real cause among them.
+ *
+ * So strictness is **not** simply removed: it is moved onto near-misses. An unrecognised key within
+ * two edits of one of ours is a typo and is still a hard error, now with the intended name attached.
+ * Everything else is dropped. On Render, where the environment is clean, this changes nothing; in a
+ * developer's shell it stops the environment from being an obstacle.
  */
 export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const candidate: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(source)) {
     if (v === undefined) continue
     candidate[k] = v
+  }
+  const suspicious = suspiciousKeys(source)
+  if (suspicious) {
+    throw csError(
+      'CS_VALIDATION',
+      `Invalid environment: ${suspicious
+        .map(
+          (s) =>
+            `${s.key}: unrecognised, and close to ${s.didYouMean} — did you mean ${s.didYouMean}?`,
+        )
+        .join('; ')}`,
+      { suspicious },
+      {
+        userMessage:
+          'The server is misconfigured. A variable looks like a typo of one we do read. Please tell the operator.',
+      },
+    )
   }
   const result = envSchema.safeParse(candidate)
   if (!result.success) throw formatIssues(result.error)

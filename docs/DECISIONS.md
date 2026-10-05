@@ -719,3 +719,58 @@ so without it that path seq-scans the table once per dispute.
 `evidence_packets` or `jwks_keys`. WP-18’s routes read both through the same `repo()` wrapper and the
 port names what should satisfy it. That is a missing abstraction rather than a defect, and it belongs
 with the rest of `packages/db`’s repos rather than being invented twice.
+
+## D-031 — Env strictness moved onto near-misses, and the model key became optional
+
+**Date:** 2026-10-05 · **Raised by:** senior QA audit 1 (QA-env-1, QA-web-1) · **Spec item:** §6
+**Decision:** `envSchema` is no longer `.strict()`. Unrecognised keys are ignored **unless** they
+are within two Damerau-Levenshtein edits of a key we do read, in which case boot is refused with
+the intended name attached. `OPENAI_API_KEY` is optional. `apps/web` `start` is `next start`.
+
+**1. Why strictness was not simply removed.** `.strict()` conflated two failures that deserve
+opposite answers:
+
+| Situation | Correct | `.strict()` |
+|---|---|---|
+| `DATABSE_URL` — a typo in one of ours | **refuse to boot.** The variable meant to hold the database password holds nothing | refused |
+| `GIT_BRANCH`, `USERNAME`, `npm_config_*` — the developer shell | **ignore it** | refused |
+
+The second row is the reported bug: adding one unrelated variable produced
+`Invalid environment: : Unrecognized key: "GIT_BRANCH"`, the worker refused with exit 78, and the
+message enumerated eighty of the developer own unrelated variables while hiding the real cause.
+So strictness is **moved**, not dropped — a typo of ours is still a hard error, now with
+`did you mean DATABASE_URL?` attached. Both halves are pinned by tests, because the second half is
+worthless without the first.
+
+**Why the edit distance is bounded at two.** An unbounded "is this close to one of ours" check
+finds matches everywhere in a shell holding hundreds of variables. Unbounded similarity would be
+**worse** than none, because it produces a hard error about the wrong variable. Case is compared
+case-insensitively for the same reason: Windows populates `Path` and `USERPROFILE`, and failing boot
+over that is absurd.
+
+**2. `OPENAI_API_KEY` was required and nothing read it.** No file in the repository reads it — the
+drafter and the agent take a model by dependency injection. The cost was that `parseEnv` refused
+every process without one, so the project could not boot for anyone without an OpenAI key, and
+therefore the Gate, the router, the compiler read-back, the order path and the public verifier
+could not be demonstrated by anyone who lacked one. That is a large part of the product gated
+behind the one dependency it is explicitly designed to work without (D-018, D-023, WP-15e optional
+`FileDeps.llm`). It is now optional and `/status` reports its absence as "not configured".
+
+**3. `apps/web` `start` was `next start -p ${PORT:-3000}`.** POSIX parameter expansion, which pnpm
+does not perform on Windows, so the command a judge or the README tells them to run failed
+outright: `option -p, --port <port> argument ${PORT:-3000} is invalid`. Next reads `PORT` itself,
+so the expansion was never necessary.
+
+**Four bugs found in the fix while making it**, all of which the tests caught:
+
+- `Object.freeze(Object.keys(...)).sort()` — `Array.prototype.sort` writes into the receiver, and
+  the receiver is frozen. Sorted before freezing.
+- The near-miss loop needed `noUncheckedIndexedAccess` handling, and the honest form is an
+  accessor that **throws** on a short row rather than a `?? 0` default, which would be a lie
+  dressed as a fallback.
+- `CsError` is a plain object with a `message` field, **not** an `Error` subclass, so a test
+  extracting `e instanceof Error ? e.message : String(e)` was asserting on `[object Object]` and
+  passing without checking anything.
+- The test fixture was hand-written and wrong (`APP_ENV` domain, `VI_KEK` base64 shape). The
+  required set is now **derived** in the test, so a new required variable fails one readable test
+  instead of nine with "Unrecognized key".
