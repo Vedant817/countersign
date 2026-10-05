@@ -193,17 +193,40 @@ on a wrong-length signature, so the 64-byte length is enforced explicitly.
 **Evidence:** all read from the installed source at the pinned commit; see the docstrings in
 `apps/vi/src/vi_service/{l2,l3,verify,checkout_jwt}.py` and `tests/test_constraints_fixture.py`.
 
-## D-011 — `l3_jti` is derived, not read from the L3
+## D-011 — `l3_jti` is derived from the signed L3a bytes, so it is a replay id, not a request id
 
 **Date:** 2026-10-04 · **Raised by:** WP-03 · **Spec item:** §7.2 `checkout_attempts.l3_jti` UNIQUE
-**Decision:** `jti` = base64url SHA-256 of the L3a issuer JWT.
+**Decision:** `jti` = base64url SHA-256 of the L3a issuer JWT. Nothing else, and specifically **not**
+derived from the L2, the amount, the clock or a per-attempt nonce.
 **Reason:** The L3 payload the library produces has **no `jti` claim**, but §7.2 requires a unique
 `l3_jti` and §8.10 check 7 uses it as the replay defence (EC-IDEM-1, EC-MER-2). Deriving it from the
-signed token gives the two properties that matter: it is content-bound (a mutated L3 has a different
-replay id) and it is **deterministic** (a retried request produces the same id, so an idempotent
-retry cannot consume its own replay protection). A random `jti` per attempt would have the opposite
-behaviour.
-**Evidence:** `apps/vi/src/vi_service/l3.py`.
+signed token makes it a pure function of the exact bytes the Gate is being asked to authorise, which
+is the one property that defence needs: submitting the *same signed L3* twice yields the same `jti`,
+the UNIQUE index `checkout_attempts_l3_jti_key` refuses the second insert, and that refusal maps to
+`GATE_REPLAY`. It is also content-bound, so two different authorisations cannot collide on it.
+
+**Correction (2026-10-05, QA2-VI-2).** This entry previously claimed the `jti` was *deterministic
+across retries of the `l3/create` request* — "a retried request produces the same id, so an idempotent
+retry cannot consume its own replay protection", and `l3.py`'s module docstring made the same claim.
+**Both halves were false and the stated rationale was inverted.** `create_l3` takes `iat`/`exp` from
+`now_sec()`, so a retry across a second boundary changes the payload; and `create_disclosure` mints a
+fresh `os.urandom(16)` salt per disclosure, so even inside a single second a retry produces different
+disclosure bytes, a different `delegate_payload`, a different issuer JWT and a different `jti`. Two
+`l3/create` calls in the same second yield two different `jti`s. The UNIQUE index therefore cannot
+fire on a retried *request*, so the retry "consumes fresh replay protection" rather than being
+absorbed by it — the opposite of what was documented.
+
+**Semantics chosen.** A retried `l3/create` is a genuinely **new authorisation** — different `iat`,
+different disclosure salts, different signature — so it gets a new `jti`, and that is correct.
+Reusing one would make the UNIQUE index refuse a legitimate retry. So: `jti` identifies *the signed
+L3a*, not the request, and **what absorbs a retry is not the `jti`**. Per §8.6 every side-effecting
+PayPal call carries a deterministic `PayPal-Request-Id` derived from our own IDs, and that is the
+retry-idempotency defence; the `jti` covers the other direction, the same signed token captured and
+replayed later. Both are required. They are different defences and this entry previously conflated
+them.
+**Evidence:** `apps/vi/src/vi_service/l3.py` (module docstring and `create_l3`),
+`apps/vi/src/vi_service/models.py` (`L3CreateResponse.jti`),
+`apps/vi/tests/test_l3.py::test_EC_IDEM_1_jti_identifies_the_signed_token_not_the_request`.
 
 ---
 
@@ -774,3 +797,54 @@ so the expansion was never necessary.
 - The test fixture was hand-written and wrong (`APP_ENV` domain, `VI_KEK` base64 shape). The
   required set is now **derived** in the test, so a new required variable fails one readable test
   instead of nine with "Unrecognized key".
+
+## D-032 — The signed-budget reader is verified against a real vi capture, and `max` above 2^53 is refused too late
+
+**Date:** 2026-10-06 · **Raised by:** verification of the QA-gate-1 fix · **Spec item:** §7.2, D19, D18
+**Decision:** Commit `packages/gate/test/fixtures/vi-verify-budget-capture.json` as the authority for
+the disclosed-constraint shape, and add `max <= 2^53-1` enforcement at the route (reported below, not
+yet applied — it belongs to `apps/vi`).
+
+**The earlier fix was read from `apps/vi` source, not from a running service, and that uncertainty is
+now closed.** The Gate reads the signed budget from `disclosed.l2.delegate_payload[*].constraints[*]`.
+Captured from a real `POST /v1/verify` against `apps/vi`’s own routes through `testclient`, with every
+token signed by the pinned library at `356c296…`:
+
+```
+verify_response.disclosed.l2.delegate_payload[1].constraints[2]
+{"currency":"USD","max":13000,"type":"mandate.payment.budget"}
+```
+
+Keys are exactly `currency`, `max`, `type`, and **`min` is absent rather than null** — which matters,
+because `to_dict()` omits optional fields and a `.nullable().default(null)` schema that expected an
+explicit null would have failed on every real budget constraint. `readSignedBudget` returns
+`found: true` with `max: 13000n`, and `evaluate` ALLOWs a $30.00 cart under a signed $130.00 ceiling
+while BLOCKing a $140.00 cart with `GATE_BUDGET_EXCEEDED`.
+
+**The hash-indirection worry is settled, and negatively.** It was suspected that a constraint might be
+reachable only through `resolve_disclosure_refs`’ hash indirection, which the structural walker does
+not follow. Three independent lines of evidence say it cannot happen: `create_layer2_autonomous`
+creates refs only via `_match_merchant_refs`/`_match_item_refs`, which wrap **merchants and items**,
+never a constraint object; `resolve_disclosure_refs` only resolves and is never applied to
+disclosed.l2 at all; and in the capture **0 of 8** constraint entries is a bare ref — refs appear only
+nested inside `allowed` and `acceptable_items`. Were it to happen, `readSignedBudget` returns
+`found: false` and the obligation gate BLOCKs.
+
+**The real hole: `max` above `2^53-1`.** 83 library `to_dict()` outputs were generated at runtime and
+checked against `budgetConstraintSchema`. 79 pass. Of the 4 failures, 2 are `extra_fields`, which
+cannot reach a signed L2 at all because vi’s `_ConstraintBase` is `extra="forbid"` — an extra key is
+a 422 at `l2/prepare`. The remaining 2 are genuine:
+
+`apps/vi` accepts and **signs** `max: 9007199254740993`, which is `2^53 + 1`. JavaScript `JSON.parse`
+has already corrupted that to `…992` by the time zod sees it, so `readSignedBudget` reports
+`found: false` and the Gate BLOCKs. Fail-closed, and the value is unrecoverable either way — but the
+service should refuse it at the route rather than sign a constraint no verifier can read.
+**Fix belongs in `apps/vi/src/vi_service/models.py` on `BudgetConstraint.max`** (add `le`), or in
+`vi-client`’s `budgetConstraintSchema`. Not applied here: `apps/vi` was mid-edit by another agent.
+
+**Also confirmed while checking this:** `recurrence` and `agent_recurrence` differ on exactly the
+occurrence key — `number` versus `max_occurrences` — and the Gate reads both correctly. That
+distinction is load-bearing rather than cosmetic: reading the wrong one leaves
+`max_occurrences: null`, which `evaluateRecurrence` treats as "the date window is the entire limit",
+which is the loosest possible reading of a signed cap. There is now a test that would fail if the
+reader regressed to the wrong key.
