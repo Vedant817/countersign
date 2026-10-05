@@ -171,3 +171,18 @@ export { buildDisputeContext, ingestDisputeToDefender, joinDisputeToOrder } from
 // --- WP-16: the Strategist -----------------------------------------------------------------------------------
 export { proposeStrategy, proposeStrategyDeterministic } from './strategist'
 export { executeStrategy } from './strategist-actions'
+
+// --- WP-15c/15d: the surfaces a second package legitimately needs ------------------------------------------
+//
+// `publicPacketUrl` is exported for one specific reason, and the reason is worth stating because the
+// alternative was tried and did not work.
+//
+// The verifier (§8.18) and the QR (`qr.ts`) must agree on the address of a packet. §8.15 permits exactly
+// one URL in a whole evidence document, so if these two ever disagreed the failure mode is a QR that
+// scans to a 404 — a document that looks perfect and sends a PayPal adjudicator nowhere.
+//
+// WP-18 found it had to *mirror* `publicPacketUrl` because this package's `exports` map allows only
+// `"."` and the symbol was never re-exported. It added a cross-base-URL agreement test against the
+// original by relative path, which is a good mitigation and still a second implementation. One export
+// line removes the duplication rather than testing for its absence.
+export { publicPacketUrl } from './citation-check'

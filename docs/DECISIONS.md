@@ -676,3 +676,46 @@ live bug. It was still changed to `disputeStageOf(next)` — the accessor writte
 which returns `null` rather than a guess — because the cast was correct only by accident of ordering,
 and both safety properties now live in one place instead of one place plus a reader's memory
 about the line above. Verified identical for every recognised stage.
+
+## D-029 — The verifier and the PDF were each carrying their own copy of the packet URL
+
+**Date:** 2026-10-05 · **Raised by:** WP-18 · **Spec item:** §8.18, §8.15 "one URL per document"
+**Decision:** `publicPacketUrl` is exported from `@countersign/defender` and re-exported by
+`@countersign/verifier`. No second implementation exists.
+
+**Reason.** `qr.ts` encodes this address into the evidence PDF, `citation-check.ts` refuses any note
+containing a *different* one, and `/v/[packetId]` is what a scan opens. Those three are the same string
+by construction or they are a bug waiting to be found. WP-18 could not import it — the symbol was not
+re-exported from `defender`’s index and that package’s `exports` map allows only `"."` — so it kept a
+one-line mirror plus a cross-base-URL agreement test that imported the original by **relative path**.
+A reasonable mitigation and still a second implementation; AGENTS.md rule 8 is why it was not simply
+fixed in place.
+
+**The failure mode is specific and quiet.** Divergence produces a perfect-looking evidence packet whose
+QR opens a 404. §8.18 says the QR is what makes "you do not have to trust us" something the reader can
+act on, so that symptom lands on the one reader the product exists to reassure — a PayPal adjudicator,
+with a printed copy, in front of a judge.
+
+## D-030 — `evidence_packets.bundle_hash` is constrained to base64url, because hex would fail silently
+
+**Date:** 2026-10-05 · **Raised by:** WP-18 · **Spec item:** §7.3, D18
+**Decision:** `CHECK (bundle_hash ~ '^[A-Za-z0-9_-]{43}$')` plus an index on the column.
+
+**Reason.** WP-18 reported that `apps/vi` returns `bundle_hash` as base64url while the column was
+unconstrained text, and reported a hex/base64url split. The split is real but the column’s own comment
+says it "equals the `custom_id` payload" — and `custom_id` is base64url — so the intent was already
+stated and simply not enforced.
+
+**Why a CHECK and not a comment.** A SHA-256 digest is 32 bytes, so base64url of it is always 43
+characters with no padding. Without the constraint a hex digest stores happily and then fails every
+comparison, and `disputes.ts` looks packets up by this column — so the symptom would be **"no packet with
+that id"** for a packet that exists. A wrong answer to "is this genuine?" has to be loud, and a lookup
+failure is the quietest possible way to be wrong.
+
+**The index, not just the constraint.** `disputes.ts` finds a packet by hash when a reviewer re-verifies,
+so without it that path seq-scans the table once per dispute.
+
+**Still open, and deliberately not worked around:** `packages/db` has no repository for
+`evidence_packets` or `jwks_keys`. WP-18’s routes read both through the same `repo()` wrapper and the
+port names what should satisfy it. That is a missing abstraction rather than a defect, and it belongs
+with the rest of `packages/db`’s repos rather than being invented twice.

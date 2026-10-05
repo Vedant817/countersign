@@ -52,6 +52,10 @@ const SCAN_ROOTS = [
   'packages/agent/src',
   'packages/evidence-pdf/src',
   'packages/privacy/src',
+  // The public verifier serves a dispute's amount on an unauthenticated page, so it is as money-bearing as
+  // the packages that move it. Its only money handling is carrying `disputes.amount_minor` as a bigint and
+  // serialising it as a string — which is exactly what this scan exists to keep it doing.
+  'packages/verifier/src',
   'apps/web/lib',
   'apps/web/app',
   'apps/worker/src',

@@ -1135,7 +1135,16 @@ export const evidencePackets = pgTable(
     version: integer('version').notNull().default(1),
     /** The §7.3 canonical-JSON bundle. Public view = the redacted subset. */
     bundle: jsonb('bundle').$type<JsonValue>().notNull(),
-    /** sha256 over the RFC 8785 JCS encoding of `bundle`; equals the `custom_id` payload. */
+    /**
+     * sha256 over the RFC 8785 JCS encoding of `bundle`; **equals the `custom_id` payload**.
+     *
+     * Which means base64url, unpadded, and therefore always 43 characters — a SHA-256 digest is32
+     * bytes and base64url of 32 bytes is 43 characters with no padding. Enforced by the CHECK below
+     * rather than by convention, because the two services disagreed here: `apps/vi` returns base64url
+     * from `verify.py::bundle_hash`, and a hex digest stored in this column would be accepted happily
+     * and then fail every comparison — surfacing as "no packet with that id" rather than as a bad
+     * hash. A wrong answer to "is this packet genuine?" must be loud. See docs/DECISIONS.md D-029.
+     */
     bundle_hash: text('bundle_hash').notNull(),
     /** The rendered PDF. ≤ 10 MB [V8]; stored as `bytea`, never in the bundle. */
     pdf_bytes: byteaColumn('pdf_bytes'),
@@ -1153,6 +1162,16 @@ export const evidencePackets = pgTable(
     // The public verifier serves the newest packet per dispute; history stays for the case file.
     index('evidence_packets_dispute_id_idx').on(t.dispute_id),
     uniqueIndex('evidence_packets_dispute_id_version_key').on(t.dispute_id, t.version),
+    // The published digest, looked up by value. `disputes.ts` finds a packet this way when a
+    // reviewer re-verifies, so an unindexed lookup would scan the whole table on every dispute.
+    index('evidence_packets_bundle_hash_idx').on(t.bundle_hash),
+    // Base64url, unpadded, exactly 43 characters — see the `bundle_hash` docstring (D-029). This is
+    // the constraint that makes a hex-vs-base64url disagreement a failed INSERT rather than a
+    // silently unfindable packet.
+    check(
+      'evidence_packets_bundle_hash_is_base64url_sha256',
+      sql`${t.bundle_hash} ~ '^[A-Za-z0-9_-]{43}$'`,
+    ),
     check(
       'evidence_packets_notes_le_2000',
       sql`${t.notes} IS NULL OR char_length(${t.notes}) <= 2000`,

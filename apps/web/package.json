@@ -24,6 +24,7 @@
     "@countersign/ledger": "workspace:*",
     "@countersign/orders": "workspace:*",
     "@countersign/paypal": "workspace:*",
+    "@countersign/verifier": "workspace:*",
     "@countersign/vi-client": "workspace:*",
     "@countersign/webhooks": "workspace:*",
     "@ai-sdk/mcp": "2.0.66",
