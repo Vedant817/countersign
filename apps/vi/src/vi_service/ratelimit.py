@@ -82,21 +82,49 @@ def reset_limiter() -> None:
     _limiter = None
 
 
-def client_id_for(host: str | None, forwarded_for: str | None = None) -> str:
+def client_id_for(
+    host: str | None,
+    forwarded_for: str | None = None,
+    *,
+    trusted_hops: int = 0,
+) -> str:
     """Which IP to bill the request to.
 
-    `X-Forwarded-For` is consulted only when vi-service sits behind a proxy that sets it, and only its
-    **first** hop — the original client. A forged header would otherwise let one caller mint unlimited
-    budgets by rotating a fake value.
+    **`X-Forwarded-For` is ignored unless `VI_TRUSTED_PROXY_HOPS` says how many hops to trust, and
+    the default is zero.** With the default, `host` — the socket address — is the only client
+    identity, so no header can change which budget a request lands in.
 
-    The first *non-empty* hop, because some proxies prepend an empty entry; an empty first hop carries
-    no information and falling through to the next one still gives the original client.
+    Why the default is zero rather than one. `X-Forwarded-For` is a plain, unauthenticated string
+    that any client can set. Hop 1 is only the real client if the thing that wrote it is a proxy we
+    control and we know how many proxies sit in front of us. Trusting hop 1 unconditionally was
+    exactly that assumption made without the evidence: a caller who controls the leftmost value got
+    a fresh 30/min budget per request, so §8.3's budget was per-*string* and a caller could mint
+    unlimited ES256 verification CPU on the trust root. Measured before the fix: 35 requests, 35
+    different first hops, 35 × 200.
+
+    What `trusted_hops=N` asserts: "the **last N** entries of this header were written by N proxies I
+    control, so the entry immediately before them is the client and every earlier entry is
+    caller-supplied." That is the strongest claim hop arithmetic can support, and it is the one the
+    default of 0 declines to make.
+
+    Two honest limitations, neither of which this function pretends to solve:
+
+    * If the header carries **N or fewer** entries, it does not contain an entry we can attribute to
+      the client — everything in it is either ours or the caller's, and the two are indistinguishable.
+      So the socket address is used. Behind a proxy that *replaces* the header (emitting a single
+      client IP), that means every caller shares one budget: a real availability cost, chosen over a
+      spoofable one. The remedy is an edge rate limit that understands the topology, or a proxy
+      configured to append so hop `N+1` exists.
+    * Whether a proxy replaces or appends is a property of the proxy, not of the header, and no
+      arrangement of hop indexing can detect it. This function does not claim otherwise.
+
+    Empty hops are skipped, because some proxies emit a leading empty entry; an empty hop carries no
+    information.
     """
-    if forwarded_for:
-        for hop in forwarded_for.split(","):
-            candidate = hop.strip()
-            if candidate:
-                return candidate
+    if trusted_hops > 0 and forwarded_for:
+        hops = [hop.strip() for hop in forwarded_for.split(",") if hop.strip()]
+        if len(hops) > trusted_hops:
+            return hops[-(trusted_hops + 1)]
     return host or "unknown"
 
 

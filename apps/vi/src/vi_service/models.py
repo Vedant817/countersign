@@ -666,8 +666,13 @@ class L3CreateResponse(BaseModel):
     l3a: str
     l3b: str
     jti: NonEmptyStr(
-        "Deterministic replay id: base64url SHA-256 of the L3a issuer JWT. Identical on "
-        "every retry of the same request."
+        "Replay id: base64url SHA-256 of this response's L3a issuer JWT. It is a pure function of "
+        "the signed L3a bytes, so re-submitting the same signed L3 yields the same jti and the "
+        "UNIQUE `checkout_attempts_l3_jti_key` index refuses the replay (Gate check 7, EC-IDEM-1). "
+        "It is NOT stable across retries of this request — a retried `l3/create` mints new "
+        "disclosure salts and a new iat, so it is a new authorisation with a new jti. Retry "
+        "idempotency comes from the deterministic `PayPal-Request-Id` on the PayPal call (spec "
+        "§8.6), not from this. See docs/DECISIONS.md D-011."
     )
     iat: int
     exp: int

@@ -109,11 +109,19 @@ def require_bearer(authorization: Annotated[str | None, Header()] = None) -> Non
 
 
 def enforce_public_limit(request: Request) -> None:
-    """30 req/min/IP, per spec §8.3. Applied only to `GET /v1/jwks` and `POST /v1/public/verify`."""
+    """30 req/min/IP, per spec §8.3. Applied only to `GET /v1/jwks` and `POST /v1/public/verify`.
+
+    The client identity comes from `ratelimit.client_id_for` with the configured
+    `VI_TRUSTED_PROXY_HOPS`, which defaults to 0 — so by default the socket address is the only
+    identity and `X-Forwarded-For` cannot be used to mint fresh budgets.
+    """
+    from .config import get_settings
+
     ratelimit.enforce(
         ratelimit.client_id_for(
             request.client.host if request.client else None,
             request.headers.get("x-forwarded-for"),
+            trusted_hops=get_settings().trusted_proxy_hops,
         )
     )
 

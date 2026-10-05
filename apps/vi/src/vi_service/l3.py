@@ -10,13 +10,31 @@ injection in a product listing would end with a validly signed authorisation. So
 the same STRICT-mode constraint check the Gate will run, against the same resolved SD references,
 **before** the agent key touches anything — and on failure the answer is a refusal, not a warning.
 
-`jti` is derived, not random
-----------------------------
-The library's L3 payload has no ``jti`` claim, but ``checkout_attempts.l3_jti`` is unique in the
-data model and is what gives replay protection (spec §7.2, §12.2). So ``jti`` is
-base64url(SHA-256(L3a issuer JWT)): deterministic, so a retried request yields the same jti and the
-Gate's unique constraint does the deduplication; and content-bound, so two different
-authorisations can never collide on it.
+`jti` is derived from the signed bytes, so it is a replay id — not a request id
+-------------------------------------------------------------------------------
+The library's L3 payload has no ``jti`` claim, but ``checkout_attempts.l3_jti`` is UNIQUE in the data
+model and that unique index *is* Gate check 7, the replay defence (spec §7.2, §12.2, EC-IDEM-1). So
+``jti`` is base64url(SHA-256(L3a issuer JWT)) and nothing else.
+
+**What that does and does not guarantee.** It is a pure function of the exact L3a bytes, which is
+precisely the property check 7 needs: submitting the *same signed L3* twice yields the same `jti`,
+the unique index refuses the second insert, and the refusal maps to `GATE_REPLAY`. Content-bound, so
+two different authorisations cannot collide.
+
+It is **not** stable across retries of the `l3/create` *request*, and it must not be read as if it
+were. Two independent reasons, both measured rather than assumed: `create_l3` sets `iat`/`exp` from
+`now_sec()`, so a retry crossing a second boundary changes the payload; and
+`create_disclosure` mints a fresh `os.urandom(16)` salt per disclosure, so even inside one second a
+retry produces different disclosure bytes, a different `delegate_payload`, a different issuer JWT and
+a different `jti`. A retried `l3/create` is therefore a genuinely new authorisation and **must** get
+a new `jti` — reusing one would make the unique index refuse a legitimate retry.
+
+**What absorbs a retry, then.** Not the `jti`. Per spec §8.6 every side-effecting PayPal call
+carries a deterministic `PayPal-Request-Id` derived from our own IDs, and that is what makes a retry
+idempotent at PayPal. The `jti` covers the other direction: the same signed token replayed later by
+someone who captured it. Both defences are needed and they are not the same defence.
+
+See docs/DECISIONS.md D-011.
 """
 
 from __future__ import annotations
@@ -42,7 +60,15 @@ from .checkout_jwt import (
 )
 from .config import Settings, get_settings, now_sec
 from .keys import b64u_encode, get_keystore
-from .l2 import decode_l2, find_disclosures, resolve_disclosure_refs
+from .l2 import (
+    DisclosureCompletenessError,
+    RefWalkTooLarge,
+    UnresolvedDisclosureRef,
+    decode_l2,
+    find_disclosures,
+    require_complete_presentation,
+    resolve_disclosure_refs,
+)
 from .models import L3CreateRequest, L3CreateResponse
 
 #: The open (autonomous) mandate VCTs. Both must be present for a split L3 to be buildable.
@@ -101,6 +127,20 @@ def create_l3(req: L3CreateRequest, settings: Settings | None = None) -> L3Creat
     store.require_agent_entry(req.agent_kid)
 
     l2 = decode_l2(req.l2)
+    # Completeness, before anything is read out of the L2. SD-JWT disclosures are outside the JWS
+    # signature, so a caller who is handed an L2 chooses which disclosures it contains. If a
+    # disclosure the L2 commits to is absent, `allowed_payees` cannot be resolved and the pinned
+    # library treats "every entry is an unresolved ref" as a *pass* — so this route would sign an
+    # L3a against an allow-list nobody could enforce. Refuse the whole request instead.
+    try:
+        require_complete_presentation(l2, layer="L2")
+    except (DisclosureCompletenessError, RefWalkTooLarge) as exc:
+        raise errors.http_error(
+            "VI_CHAIN_INVALID",
+            f"Refusing to sign an L3 against an incomplete L2: {exc}",
+            {"missing_disclosures": len(getattr(exc, "missing", []) or [])},
+        ) from exc
+
     l2_claims = _resolve_disclosures(l2)
     payment_mandate = _mandate(l2_claims, _PAYMENT_OPEN_VCT)
     checkout_mandate = _mandate(l2_claims, _CHECKOUT_OPEN_VCT)
@@ -127,9 +167,7 @@ def create_l3(req: L3CreateRequest, settings: Settings | None = None) -> L3Creat
 
     # --- pre-check: the same STRICT evaluation the Gate will do, before signing anything ------
     payment_constraints = [
-        c
-        for c in resolve_disclosure_refs(l2, payment_mandate.get("constraints") or [])
-        if isinstance(c, dict)
+        c for c in _resolved_or_refuse(l2, payment_mandate, side="payment") if isinstance(c, dict)
     ]
     payment_fulfilment: dict[str, Any] = {
         "transaction_id": checkout_hash,
@@ -153,9 +191,7 @@ def create_l3(req: L3CreateRequest, settings: Settings | None = None) -> L3Creat
 
     cart_items = (cart.get("cart") or {}).get("items") or []
     checkout_constraints = [
-        c
-        for c in resolve_disclosure_refs(l2, checkout_mandate.get("constraints") or [])
-        if isinstance(c, dict)
+        c for c in _resolved_or_refuse(l2, checkout_mandate, side="checkout") if isinstance(c, dict)
     ]
     checkout_fulfilment: dict[str, Any] = {
         "merchant": (cart.get("cart") or {}).get("merchant") or cart.get("merchant"),
@@ -179,12 +215,12 @@ def create_l3(req: L3CreateRequest, settings: Settings | None = None) -> L3Creat
         l2, merchant_id=req.payment.payee_id, item_id=cart_skus[0] if cart_skus else None
     )
 
-    # The library hard-codes "exactly two disclosures" per selective presentation, so the second
-    # element must always be a real L2 disclosure. An acceptable item is the right one for the
-    # merchant's view; if the mandate carried no items at all, the merchant disclosure is the
-    # closest thing that is actually inside the signed set.
+    # `find_disclosures` now refuses an L2 with no merchant disclosure outright, because the library's
+    # selective presentation is exactly two disclosures and the second one has to be real — that
+    # check is where the join used to raise `TypeError`. The item-or-merchant fallback below is
+    # therefore always non-`None`; it is kept because it is the choice, not the guard.
     checkout_second = disclosures.item or disclosures.merchant
-    if checkout_second is None:  # pragma: no cover - an autonomous L2 always has a merchant entry
+    if checkout_second is None:  # pragma: no cover - unreachable past find_disclosures' refusal
         raise errors.http_error(
             "VI_CHAIN_INVALID",
             "The L2 contains neither an acceptable-item nor a merchant disclosure, so no selective "
@@ -258,6 +294,27 @@ def _resolve_disclosures(l2: SdJwt) -> dict[str, Any]:
     from verifiable_intent.crypto.sd_jwt import resolve_disclosures
 
     return resolve_disclosures(l2)
+
+
+def _resolved_or_refuse(l2: SdJwt, mandate: dict[str, Any], *, side: str) -> list[Any]:
+    """A mandate's constraints with every SD reference resolved, or a refusal.
+
+    `resolve_disclosure_refs` raises on a reference it cannot resolve rather than handing the bare
+    `{"...": hash}` to the checker. On this route that has to become a 422: signing an L3a whose
+    payee allow-list could not be read would issue exactly the authorisation the buyer's signature
+    does not support. `l3/create`'s one documented error is `VI_CONSTRAINT_VIOLATION` (spec §8.3),
+    and an unenforceable allow-list is that.
+    """
+    try:
+        return resolve_disclosure_refs(l2, mandate.get("constraints") or [])
+    except UnresolvedDisclosureRef as exc:
+        raise errors.http_error(
+            "VI_CONSTRAINT_VIOLATION",
+            f"Refusing to sign an L3 {side} mandate: a signed SD reference did not resolve against "
+            f"the L2's presented disclosures ({exc}). The constraint cannot be checked, and an "
+            "unchecked constraint is unbounded agent authority (spec §8.0 rule 4).",
+            {"side": side},
+        ) from exc
 
 
 def _merchant_aud(cart: dict[str, Any]) -> str:

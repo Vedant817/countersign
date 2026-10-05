@@ -848,3 +848,104 @@ distinction is load-bearing rather than cosmetic: reading the wrong one leaves
 `max_occurrences: null`, which `evaluateRecurrence` treats as "the date window is the entire limit",
 which is the loosest possible reading of a signed cap. There is now a test that would fail if the
 reader regressed to the wrong key.
+
+## D-033 — SD-JWT completeness is enforced at the verifier, because disclosures are not signed
+
+**Date:** 2026-10-06 · **Raised by:** senior QA audit 2 (QA2-VI-1, `critical`) · **Spec item:** §8.3,
+§8.0 rule 4, §3.1 · **Verified:** re-running the auditor own probe reports `BYPASSES CONFIRMED: 0`
+
+**Decision:** `apps/vi` refuses any L1/L2/L3a/L3b presentation that omits a disclosure the **signed**
+payload commits to by hash. `resolve_disclosure_refs` no longer falls back to returning the
+unresolved reference. `checked` carries bare registered types only, so `checked.includes(name)`
+means *evaluated*.
+
+**The defect.** SD-JWT disclosures live after the `~` and are therefore **outside the JWS signature**,
+which covers `header.payload` only. The signed payload commits to `hash(merchant)`, but nothing
+required every committed hash to be *present*, and SD-JWT gives no completeness guarantee. The party
+presenting the token is the agent — untrusted per §3.1 — so it chose what travelled.
+
+Three layers each failed open, and all three had to be closed:
+
+1. `l2.py:283` was `return by_hash.get(entry["..."], entry)` — a missing disclosure left the
+   **unresolved reference itself** in the constraint.
+2. The library `_check_allowed_payee` treats "every entry is an SD ref" as **skip-and-pass**, appending
+   `… (skipped: no resolved payees)` with `satisfied` still `True`.
+3. `find_disclosures` picked the merchant **by position** while `resolve_disclosure_refs` picked **by
+   hash** — different selections, so the sanity check passed while enforcement was blind.
+
+Result: `chain_valid: true`, `violations: []`, for a payment to a merchant the buyer never authorised,
+reproduced on the **unauthenticated** `/v1/public/verify`. Why this outranks the budget bug: a missed
+cap spends slightly too much, and this decides **who gets paid**.
+
+**Why a completeness gate and not filtering.** Narrowing the input would make the bypass return
+`chain_valid: true` with fewer constraints reported — which looks like a fix and is worse than none,
+because the verifier would be reporting a chain it did not evaluate.
+
+**The subtle part: a digest-disclosed claim and a withheld one are not distinguishable, and the
+reason is structural rather than incidental.** SD-JWT `_sd` encodes both "the value travels as a
+disclosure" and "the value is disclosed by digest with the value left inline", and a disclosure hash
+covers a fresh `os.urandom(16)` salt, so it cannot be inverted or even matched against a candidate.
+No algorithm reads `_sd` and partitions it. So this had to be a policy choice, and only one of the two
+available policies is sound:
+
+- *Require every `_sd` entry to be presented* — **unsound**. It would refuse the L1 own `email`, which
+  the issuer never intended as a disclosure, breaking every working chain.
+- *Require every placeholder to be present* — **decidable**. `{"...": h}` **is** the encoding of "the
+  value is not in this token, it is in the disclosure with this hash". A placeholder in the signed
+  bytes with no matching disclosure is not a policy judgement; it is a commitment the signature made
+  and the presenter withheld. **This is what is implemented.**
+
+The unsound alternative was rejected on evidence, not taste: every disclosure carrying authority or a
+constraint in this library is reachable from a placeholder. The one exception is the L1 `email`, which
+carries no constraint and no money, and which `verify_chain` already covers because the L2 `sd_hash`
+pins the exact L1 presentation.
+
+**Two fail-opens remain in the pinned library** (`constraint_checker.py:196-202` and `243-252`, where
+"every entry is an SD ref" is an error condition treated as a pass). They are the *reason* this gate
+exists rather than something to fix at source. Fixing them upstream is a pin change, which is a
+decision for the maintainers of this repository and not one to slip into a fix.
+
+## D-034 — The Gate reads a `jti` claim the pinned library never writes, so check 7 never passes
+
+**Date:** 2026-10-06 · **Raised by:** the D-033 fix, then confirmed here · **Spec item:** §8.10 check 7,
+EC-IDEM-1, §7.2
+**Status:** open. Recorded now because it is the **fourth** instance of one pattern, and naming the
+pattern is more useful than the individual fix.
+
+`packages/gate/src/checks.ts:1035` reads the replay id off the decoded token:
+
+```ts
+const jti = typeof l3a.jti === 'string' ? l3a.jti : null
+if (jti === null) {
+  return fail(7, chainInvalid('L3a carries no jti, so this authorisation cannot be replay-protected'))
+}
+```
+
+**The pinned library contains zero occurrences of the string `jti`** — searched across every `.py` in
+`verifiable_intent` at commit `356c296…`. It never sets a `jti` claim on any token, the L3 included.
+`apps/vi` computes it as `base64url(SHA-256(L3a issuer JWT))` and returns it in the `l3/create` **HTTP
+response**, which the Gate never sees.
+
+So `jti` is always `null`, check 7 always fails closed, and **the Gate cannot ALLOW anything** — for a
+second independent reason alongside the `l1: ''` / `l2: ''` defect. The UNIQUE index on
+`checkout_attempts.l3_jti` cannot fire, because the value it would key on is never populated.
+
+**The fix is to compute the id in the Gate from the L3a bytes**, which is a pure function and exactly
+the property check 7 needs: the same signed L3 twice yields the same id. It is not read from a claim.
+
+**And the pattern, which is the real finding.** This is the fourth defect in a row with the same
+shape:
+
+| Defect | Test that should have caught it | Why it did not |
+|---|---|---|
+| SD-JWT disclosure withheld | a completeness test over real tokens | fixtures, not presented tokens |
+| `l1: ''` / `l2: ''` | a real `ViClient` request check | `deps.ts` in-memory world skips the schema |
+| signed budget unenforced | a test with a budget in the L2 | fixtures carried no constraint |
+| `jti` never present | a test decoding a real L3a | fixtures carried a `jti` the library never emits |
+
+**Every one of these is invisible to a test whose fixture is hand-built to be convenient.** The
+fixtures are not wrong; they are *unrepresentative*, and they were all written to make an assertion
+easy rather than to match what the pinned dependency actually produces. The remediation is not more
+unit tests. It is a standing rule that **any test touching a pinned dependency boundary must
+consume a value that dependency actually produced** — captured through its own routes, as
+`packages/gate/test/fixtures/vi-verify-budget-capture.json` now is.

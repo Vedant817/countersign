@@ -318,18 +318,25 @@ def test_retry_after_names_when_the_window_frees_up(client) -> None:
     assert retry_after == 56  # 60s window from t=0, now t=5
 
 
-def test_client_id_prefers_the_original_forwarded_hop() -> None:
-    """`X-Forwarded-For` is read only for its first hop, and only when a proxy set it.
+def test_client_id_defaults_to_the_socket_address_not_the_forwarded_header() -> None:
+    """QA2-VI-4 — `X-Forwarded-For` is **ignored** unless `VI_TRUSTED_PROXY_HOPS` says to trust hops.
 
-    A forged header would otherwise let one caller mint unlimited budgets by rotating a fake value.
+    The old behaviour took hop 1 verbatim, unconditionally. Hop 1 is the real client only if a proxy
+    we control wrote it, and since the header is an ordinary caller-settable request header, a caller
+    who controlled it controlled which budget they were billed to: 35 requests with 35 different
+    first hops all returned 200, so §8.3's 30/min budget was per-callable-string.
+
+    The default is now zero, so the socket address is the only client identity. The detailed
+    `trusted_hops=N` behaviour is asserted in
+    `tests/test_disclosure_completeness.py::test_EC_RL_3_…`.
     """
     assert ratelimit.client_id_for("10.0.0.1") == "10.0.0.1"
-    assert ratelimit.client_id_for("10.0.0.1", "203.0.113.7, 70.41.3.18") == "203.0.113.7"
+    assert ratelimit.client_id_for("10.0.0.1", "203.0.113.7, 70.41.3.18") == "10.0.0.1"
+    assert ratelimit.client_id_for(None, "203.0.113.7") == "unknown"
     assert ratelimit.client_id_for(None) == "unknown"
-    # Some proxies prepend an empty entry; the first *non-empty* hop is still the original client.
-    assert ratelimit.client_id_for(None, "  , 203.0.113.7 ") == "203.0.113.7"
-    # An all-empty header carries no information, so fall back to the peer.
+    # Some proxies prepend an empty entry; an all-empty header carries no information either way.
     assert ratelimit.client_id_for("10.0.0.1", " , ") == "10.0.0.1"
+    assert ratelimit.client_id_for("10.0.0.1", "  , 203.0.113.7 ") == "10.0.0.1"
 
 
 # ====================================================================================================

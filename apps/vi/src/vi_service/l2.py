@@ -26,6 +26,18 @@ byte-identical because both sides work from the same two base64url segments: ES2
 ``ASCII(JWS Signing Input)`` (RFC 7515 §5.1) and `verify_sd_jwt_signature` recomputes it by
 re-encoding `header`/`payload` as compact JSON — which round-trips exactly, because the segments
 are stored raw and never re-serialised.
+
+Disclosure completeness
+----------------------
+A JWS signature covers ``header.payload`` and nothing else, so **SD-JWT disclosures are unsigned
+and the presenter chooses which ones travel**. Per spec §3.1 the presenter is the agent, the
+untrusted party. This module therefore also owns the completeness gate
+(:func:`incomplete_disclosures`): it derives every disclosure hash the signed bytes commit to and
+requires each to be present. SD-JWT gives no completeness guarantee of its own, so a verifier that
+skips this check can be handed a narrowed presentation in which a constraint the user signed
+resolves to nothing and is silently not evaluated. See the section comment above
+:func:`committed_disclosure_refs` for why the committed set is exactly the ``{"...": hash}``
+placeholders and deliberately not the ``_sd`` array.
 """
 
 from __future__ import annotations
@@ -34,7 +46,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from verifiable_intent.crypto.disclosure import build_selective_presentation, hash_bytes
+from verifiable_intent.crypto.disclosure import (
+    build_selective_presentation,
+    hash_bytes,
+    hash_disclosure,
+)
 from verifiable_intent.crypto.sd_jwt import SdJwt, decode_sd_jwt
 from verifiable_intent.crypto.signing import es256_verify, generate_es256_key, jwk_to_public_key
 from verifiable_intent.issuance.user import create_layer2_autonomous
@@ -176,6 +192,162 @@ def _disclosure_value(disc_value: list[Any]) -> Any:  # noqa: ANN401 - decoded S
     return disc_value[-1] if disc_value else None
 
 
+# --- SD-JWT presentation completeness ----------------------------------------------------------------
+#
+# Why this section exists (spec §8.3, §8.0 rule 4)
+# -------------------------------------------------
+# A JWS signature covers `header.payload` and nothing else. SD-JWT disclosures live *after* the
+# `~`, so **the party presenting the token chooses which disclosures travel with it** — and per spec
+# §3.1 that party is the agent, the untrusted one. The signed payload commits to
+# `hash(merchant)`; SD-JWT itself requires nothing about that disclosure being *present*.
+#
+# Left alone, that is not a theoretical gap. `allowed_payees` is stored as `{"...": hash}`
+# references, the reference checker cannot match a payee against a reference, and the pinned
+# library treats "every entry is an unresolved reference" as *skip and pass*
+# (`verification/constraint_checker.py`, `if all_sd_refs: … return`). So the presenter could
+# withhold one string from the part of the token nobody signed and turn the payee allow-list — the
+# constraint that decides **who gets paid** — into an unbounded agent authority, with the verifier
+# reporting it as `checked`.
+#
+# The fix is completeness, not filtering. This module derives the set of hashes the *signed bytes*
+# commit to and requires each to be present; `verify` refuses the chain if any is missing. Nothing
+# here decides which constraints to run or narrows what is evaluated.
+
+#: The key the library writes for a selectively disclosable value it did not inline: `{"...": hash}`.
+SD_REF_KEY = "..."
+
+#: Stable, greppable prefix on the refusal. `CsError.code` is a closed registry (spec §8.0 rule 3),
+#: so an incomplete presentation cannot have its own code — it is `VI_CHAIN_INVALID` — and this
+#: string is what makes the reason findable in a log or an evidence packet.
+INCOMPLETE_PRESENTATION_PREFIX = "incomplete SD-JWT presentation"
+
+#: Node budget for the reference walk. An adversarial payload can nest arbitrarily deep, and a
+#: recursive walk would turn that into a `RecursionError` (a 500) rather than a verdict. The budget
+#: makes "too large to prove complete" an explicit refusal, which is the correct direction.
+_REF_WALK_NODE_BUDGET = 20_000
+
+
+class DisclosureCompletenessError(ValueError):
+    """A disclosure the signature commits to was not presented.
+
+    Raised instead of letting an unresolved `{"...": hash}` travel further into constraint
+    evaluation, where the pinned library would treat it as a pass. Carries the layer name and the
+    missing hashes so a caller can report them without re-deriving anything.
+    """
+
+    def __init__(self, *, layer: str, missing: list[str]) -> None:
+        self.layer = layer
+        self.missing = missing
+        detail = ", ".join(h[:12] + ".." for h in missing)
+        super().__init__(
+            f"{INCOMPLETE_PRESENTATION_PREFIX}: the signed {layer} commits to {len(missing)} "
+            f"disclosure(s) that the presentation does not contain ({detail})."
+        )
+
+
+class RefWalkTooLarge(ValueError):
+    """The token is larger than the completeness walk will traverse."""
+
+
+def _collect_sd_refs(root: Any, out: set[str]) -> None:  # noqa: ANN401 - walks arbitrary decoded JSON
+    """Add every `{"...": "<hash>"}` reachable from `root` to `out`. Iterative, budgeted."""
+    nodes = 0
+    stack: list[Any] = [root]
+    while stack:
+        node = stack.pop()
+        nodes += 1
+        if nodes > _REF_WALK_NODE_BUDGET:
+            raise RefWalkTooLarge(f"more than {_REF_WALK_NODE_BUDGET} nodes")
+        if isinstance(node, dict):
+            ref = node.get(SD_REF_KEY)
+            if isinstance(ref, str) and ref:
+                out.add(ref)
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+
+
+def committed_disclosure_refs(sd_jwt: SdJwt) -> set[str]:
+    """Every disclosure hash the **signed bytes** commit to, wherever the commitment lives.
+
+    Two places, both inside signature coverage:
+
+    1. ``payload.delegate_payload`` — the L2/L3 mandate disclosures. The signed payload proper.
+    2. Inside a **presented** disclosure — an ``allowed_payees`` / ``allowed_merchants`` /
+       ``line_items`` entry is a `{"...": hash}` placeholder living inside the mandate disclosure.
+       That mandate disclosure is itself hash-committed by ``delegate_payload``, so its bytes are
+       authenticated even though the hash of the claim it points at is not. Walking in is
+       therefore sound, and it is the only way to see the payee allow-list references at all.
+
+    Which hashes are *not* here, and why
+    ------------------------------------
+    The top-level ``_sd`` array is deliberately excluded. SD-JWT uses it for two different things
+    that the token itself cannot tell apart:
+
+    * the digest of a claim that travels as a disclosure (the L2's merchant and item entries, and
+      both open mandates — every one of which is *also* reachable from a `{"...": …}` placeholder),
+      and
+    * the digest of a claim the issuer disclosed **by digest**, leaving the value inline in the
+      payload. ``create_layer1`` does exactly this for the L1's ``email``: ``payload["_sd"]`` holds
+      the digest of ``[salt, "email", …]`` and the address is never inlined.
+
+    There is no way to tell these two apart from the token, because the array holds only hashes and
+    a disclosure hash is taken over the whole disclosure string *including a random 16-byte salt*
+    (``crypto/disclosure.py::create_disclosure`` calls ``os.urandom(16)``), so the digest cannot be
+    inverted or even matched against a candidate. Demanding every ``_sd`` entry be presented would
+    therefore refuse the L1's own ``email`` — a claim the issuer never intended to be a disclosure
+    at all — while adding nothing an attacker could use, because every disclosure carrying authority
+    or a constraint is reachable from a placeholder.
+
+    A placeholder has no such ambiguity. `{"...": h}` *is* the SD-JWT encoding of "the value is not
+    in this token; it is in the disclosure with this hash". So a placeholder in the signed bytes
+    with no matching disclosure in the presentation is not a judgement call about presentation
+    policy — it is a commitment the signature made and the presenter withheld. That is what this
+    gate refuses, and it is decidable in both directions.
+    """
+    refs: set[str] = set()
+    _collect_sd_refs(sd_jwt.payload, refs)
+    for disc_value in sd_jwt.disclosure_values:
+        _collect_sd_refs(disc_value, refs)
+    return refs
+
+
+def missing_disclosures(sd_jwt: SdJwt) -> list[str]:
+    """Committed disclosure hashes the presentation does not contain. Sorted; may be empty."""
+    refs = committed_disclosure_refs(sd_jwt)
+    if not refs:
+        return []
+    presented = {hash_disclosure(d) for d in sd_jwt.disclosures}
+    return sorted(refs - presented)
+
+
+def incomplete_disclosures(sd_jwt: SdJwt, *, layer: str) -> list[str]:
+    """Reasons the presentation is incomplete for `layer`. Empty means complete.
+
+    Absence, not substitution, is the question. Presenting a *different* disclosure for a committed
+    hash needs a SHA-256 preimage, and reordering changes no hash, so an extra or reordered
+    disclosure is already inert; what matters is that nothing the signature promised is missing.
+    """
+    missing = missing_disclosures(sd_jwt)
+    if not missing:
+        return []
+    detail = ", ".join(h[:12] + ".." for h in missing)
+    return [
+        f"{INCOMPLETE_PRESENTATION_PREFIX}: the signed {layer} commits to {len(missing)} disclosure(s) "
+        f"by hash and the presentation does not contain them ({detail}). SD-JWT disclosures are not "
+        f"signed, so their absence is the presenter's choice; a constraint that resolved by reference "
+        f"cannot be enforced, and an unenforced constraint is unbounded agent authority "
+        f"(spec §8.3, §8.0 rule 4). Present the complete token."
+    ]
+
+
+def require_complete_presentation(sd_jwt: SdJwt, *, layer: str) -> None:
+    """Raise ``DisclosureCompletenessError`` unless every committed disclosure is presented."""
+    missing = missing_disclosures(sd_jwt)
+    if missing:
+        raise DisclosureCompletenessError(layer=layer, missing=missing)
+
+
 def find_disclosures(
     l2: SdJwt,
     *,
@@ -247,6 +419,25 @@ def find_disclosures(
 
     full = l2.serialize()
     base = full.split("~")[0]
+    # The library hard-codes exactly two disclosures per selective presentation
+    # (`build_selective_presentation(base, [a, b])` -> `"~".join([base, a, b])`), and each L3's
+    # `sd_hash` is taken over exactly those two. So a presentation cannot be built at all without a
+    # merchant, and the checkout side needs an item or a merchant.
+    #
+    # Refusing here is the whole fix for what used to be an unauthenticated 500: the old code passed
+    # `item or merchant` straight into the join, so a presentation with no merchant disclosure left
+    # `None` in the list and `"~".join` raised `TypeError`, which escaped `verify`'s
+    # `HTTPException` handler and reached FastAPI as a 500 on the public verifier. A chain the
+    # verifier cannot slice is an invalid chain, and an invalid chain is a 200 with reasons.
+    if merchant is None:
+        raise errors.http_error(
+            "VI_CHAIN_INVALID",
+            "The L2 carries no merchant disclosure (id + name + website), so no selective "
+            "presentation can be built: the library's presentation is exactly two disclosures and "
+            "the second one must be a merchant the user signed. The presentation is therefore not "
+            "verifiable, whatever the rest of the chain says.",
+            {"missing": "merchant_disclosure"},
+        )
     # The network sees the payment mandate plus the payee it will settle to; the merchant sees the
     # checkout mandate plus the item it will ship. Each sd_hash therefore commits only to what its
     # own holder is allowed to learn, and `verify_chain` re-checks both hashes.
@@ -262,7 +453,26 @@ def find_disclosures(
     )
 
 
-def resolve_disclosure_refs(l2: SdJwt, constraints: list[dict[str, Any]]) -> dict[str, Any]:
+class UnresolvedDisclosureRef(ValueError):
+    """A `{"...": hash}` reference survived resolution because its disclosure is not presented.
+
+    The old behaviour returned the *reference itself* on a miss, so `allowed_payees` reached
+    `check_constraints` as `[{"...": "<hash>"}]`. The pinned library then treats "every entry is an
+    SD ref" as a skip that leaves `satisfied` true — a silent pass on the constraint that decides
+    who may be paid. A reference that resolves to itself is a pass waiting to happen, so this
+    raises instead. Callers translate it into whatever their contract is: a chain error on
+    `/v1/verify`, a 422 on `l3/create`.
+    """
+
+    def __init__(self, refs: list[str]) -> None:
+        self.refs = refs
+        super().__init__(
+            f"{len(refs)} SD reference(s) did not resolve against the presented disclosures "
+            f"({', '.join(r[:12] + '..' for r in refs)})"
+        )
+
+
+def resolve_disclosure_refs(l2: SdJwt, constraints: list[dict[str, Any]]) -> list[Any]:
     """Resolve SD references inside a mandate's constraints into inline dicts.
 
     The library stores `allowed_merchants`/`allowed_payees` entries as `{"...": "<hash>"}`
@@ -270,24 +480,36 @@ def resolve_disclosure_refs(l2: SdJwt, constraints: list[dict[str, Any]]) -> dic
     real merchant dicts. `examples/helpers.py::validate_intent` does the same resolution before
     calling the checker; without it, `allowed_payees` silently degrades to "skipped: no resolved
     payees", which would be a *pass* on an unchecked constraint.
-    """
-    from verifiable_intent.crypto.disclosure import hash_disclosure
 
+    **Fails closed.** An unresolved reference raises :class:`UnresolvedDisclosureRef` rather than
+    travelling on as `{"...": hash}`. That fallback was the first of the three fail-opens in the
+    disclosure-narrowing bypass; the completeness gate in :func:`incomplete_disclosures` should mean
+    this never fires, which is exactly why it is worth keeping as a second, independent refusal.
+    """
     by_hash = {
         hash_disclosure(s): _disclosure_value(v)
         for s, v in zip(l2.disclosures, l2.disclosure_values, strict=True)
     }
+    unresolved: list[str] = []
 
     def resolve_entry(entry: Any) -> Any:  # noqa: ANN401 - walks arbitrary decoded JSON
-        if isinstance(entry, dict) and "..." in entry:
-            return by_hash.get(entry["..."], entry)
+        if isinstance(entry, dict) and SD_REF_KEY in entry:
+            ref = entry[SD_REF_KEY]
+            if isinstance(ref, str) and ref in by_hash:
+                return by_hash[ref]
+            if isinstance(ref, str):
+                unresolved.append(ref)
+            return entry
         if isinstance(entry, list):
             return [resolve_entry(e) for e in entry]
         if isinstance(entry, dict):
             return {k: resolve_entry(v) for k, v in entry.items()}
         return entry
 
-    return [resolve_entry(c) for c in constraints]
+    resolved = [resolve_entry(c) for c in constraints]
+    if unresolved:
+        raise UnresolvedDisclosureRef(sorted(set(unresolved)))
+    return resolved
 
 
 # --- phase 1: prepare ------------------------------------------------------------------------------

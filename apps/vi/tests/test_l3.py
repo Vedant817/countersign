@@ -228,13 +228,13 @@ def test_l3_create_refuses_a_checkout_jwt_it_did_not_sign(
     assert "merchant key" in error["message"]
 
 
-def test_l3_returns_both_split_credentials_and_a_deterministic_jti(
+def test_l3_returns_both_split_credentials_and_a_content_bound_jti(
     client, auth: dict[str, str], full_chain
 ) -> None:
-    """`jti` is content-bound, so retrying the same request cannot mint a second replay id.
+    """`jti` is a pure function of the signed L3a bytes, so a replayed token reuses its id.
 
-    `checkout_attempts.l3_jti` is unique and is what makes `GATE_REPLAY` possible. A random jti per
-    attempt would let the same authorisation be retried forever with a fresh id.
+    `checkout_attempts.l3_jti` is unique and is what makes `GATE_REPLAY` possible. Two different
+    authorisations cannot collide on it, and the same one cannot escape it by being re-sent.
     """
     import hashlib
 
@@ -245,6 +245,53 @@ def test_l3_returns_both_split_credentials_and_a_deterministic_jti(
     )
     assert full_chain.jti == expected
     assert len(full_chain.jti) == 43  # base64url of 32 bytes
+
+
+def test_EC_IDEM_1_jti_identifies_the_signed_token_not_the_request(
+    client, auth: dict[str, str], builder, device_key, agent_key, full_chain
+) -> None:
+    """EC-IDEM-1 — the two semantics asserted separately, because they pull opposite ways.
+
+    QA2-VI-2 falsified half of D-011: `jti` was documented as "deterministic, so a retried request
+    yields the same jti". It is not, and it must not be. `create_disclosure` mints a fresh
+    `os.urandom(16)` salt per disclosure, so even **inside the same second** two `l3/create` calls
+    produce different bytes and therefore different ids. A retried request is a new authorisation,
+    and reusing its id would make the UNIQUE index refuse a legitimate retry.
+
+    So the assertions are:
+      1. same signed L3a bytes  -> same `jti`  (the replay defence fires — Gate check 7)
+      2. two `l3/create` calls -> different `jti`  (a retry is not blocked as a replay)
+    """
+    # A second, independent call on the same L2 and the same price lock. `builder.create_l3` takes
+    # the checkout *response body*, not the JWT string.
+    second = builder.create_l3(
+        full_chain.l2, {"checkout_jwt": full_chain.checkout_jwt}, agent_key, amount_minor=TOTAL_MINOR
+    )
+    assert second.status_code == 200, second.text
+    body = second.json()
+
+    assert body["jti"] != full_chain.jti, "a fresh authorisation must not reuse a replay id"
+    assert body["l3a"] != full_chain.l3a, "the disclosure salts differ, so the tokens differ"
+
+    # (1) The replay defence. `jti` is derived from the L3a issuer JWT, so re-deriving it from the
+    # bytes a captured token carries reproduces the id exactly. That is the property check 7 relies
+    # on: the same signed token, submitted twice, hits the UNIQUE index and becomes GATE_REPLAY.
+    assert _jti_of(full_chain.l3a) == full_chain.jti
+    assert len(full_chain.jti) == 43
+
+    # And it is *only* a function of the signed bytes. Mutating one character of the JWS yields a
+    # different id, so the defence cannot be sidestepped by submitting a mutated authorisation under
+    # the old one.
+    head, _, tail = full_chain.l3a.partition("~")
+    flipped = head[:-1] + ("A" if head[-1] != "A" else "B") + f"~{tail}"
+    assert flipped.split("~")[0] != head
+    assert _jti_of(flipped) != full_chain.jti
+
+    # Stated precisely, because it is a real and slightly surprising boundary: the id covers the
+    # **issuer JWT** only, not the disclosure section. Two presentations of one signed token share an
+    # id. That is correct — the disclosures are unsigned (see the QA2-VI-1 gate), so they cannot be
+    # part of a replay identity, and the chain verifier is what establishes completeness.
+    assert _jti_of(f"{head}~") == full_chain.jti
 
 
 def test_l3a_and_l3b_are_addressed_to_different_audiences(client, auth: dict[str, str], full_chain) -> None:
@@ -458,6 +505,22 @@ def test_l3_payment_requires_all_three_fields(
 
 
 # --- helpers -----------------------------------------------------------------------------------------
+
+
+def _jti_of(l3a: str) -> str:
+    """The `jti` `l3/create` would report for these L3a bytes.
+
+    The same derivation `create_l3` performs, so a test can ask "does this token carry this replay
+    id?" without minting a new token — which is the whole point, because minting one produces
+    different bytes.
+    """
+    import hashlib
+
+    return (
+        base64.urlsafe_b64encode(hashlib.sha256(l3a.split("~")[0].encode("ascii")).digest())
+        .rstrip(b"=")
+        .decode()
+    )
 
 
 def _segments(presentation: str) -> list[str]:

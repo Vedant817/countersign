@@ -14,6 +14,25 @@ what a prompt-injected L3 would like (spec §12.9, §8.0 rule 4).
 
 **3. `at_time` is reported honestly, not approximated.** See :data:`AT_TIME_NOT_HONOURED_REASON`.
 
+**4. The presented disclosures must be complete.** A JWS signature covers `header.payload` only, so
+an SD-JWT's disclosures are outside it and the presenter picks them (spec §3.1: the presenter is the
+agent, the untrusted party). Without a completeness gate, withholding one disclosure turns
+`allowed_payees` / `allowed_merchants` into a pass, because the pinned library treats "every entry is
+an unresolved SD ref" as *skip and return* with `satisfied` still true. So
+:func:`assert_presentations_complete` runs before any constraint is evaluated and a missing
+committed disclosure is a chain error. See `l2.py` for why the committed set is the
+`{"...": hash}` placeholders and not the `_sd` array.
+
+**5. `checked` only ever contains bare, registered constraint types.** A consumer that writes
+``checked.includes('mandate.payment.allowed_payees')`` must be able to rely on it meaning *evaluated*.
+The library appends both ``'mandate.payment.allowed_payees'`` and
+``'mandate.payment.allowed_payees (skipped: no resolved payees)'`` when it declines to evaluate, so
+an exact-match membership test used to return ``true`` while nothing was enforced —
+precisely the trap :class:`~vi_service.models.SkippedConstraint`'s docstring says the type/reason
+split exists to remove. :func:`_partition_checked` is the invariant, and
+``tests/test_verify.py::test_EC_CONS_complete_a_skipped_constraint_never_satisfies_checked_includes``
+asserts it directly.
+
 ``budget``, ``recurrence`` and ``agent_recurrence``
 --------------------------------------------------
 The library appends these three to ``checked`` while evaluating **none** of them — its own source
@@ -26,6 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from verifiable_intent.crypto.sd_jwt import SdJwt, decode_sd_jwt, resolve_disclosures
@@ -41,8 +61,18 @@ from .checkout_jwt import (
 )
 from .config import Settings, get_settings, now_sec
 from .keys import b64u_encode, get_keystore, rfc7638_thumbprint
-from .l2 import find_disclosures, resolve_disclosure_refs
+from .l2 import (
+    INCOMPLETE_PRESENTATION_PREFIX as _INCOMPLETE_PREFIX,
+)
+from .l2 import (
+    RefWalkTooLarge,
+    UnresolvedDisclosureRef,
+    find_disclosures,
+    incomplete_disclosures,
+    resolve_disclosure_refs,
+)
 from .models import (
+    CONSTRAINT_TYPES,
     NETWORK_ENFORCED_CONSTRAINTS,
     AtTimeCheck,
     ConstraintReport,
@@ -67,20 +97,95 @@ _AT_TIME_REASON = (
 AT_TIME_NOT_HONOURED_REASON = _AT_TIME_REASON
 
 
+#: ``"<type> (…)"`` — the shape the pinned library uses to say "I appended this to `checked` but
+#: evaluated nothing", e.g. ``"mandate.payment.allowed_payees (skipped: no resolved payees)"``.
+_SKIP_ANNOTATION = re.compile(r"^(?P<type>\S+)\s+\((?P<why>[^()]*)\)$")
+
+#: Every registered constraint type, for the `checked` invariant in :func:`_partition_checked`.
+_REGISTERED = frozenset(CONSTRAINT_TYPES)
+
+
+def _partition_checked(checked: list[str]) -> tuple[list[str], list[SkippedConstraint]]:
+    """Split the library's `checked` into what was really evaluated and what was not.
+
+    The invariant this enforces, and the whole reason it exists:
+
+    > For every constraint in the report, ``checked.includes(name)`` with an exact match means the
+    > constraint was *evaluated*.
+
+    The pinned library breaks that in two ways. It appends the bare type *and then* an annotated
+    ``"<type> (skipped: …)"`` when it declines to evaluate — `_check_allowed_payee` and
+    `_check_allowed_merchant` both do `result.checked.append(ctype)` and then, a few lines later,
+    `return` on the unresolved-SD-ref branch with `satisfied` untouched — so `checked` held both and
+    an exact-match membership test returned `true` while nothing was enforced. And it appends the
+    three network-enforced types it never evaluates at all.
+
+    So: an annotated entry is split into `SkippedConstraint(type, reason)` using the *bare* type,
+    and anything that is not a registered constraint type is moved out too. Nothing is dropped —
+    an unrecognised string is never evidence of an evaluation, so it goes to `skipped` with a
+    reason saying so.
+    """
+    # Two passes, because the library's damage is a *pair*: it appends the bare type and then, from
+    # inside the same function, an annotated `"<type> (skipped: …)"`. The annotated entry is the
+    # evidence that the constraint was not evaluated, so the bare twin has to go too — keeping it is
+    # precisely the `checked.includes('mandate.payment.allowed_payees') == true` trap.
+    annotated_types = {
+        match.group("type")
+        for match in (_SKIP_ANNOTATION.match(name.strip()) for name in checked)
+        if match and match.group("type") in _REGISTERED
+    }
+
+    kept: list[str] = []
+    moved: list[SkippedConstraint] = []
+    for name in checked:
+        match = _SKIP_ANNOTATION.match(name.strip())
+        if match and match.group("type") in _REGISTERED:
+            moved.append(
+                SkippedConstraint(
+                    type=match.group("type"),
+                    reason=(
+                        f"Not evaluated: {match.group('why')}. The constraint is signed but its "
+                        "referenced disclosures were not presented, so it could not be enforced; an "
+                        "unenforced constraint is unbounded agent authority (spec §8.3, §8.0 rule 4)."
+                    ),
+                )
+            )
+        elif name in annotated_types:
+            # The bare twin of an annotated skip. Reported once, by the annotated entry.
+            continue
+        elif name not in _REGISTERED:
+            moved.append(
+                SkippedConstraint(
+                    type=name,
+                    reason=(
+                        "Not a registered constraint type, so it cannot be reported as evaluated. "
+                        "Treated as unenforced (spec §8.8: exactly 8 registered types)."
+                    ),
+                )
+            )
+        else:
+            kept.append(name)
+    return kept, moved
+
+
 def classify_constraint_report(checked: list[str], skipped: list[str]) -> list[SkippedConstraint]:
-    """Move the three network-enforced constraint types out of `checked` into `skipped`.
+    """Everything that was not evaluated, in the only shape the wire uses.
 
     Returns the corrected `skipped` list.
 
-    Every entry is a `SkippedConstraint`, including the ones the library already produced. The
-    library emits bare type strings in `skipped`; wrapping them here means the wire shape has exactly
-    one form, so a consumer never has to handle a bare string and an annotated string in the same
-    array. See `SkippedConstraint` in models.py for why that matters.
+    Three sources feed it: the bare type strings the library already put in `skipped`, the three
+    network-enforced types it wrongly puts in `checked`, and any annotated `"<type> (…)"` entry it
+    appended to `checked` instead of evaluating. Every entry is a `SkippedConstraint`, so a consumer
+    never has to handle a bare string and an annotated string in the same array — and, more to the
+    point, `checked` can no longer contain a constraint that was not evaluated. See
+    `SkippedConstraint` in models.py and :func:`_partition_checked`.
     """
     moved: list[SkippedConstraint] = [
         SkippedConstraint(type=name, reason="Not evaluated by the verification request.") for name in skipped
     ]
-    for name in checked:
+    bare, annotated = _partition_checked(checked)
+    moved.extend(annotated)
+    for name in bare:
         if name in NETWORK_ENFORCED_CONSTRAINTS:
             moved.append(
                 SkippedConstraint(
@@ -92,6 +197,33 @@ def classify_constraint_report(checked: list[str], skipped: list[str]) -> list[S
                 )
             )
     return moved
+
+
+def assert_presentations_complete(tokens: dict[str, SdJwt | None]) -> list[str]:
+    """Chain errors for any token whose presentation is missing a committed disclosure.
+
+    Runs on **all four** tokens, not just the L2, and runs before `verify_chain` and before any
+    constraint evaluation. Order matters for the property, not for the verdict: a presentation that
+    is incomplete is not a verdict about anything else, and evaluating constraints against it is
+    what produced the bypass in the first place.
+
+    Reporting rather than raising is deliberate. `/v1/verify`'s contract is that an invalid chain is
+    a 200 with reasons, and `/v1/public/verify` inherits it; a refusal that arrived as an exception
+    would either 500 or be swallowed, and neither is an answer a judge can read.
+    """
+    problems: list[str] = []
+    for layer, token in tokens.items():
+        if token is None:
+            continue
+        try:
+            problems.extend(incomplete_disclosures(token, layer=layer))
+        except RefWalkTooLarge as exc:
+            problems.append(
+                f"incomplete SD-JWT presentation: the {layer} is too deeply nested to prove "
+                f"complete ({exc}). A presentation we cannot check is not a presentation we can "
+                f"accept (spec §8.0 rule 4)."
+            )
+    return problems
 
 
 def _skip(category: str, reason: str) -> list[SkippedConstraint]:
@@ -115,10 +247,11 @@ def _constraint_report(
             skipped=_skip(f"{side}_constraints", "No disclosed constraints, so none could be enforced"),
         )
     result = check_constraints(constraints, fulfilment, mode=StrictnessMode.STRICT)
+    bare, _moved = _partition_checked(result.checked)
     return ConstraintReport(
         satisfied=result.satisfied,
         violations=list(result.violations),
-        checked=[n for n in result.checked if n not in NETWORK_ENFORCED_CONSTRAINTS],
+        checked=[n for n in bare if n not in NETWORK_ENFORCED_CONSTRAINTS],
         skipped=classify_constraint_report(result.checked, result.skipped),
     )
 
@@ -253,6 +386,12 @@ def verify(req: VerifyRequest, settings: Settings | None = None) -> VerifyRespon
     cart, cart_errors = _safe_checkout(req.checkout_jwt)
     chain_errors.extend(cart_errors)
 
+    # The completeness gate, before anything is evaluated. A chain missing a disclosure its own
+    # signature commits to is not a chain whose constraints mean anything, so this is recorded
+    # before `verify_chain` and before `_constraints` and short-circuits them both: reporting a
+    # narrowed presentation as "constraints satisfied, nothing to report" is the bug.
+    chain_errors.extend(assert_presentations_complete({"l1": l1, "l2": l2, "l3a": l3a, "l3b": l3b}))
+
     if l1 is None or l2 is None:
         return VerifyResponse(
             chain_valid=False,
@@ -293,6 +432,11 @@ def verify(req: VerifyRequest, settings: Settings | None = None) -> VerifyRespon
             l2_checkout_serialized = disclosures.checkout_presentation
         except errors.HTTPException as exc:
             chain_errors.append(exc.detail["error"]["message"])
+        except Exception as exc:  # noqa: BLE001 - a public verifier must never 500 (spec §8.3)
+            chain_errors.append(
+                f"L2 disclosure layout could not be read: {type(exc).__name__}: {exc}. The chain is "
+                "not verifiable as presented."
+            )
 
     result = None
     if issuer_public is not None:
@@ -323,7 +467,29 @@ def verify(req: VerifyRequest, settings: Settings | None = None) -> VerifyRespon
     checkout_errors, merchant_kid = _check_checkout_binding(req, cart, l3b_claims)
     chain_errors.extend(checkout_errors)
 
-    report = _constraints(req, cart, l2, l2_claims, l3a_claims)
+    # An incomplete presentation is a verification failure, not a licence to evaluate what is left.
+    # Reporting a narrowed L2's constraints as "satisfied" is exactly the bypass, so once the gate
+    # has fired the constraint report says so instead of running a partial evaluation.
+    presentation_incomplete = any(e.startswith(_INCOMPLETE_PREFIX) for e in chain_errors)
+
+    if presentation_incomplete:
+        report = ConstraintReport(
+            satisfied=False,
+            violations=[
+                "The chain was not evaluated: the presentation omits a disclosure the signed "
+                "payload commits to, so no constraint can be enforced. An incomplete "
+                "presentation is not a valid chain (spec §8.3, §8.0 rule 4)."
+            ],
+            checked=[],
+            skipped=_skip(
+                "all_constraint_checks",
+                "Not evaluated, because the presented disclosures are incomplete. A constraint "
+                "whose referenced disclosure is absent cannot be enforced, and reporting it as "
+                "satisfied would be unbounded agent authority.",
+            ),
+        )
+    else:
+        report = _constraints(req, cart, l2, l2_claims, l3a_claims)
 
     return VerifyResponse(
         chain_valid=bool(result and result.valid and not chain_errors and report.satisfied),
@@ -398,6 +564,32 @@ def _check_checkout_binding(
     return out, header_kid
 
 
+def _unresolved_side_report(side: str, subject: str, exc: UnresolvedDisclosureRef) -> ConstraintReport:
+    """The report for a side whose constraint references did not all resolve.
+
+    `satisfied: False` and a named `skipped` entry — never a bare ``"<type> (skipped: …)"`` string in
+    ``checked``. The library's own answer to this situation is skip-and-pass
+    (``constraint_checker.py``: ``if all_sd_refs: … return`` with ``satisfied`` untouched), and that
+    is the second fail-open in the disclosure-narrowing bypass. An allow-list we cannot read is not
+    an allow-list we can honour, so the correct report is "nothing authorised here".
+    """
+    return ConstraintReport(
+        satisfied=False,
+        violations=[
+            f"{side.capitalize()} constraints could not be enforced: a signed SD reference did not "
+            f"resolve against the presented disclosures ({exc}). The {subject} is unenforceable, so "
+            "nothing is authorised (spec §8.3, §8.0 rule 4)."
+        ],
+        checked=[],
+        skipped=_skip(
+            f"{side}_constraints",
+            "Not evaluated, because a signed SD reference inside the mandate did not resolve to a "
+            "presented disclosure. This is a refusal, not a pass: the constraint is signed and "
+            "unenforceable, which is unbounded agent authority.",
+        ),
+    )
+
+
 def _constraints(
     req: VerifyRequest,
     cart: dict[str, Any] | None,
@@ -421,15 +613,19 @@ def _constraints(
             )
         )
     else:
-        constraints = [
-            c
-            for c in resolve_disclosure_refs(l2, payment_mandate.get("constraints") or [])
-            if isinstance(c, dict)
-        ]
-        fulfilment = _find_vct(l3a_claims, "mandate.payment.1") or {}
-        if not fulfilment and l3a_claims:
-            fulfilment = {"delegate_payload": l3a_claims.get("delegate_payload", [])}
-        reports.append(_constraint_report(constraints, fulfilment, side="payment"))
+        # Fail closed. The completeness gate above should already have refused this chain; this is
+        # the independent second refusal, so that a future path into `_constraints` that skipped the
+        # gate still cannot turn an unreadable payee allow-list into a pass.
+        try:
+            payment_constraints = resolve_disclosure_refs(l2, payment_mandate.get("constraints") or [])
+        except UnresolvedDisclosureRef as exc:
+            reports.append(_unresolved_side_report("payment", "payee allow-list", exc))
+        else:
+            constraints = [c for c in payment_constraints if isinstance(c, dict)]
+            fulfilment = _find_vct(l3a_claims, "mandate.payment.1") or {}
+            if not fulfilment and l3a_claims:
+                fulfilment = {"delegate_payload": l3a_claims.get("delegate_payload", [])}
+            reports.append(_constraint_report(constraints, fulfilment, side="payment"))
 
     checkout_mandate = _find_vct(l2_claims, "mandate.checkout.open.1") or _find_vct(
         l2_claims, "mandate.checkout.1"
@@ -462,24 +658,25 @@ def _constraints(
             )
         )
     else:
-        constraints = [
-            c
-            for c in resolve_disclosure_refs(l2, checkout_mandate.get("constraints") or [])
-            if isinstance(c, dict)
-        ]
-        items = (cart.get("cart") or {}).get("items") or []
-        reports.append(
-            _constraint_report(
-                constraints,
-                {
-                    "merchant": (cart.get("cart") or {}).get("merchant") or cart.get("merchant"),
-                    "line_items": [{"id": i.get("sku"), "quantity": i.get("quantity")} for i in items],
-                    "checkout_jwt": req.checkout_jwt,
-                    "checkout_hash": checkout_hash_from_jwt(req.checkout_jwt),
-                },
-                side="checkout",
+        try:
+            checkout_constraints = resolve_disclosure_refs(l2, checkout_mandate.get("constraints") or [])
+        except UnresolvedDisclosureRef as exc:
+            reports.append(_unresolved_side_report("checkout", "merchant allow-list", exc))
+        else:
+            constraints = [c for c in checkout_constraints if isinstance(c, dict)]
+            items = (cart.get("cart") or {}).get("items") or []
+            reports.append(
+                _constraint_report(
+                    constraints,
+                    {
+                        "merchant": (cart.get("cart") or {}).get("merchant") or cart.get("merchant"),
+                        "line_items": [{"id": i.get("sku"), "quantity": i.get("quantity")} for i in items],
+                        "checkout_jwt": req.checkout_jwt,
+                        "checkout_hash": checkout_hash_from_jwt(req.checkout_jwt),
+                    },
+                    side="checkout",
+                )
             )
-        )
 
     violations = [v for r in reports for v in r.violations]
     return ConstraintReport(
@@ -590,6 +787,7 @@ def _jcs(value: Any) -> bytes:  # noqa: ANN401 - RFC 8785 walks arbitrary JSON
 
 __all__ = [
     "AT_TIME_NOT_HONOURED_REASON",
+    "assert_presentations_complete",
     "bundle_hash",
     "classify_constraint_report",
     "public_verify",

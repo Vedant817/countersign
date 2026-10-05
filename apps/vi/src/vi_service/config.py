@@ -29,6 +29,9 @@ L2_TTL_SECONDS_MAX = 2_592_000
 PREPARE_TTL_SECONDS_DEFAULT = 300
 #: §8.3: `GET /v1/jwks` and `POST /v1/public/verify` are 30 requests/minute/IP.
 PUBLIC_RATE_LIMIT_DEFAULT = 30
+#: How many `X-Forwarded-For` hops to trust. **0 by default**, which means the header is ignored
+#: entirely and the budget is billed to the socket address. See `ratelimit.client_id_for`.
+TRUSTED_PROXY_HOPS_DEFAULT = 0
 #: [B2] the library default; spec §6 `VI_CLOCK_SKEW_SECONDS`.
 CLOCK_SKEW_SECONDS_DEFAULT = 300
 #: §8.3 `POST /v1/checkout-jwt` price lock. `CHECKOUT_PRICE_LOCK_SECONDS` is 900 (spec §6); this
@@ -95,6 +98,11 @@ class Settings:
     clock_skew_seconds: int
     prepare_ttl_seconds: int
     public_rate_limit_per_min: int
+    #: Number of `X-Forwarded-For` hops to trust when billing the public rate-limit budget. 0 (the
+    #: default) means the header is ignored: the socket address is the only client identity, so a
+    #: caller cannot mint fresh budgets by sending a header. Raise it to 1 only behind exactly one
+    #: known proxy that *replaces* rather than appends the header.
+    trusted_proxy_hops: int
     #: ``iss`` of the L1 issuer credential. The ``vct`` stays the library default
     #: ``https://credentials.mastercard.com/card`` because ``verify_chain`` pins it.
     issuer_url: str
@@ -157,6 +165,7 @@ def load_settings() -> Settings:
         public_rate_limit_per_min=_int(
             "VI_PUBLIC_RATE_LIMIT_PER_MIN", PUBLIC_RATE_LIMIT_DEFAULT, minimum=1, maximum=10_000
         ),
+        trusted_proxy_hops=_int("VI_TRUSTED_PROXY_HOPS", TRUSTED_PROXY_HOPS_DEFAULT, minimum=0, maximum=8),
         issuer_url=os.environ.get("VI_ISSUER_URL", "https://www.mastercard.com").strip(),
         agent_iss=os.environ.get("VI_AGENT_ISS", "https://agent.countersign.example").strip(),
         app_env=os.environ.get("APP_ENV", "local").strip() or "local",
