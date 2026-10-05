@@ -949,3 +949,107 @@ easy rather than to match what the pinned dependency actually produces. The reme
 unit tests. It is a standing rule that **any test touching a pinned dependency boundary must
 consume a value that dependency actually produced** — captured through its own routes, as
 `packages/gate/test/fixtures/vi-verify-budget-capture.json` now is.
+
+## D-035 — `notApplicable` means "nothing to enforce"; a missing subject blocks
+
+**Date:** 2026-10-06 · **Raised by:** senior QA audit 3 (QA3-GATE-1, `critical`) · **Spec item:** §8.10,
+D19 · **Verified:** re-running the auditor own probe now reports `GHOST -> BLOCK` with six
+`GATE_CHECK_UNSATISFIABLE` reasons and a null reservation, while `CONTROL` still ALLOWs
+
+**Decision:** Two outcomes, not one. `notApplicable` is "the thing checked does not exist in this
+request, so there is nothing to enforce". `missing` is "the thing checked should exist and does not,
+so the check could not evaluate what it exists to evaluate", and it **blocks**, under the new code
+`GATE_CHECK_UNSATISFIABLE`.
+
+**The defect.** With no checkout session, checks 5 through 10 each returned `notApplicable`,
+`resolveOutcome` treated that as non-blocking, and the Gate signed an `ALLOW`:
+
+```
+GHOST  no session -> ALLOW | reasons: (none)
+GHOST signed record: amount "0.00", payee "", chain_valid true
+  check 5 CHECKOUT_BINDING passed=false n/a=true  no checkout session to bind against
+  check 6 PRICE_LOCK       passed=false n/a=true  no checkout session to price against
+  check 8 BUDGET           passed=false n/a=true  no amount resolved by check 6
+```
+
+**Six checks declined for one reason, and the record claimed a verified chain over a cart that did
+not exist.** This is the D19 lie in the costume D-019 warned about, which is why the original
+`notApplicable` docstring already said that reporting "not applicable" as a pass "would be the D19
+lie in a new costume". It took a second audit to produce the costume.
+
+**Why "no money moved" is the wrong thing to be reassured about.** `packages/orders::loadOrderDraft`
+re-reads the session independently and refuses, so no PayPal order was created. That is a second line
+of defence catching the first line failure — not a design anyone would choose, and it means the first
+line is untested by consequence. What actually matters is that **the signature is load-bearing**: the
+`gate_decisions` row is the evidentiary spine of a dispute packet, so a signed record asserting a
+valid chain over a nonexistent cart propagates into evidence an adjudicator is told is
+cryptographically sound. A forged-looking artifact that verifies is worse than no artifact.
+
+**The buyer-facing copy is deliberate.** `GATE_CHECK_UNSATISFIABLE` reads "We could not check this
+purchase properly, so we are not allowing it. Nothing has been charged." — not anything about limits
+or budgets. Telling a buyer they exceeded a cap when the real problem is that we could not look at
+their cart is how a support queue ends up arguing about money. There is a test asserting the check-5
+detail does not match `/exceed|budget|cap/i`.
+
+**`unsatisfiableBudget` is duplicated rather than imported.** `checks.ts` imports `budget-guard.ts` for
+checks 8 and 9, so importing back would be a cycle. A duplicate that produced a *different* record
+would be a silent inconsistency in the signed decision, so a test asserts the two agree rather than
+leaving it to a comment.
+
+**Two `notApplicableBudget` sites deliberately stay.** A missing `wallet_caps` row is genuinely
+nothing to enforce, and "no mandate row: check 1 could not resolve one" is check 1 having already
+blocked, where a second reason for the same fact is noise.
+
+**A test caught an omission in the fix itself**, which is the part worth keeping: the first pass
+changed checks 5, 6, 7 and 10 and left checks 8 and 9 still declining non-blockingly on "no amount
+resolved by check 6" — the same class of omission, inside the same fix. This is the D-034 pattern one
+level down: a fix verified only against the case it was written for.
+
+## D-036 — Recorded, not fixed: the §8.18 verifier does not bind the record or the read-back
+
+**Date:** 2026-10-06 · **Raised by:** senior QA audit 3 (QA3-VENDOR-1, `critical`, confirmed)
+**Status:** open, fix in progress. Recorded now because the *shape* of it belongs next to D-034 and
+D-035 as evidence of a single pattern.
+
+All three variants run through the **shipped** `offlineChecks` against the real-chain fixture with a
+genuinely Ed25519-signed record, and all three report a clean packet:
+
+| Substitution | Result |
+|---|---|
+| Gate record naming a different attempt / amount / currency / payee | `gate_record: [PASS]`, failing checks: NONE |
+| Packet carrying another order bundle, `order_id` / `capture_ids` retargeted, `custom_id` + `bundle_hash` recomputed | all 11 checks PASS |
+| `readback` replaced with "You may spend up to $9,999,999 at any merchant", `readback_sha256` recomputed | all 11 checks PASS |
+
+**Root cause.** `gateRecordCheck` verifies the record signature and never compares it to the bundle.
+`readback` is a `PACKET_ONLY_MEMBER` in `packages/verifier/src/bundle.ts`, so it is outside
+`custom_id` and outside every signature; its only check is a self-hash, which the forger recomputes.
+
+**Why this is worse than the two it sits next to.** D19 and QA3-GATE-1 both let money move. This one
+lets a **green, publicly shareable verification page** attest to terms the buyer never approved — and
+the product claim it breaks is the one the entire pitch rests on: that the page a buyer reads is
+provably about *this* purchase. The read-back variant is the sharp end, because **the product is that
+the buyer signs what they read**.
+
+**EC-MER-6 anti-omission does hold**, and the distinction is why the previous audit passed: deleting
+`readback` / `readback_sha256` / `preferences_sha256` fails correctly. The gap is **substitution**.
+A test that proves omission-resistance is not a test that proves substitution-resistance, and only
+one of them was written.
+
+## The pattern across all three audits
+
+Six defects in a row shared one shape: **a check reported the outcome the mechanism was designed to
+report, rather than the outcome that had occurred.**
+
+| Finding | Reported | Actually |
+|---|---|---|
+| D19 budget (QA-gate-1) | obligation recorded | obligation discharged |
+| D-034 `jti` | `GATE_REPLAY` defended | the column is never populated |
+| D19 recurrence (QA-gate-2) | "the signed L2 discloses no recurrence constraint" | it discloses one |
+| D-032 `max > 2^53` | a signed constraint | a constraint no verifier can read |
+| QA3-GATE-1 | six checks `notApplicable` | six checks had no subject |
+| QA3-VENDOR-1 | "all checks pass" | nothing was bound to the chain |
+
+Every one is a reporting surface that is honest about its own vocabulary and dishonest about reality.
+The remedy is not more assertions. It is that **each of these now has a test asserting the specific
+thing that must be true**, and D-034 standing rule — a test at a pinned-dependency boundary must
+consume a value that dependency actually produced — is the generalisation.
