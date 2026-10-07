@@ -162,7 +162,7 @@ describe('AT-M10.4 — a mandate revoked mid-decision leaks no reservation', () 
 
     const decision = await decide(world, {
       attemptId: 'att_0000000000000000000000000B' as AttemptId,
-      l3a: fakeL3a({ jti: 'jti-2' }),
+      l3a: fakeL3a({ nonce: 'jti-2' }),
     })
 
     expect(decision.decision).toBe('BLOCK')

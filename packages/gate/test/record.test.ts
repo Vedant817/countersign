@@ -493,7 +493,7 @@ function jpyL3a(amountMinor: number): string {
   )
   const payload = Buffer.from(
     JSON.stringify({
-      jti: 'jpy-1',
+      nonce: 'jpy-1',
       amount_minor: amountMinor,
       currency: 'JPY',
       payee_id: MERCHANT_ID,

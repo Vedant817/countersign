@@ -20,6 +20,7 @@
  * - **No database.** `createInMemoryGateWorld` models `FOR UPDATE` deliberately — see its doc comment —
  *   so AT-M10.2's "exactly 3 ALLOW" tests the lock rather than the absence of one.
  */
+import { createHash } from 'node:crypto'
 import { SignJWT, compactVerify, exportJWK, generateKeyPair, importJWK, type CryptoKey } from 'jose'
 import {
   money,
@@ -90,7 +91,7 @@ function b64(value: unknown): string {
 export function fakeL3a(overrides: Record<string, unknown> = {}, kid: string = AGENT_KID): string {
   const header = b64({ alg: 'EdDSA', kid, typ: 'JWT' })
   const payload = b64({
-    jti: 'jti-1',
+    nonce: 'l3-nonce-1',
     amount_minor: Number(CART_MINOR),
     currency: 'USD',
     payee_id: MERCHANT_ID,
@@ -103,22 +104,46 @@ export function fakeL3a(overrides: Record<string, unknown> = {}, kid: string = A
   return `${header}.${payload}.${Buffer.from('not-a-real-signature', 'utf8').toString('base64url')}`
 }
 
-/** An unsigned L3b binding a `checkout_hash`. Same honesty as {@link fakeL3a}. */
+/** SD-JWT checkout disclosure shape, pinned against the real vi binding capture. */
+function checkoutDisclosure(checkoutHash: string): string {
+  return b64(['test-salt', { vct: 'mandate.checkout.1', checkout_hash: checkoutHash }])
+}
+
+function disclosureRef(disclosure: string): { '...': string } {
+  return { '...': createHash('sha256').update(disclosure, 'ascii').digest('base64url') }
+}
+
+/** Test-only resolved L3b, verifying the issuer's disclosure commitment before substitution. */
+export function resolvedTestL3b(token: string): Record<string, unknown> {
+  const decoded = decodeL3(token.split('~')[0] ?? '')
+  if (!decoded.ok) throw new Error('invalid test L3b issuer JWT')
+  const disclosure = token.split('~')[1] ?? ''
+  const delegates = decoded.claims['delegate_payload'] as { '...': string }[] | undefined
+  if (delegates?.[0]?.['...'] !== disclosureRef(disclosure)['...']) {
+    throw new Error('test L3b disclosure does not match its signed hash')
+  }
+  const value = JSON.parse(Buffer.from(disclosure, 'base64url').toString('utf8')) as unknown[]
+  return { delegate_payload: [value[1]] }
+}
+
+/** An unsigned SD-JWT L3b with a checkout disclosure, never an invented flat checkout_hash. */
 export function fakeL3b(
   checkoutHash: string,
   overrides: Record<string, unknown> = {},
   kid: string = AGENT_KID,
 ): string {
   const header = b64({ alg: 'EdDSA', kid, typ: 'JWT' })
+  const disclosure = checkoutDisclosure(checkoutHash)
   const payload = b64({
-    checkout_hash: checkoutHash,
+    delegate_payload: [disclosureRef(disclosure)],
+    _sd_alg: 'sha-256',
     aud: 'https://merchant.example',
     iss: 'https://agent.example',
     iat: NOW_SEC - 5,
     exp: NOW_SEC + 295,
     ...overrides,
   })
-  return `${header}.${payload}.${Buffer.from('not-a-real-signature', 'utf8').toString('base64url')}`
+  return `${header}.${payload}.${Buffer.from('not-a-real-signature', 'utf8').toString('base64url')}~${disclosure}~`
 }
 
 /** A **real** L3a, signed by the agent key. What the fuzz mutates. */
@@ -128,7 +153,7 @@ export async function signL3a(
   kid: string = AGENT_KID,
 ): Promise<string> {
   return new SignJWT({
-    jti: 'jti-1',
+    nonce: 'l3-nonce-1',
     amount_minor: Number(CART_MINOR),
     currency: 'USD',
     payee_id: MERCHANT_ID,
@@ -149,8 +174,10 @@ export async function signL3b(
   overrides: Record<string, unknown> = {},
   kid: string = AGENT_KID,
 ): Promise<string> {
-  return new SignJWT({
-    checkout_hash: checkoutHash,
+  const disclosure = checkoutDisclosure(checkoutHash)
+  const issuerJwt = await new SignJWT({
+    delegate_payload: [disclosureRef(disclosure)],
+    _sd_alg: 'sha-256',
     aud: 'https://merchant.example',
     iss: 'https://agent.example',
     iat: NOW_SEC - 5,
@@ -159,6 +186,7 @@ export async function signL3b(
   } as never)
     .setProtectedHeader({ alg: 'EdDSA', kid, typ: 'JWT' })
     .sign(key)
+  return `${issuerJwt}~${disclosure}~`
 }
 
 /** A signed checkout JWT by a real merchant key. Check 5 verifies its signature locally. */
@@ -289,7 +317,8 @@ async function buildKeys(): Promise<TestKeys> {
       for (const [label, token] of Object.entries(tokens)) {
         if (token === '') continue
         try {
-          await compactVerify(token, publicKey)
+          await compactVerify(token.split('~')[0] ?? '', publicKey)
+          if (label === 'l3b') resolvedTestL3b(token)
         } catch (cause) {
           errors.push(`${label}: ${(cause as Error).message}`)
         }
@@ -609,24 +638,36 @@ export async function makeWorld(
     const result = await verify(request)
     if (!result.ok) return result
     const l3a = result.value.disclosed.l3a
-    if (Object.keys(l3a ?? {}).length > 0) return result
+    const l3b = result.value.disclosed.l3b
     const decoded = decodeL3(request.l3a ?? '')
     const claims = decoded.ok ? decoded.claims : {}
+    let checkout: Record<string, unknown> = {}
+    if (Object.keys(l3b ?? {}).length === 0) {
+      try {
+        checkout = resolvedTestL3b(request.l3b ?? '')
+      } catch {
+        // A malformed test presentation remains missing; production only consumes vi's response.
+      }
+    }
     return {
       ok: true,
       value: {
         ...result.value,
         disclosed: {
           ...result.value.disclosed,
-          l3a: {
-            delegate_payload: [
-              {
-                vct: 'mandate.payment.1',
-                payment_amount: { amount: claims.amount_minor, currency: claims.currency },
-                payee: { id: claims.payee_id },
-              },
-            ],
-          },
+          l3b: Object.keys(l3b ?? {}).length > 0 ? l3b : checkout,
+          l3a:
+            Object.keys(l3a ?? {}).length > 0
+              ? l3a
+              : {
+                  delegate_payload: [
+                    {
+                      vct: 'mandate.payment.1',
+                      payment_amount: { amount: claims.amount_minor, currency: claims.currency },
+                      payee: { id: claims.payee_id },
+                    },
+                  ],
+                },
         },
       },
     }

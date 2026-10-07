@@ -104,10 +104,10 @@ async function signedInput(
     checkoutId: base.checkoutId,
     agentId: base.agentId,
     l3a: await signL3a(world.keys.agent.key, {
-      jti: `fuzz-${i}`,
+      nonce: `fuzz-${i}`,
       amount_minor: Number(CART_MINOR),
     }),
-    l3b: await signL3b(world.keys.agent.key, 'hash-1', { jti: `fuzz-${i}` }),
+    l3b: await signL3b(world.keys.agent.key, 'hash-1', { nonce: `fuzz-${i}` }),
     ...overrides,
   }
 }

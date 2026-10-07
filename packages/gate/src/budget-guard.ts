@@ -149,6 +149,9 @@ import {
 export async function check8Budget(ctx: CheckContext): Promise<CheckResult> {
   const mandate = ctx.state.mandate
   const amount = ctx.state.reserveAmount
+  if (ctx.state.replayRejected) {
+    return unsatisfiableBudget(8, 'check 7 rejected this L3a as GATE_REPLAY; no second reservation')
+  }
   if (!mandate) return notApplicableBudget(ctx, 8, 'no mandate row: check 1 could not resolve one')
   // **Blocking.** No amount is not "nothing to enforce" - it is the absence of the thing this check
   // exists to enforce. See `unsatisfiableBudget` and QA3-GATE-1.

@@ -11,9 +11,15 @@ const capture = JSON.parse(
   readFileSync(new URL('./fixtures/vi-verify-budget-capture.json', import.meta.url), 'utf8'),
 ) as { verify_response: unknown; verify_request: { l3a: string } }
 const response = verifyResponseSchema.parse(capture.verify_response)
+const capturedCheckoutHash = (
+  response.disclosed.l3b['delegate_payload'] as Record<string, unknown>[]
+)[0]!['checkout_hash'] as string
 
 async function decide(l3a: unknown): Promise<GateDecision> {
-  const world = await makeWorld({ cartMinor: 13_300n, session: { merchant_id: 'mrc_northwind' } })
+  const world = await makeWorld({
+    cartMinor: 13_300n,
+    session: { merchant_id: 'mrc_northwind', checkout_hash: capturedCheckoutHash },
+  })
   const result = await evaluate(
     input(),
     withDeps(world, {
@@ -40,7 +46,10 @@ function check6(decision: GateDecision) {
 }
 
 it('EC-PRICE-1: captured disclosed $133.00 matches the locked $133.00; checks 7/8/9 have an amount', async () => {
-  const world = await makeWorld({ cartMinor: 13_300n, session: { merchant_id: 'mrc_northwind' } })
+  const world = await makeWorld({
+    cartMinor: 13_300n,
+    session: { merchant_id: 'mrc_northwind', checkout_hash: capturedCheckoutHash },
+  })
   const result = await evaluate(
     input({ l3a: capture.verify_request.l3a }),
     withDeps(world, { verify: async () => ok(response) }),

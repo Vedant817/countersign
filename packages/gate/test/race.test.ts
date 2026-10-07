@@ -236,7 +236,7 @@ describe('AT-M10.2 — a 20-way concurrent race yields exactly 3 ALLOWs', () => 
 function l3aWithJti(i: number, amountMinor: bigint = CART_MINOR): string {
   const header = b64({ alg: 'EdDSA', kid: 'agent-key-1', typ: 'JWT' })
   const payload = b64({
-    jti: `race-${i}`,
+    nonce: `race-${i}`,
     amount_minor: Number(amountMinor),
     currency: 'USD',
     payee_id: 'MERCHANT_NORTHWIND',

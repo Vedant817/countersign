@@ -310,7 +310,7 @@ function inputFor(world: World, i: number, amountMinor: bigint = CART_MINOR) {
   return {
     ...base,
     attemptId: `att_${String(i).padStart(26, '0')}` as AttemptId,
-    l3a: l3a({ jti: `race-${i}`, amount_minor: Number(amountMinor) }),
+    l3a: l3a({ nonce: `race-${i}`, amount_minor: Number(amountMinor) }),
   }
 }
 

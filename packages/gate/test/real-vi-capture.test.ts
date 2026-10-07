@@ -78,6 +78,7 @@ import {
   input,
   makeWorld,
   withDeps,
+  resolvedTestL3b,
 } from './fixtures'
 
 /* ------------------------------------------------------------------------------------------ */
@@ -165,6 +166,8 @@ async function decideWithCapture(
           ...parseResponse(),
           disclosed: {
             ...parseResponse().disclosed,
+            // This budget-only scenario uses a synthetic cart and a matching test checkout.
+            l3b: resolvedTestL3b(input().l3b),
             l3a: {
               delegate_payload: [
                 {
