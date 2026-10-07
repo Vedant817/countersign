@@ -37,7 +37,7 @@
  * `tsc`-checked statement - the rank write path returns `applied: false` rather than throwing, so the second
  * instance sees a normal `ok`.
  */
-import { csError, ok, type CsError, type Logger, type Result } from '@countersign/core'
+import { csError, err, ok, type CsError, type Logger, type Result } from '@countersign/core'
 import {
   authorizationExpirySweep,
   processWebhookEvent,
@@ -98,7 +98,7 @@ export interface PgBossLike {
   work(
     name: string,
     options: PgBossWorkOptions,
-    handler: (job: { data?: unknown }) => Promise<unknown>,
+    handler: (jobs: PgBossJob[]) => Promise<unknown>,
   ): Promise<unknown>
   schedule(
     name: string,
@@ -106,6 +106,12 @@ export interface PgBossLike {
     data?: object | null,
     options?: PgBossSendOptions,
   ): Promise<unknown>
+}
+
+/** pg-boss 12 delivers Job[], including when batchSize is one. Data remains an object. */
+export interface PgBossJob {
+  readonly id: string
+  readonly data?: unknown
 }
 
 /** The subset of pg-boss's `SendOptions` this worker sets. */
@@ -280,9 +286,8 @@ export interface RunnerDeps {
  *   only safe if something re-drives the rows that were stored and never enqueued (EC-WH-1/EC-WH-5's
  *   crash-window backstop). Folding it into the 5-minute cycle means the backstop shares the cron we already
  *   promised rather than needing its own.
- * - **`release.reservations` and `budget.reconcile` are caller-supplied**, and a missing one is a logged
- *   no-op rather than a crash. A worker that refuses to start because a ledger port was not wired would make
- *   the webhook half unavailable during a wiring mistake in the other half.
+ * - **`release.reservations` and `budget.reconcile` are caller-supplied**. Missing ports fail their jobs
+ *   retryably without preventing the webhook half from starting.
  */
 export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler> {
   const lookbackDays = deps.lookbackDays ?? DEFAULT_LOOKBACK_DAYS
@@ -290,8 +295,17 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
 
   const unconfigured = (job: JobName, needed: string): QueueHandler => {
     return async () => {
-      logger?.warn('job has no handler wired', { job, needed })
-      return { skipped: true, reason: `${job} is not wired in this process` }
+      return settleForQueue(
+        err(
+          csError(
+            'CS_INTERNAL',
+            `${job} is not wired in this process`,
+            { needed },
+            { retryable: true },
+          ),
+        ),
+        { job, logger },
+      )
     }
   }
 
@@ -308,7 +322,16 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
      */
     [JOB_PROCESS]: async (data) => {
       const processed = await processWebhookEvent(data, deps.webhooks, deps.hooks)
-      if (!processed.ok) return settleForQueue(processed, { job: JOB_PROCESS, logger })
+      if (!processed.ok) {
+        // A malformed pointer or absent durable subject means processing never happened. Preserve the
+        // registry code, but retry this delivery instead of recording completion without handling it.
+        const retryable =
+          processed.error.code === 'CS_VALIDATION' || processed.error.code === 'CS_NOT_FOUND'
+        return settleForQueue(
+          retryable ? err({ ...processed.error, retryable: true }) : processed,
+          { job: JOB_PROCESS, logger },
+        )
+      }
       const { outcome, fixedWithoutWebhook } = processed.value
       logger?.info('webhook event processed', {
         webhook_event_id: processed.value.eventId,
@@ -473,7 +496,38 @@ export async function registerJobs(
         }
       }
       try {
-        await boss.work(job, { batchSize: 10 }, async (job_) => runner[job](job_.data))
+        // One job per batch isolates retries: pg-boss otherwise fails every job in a batch when any
+        // handler rejects. Still iterate the delivery so an unexpected larger batch loses no jobs.
+        await boss.work(job, { batchSize: 1 }, async (jobs) => {
+          if (!Array.isArray(jobs) || jobs.length === 0) {
+            throw csError(
+              'CS_VALIDATION',
+              `${job} needs a non-empty pg-boss Job[]`,
+              {},
+              { retryable: true },
+            )
+          }
+          const outputs: unknown[] = []
+          for (const item of jobs) {
+            if (
+              !item ||
+              typeof item !== 'object' ||
+              !Object.hasOwn(item, 'data') ||
+              (item.data !== null &&
+                item.data !== undefined &&
+                (typeof item.data !== 'object' || Array.isArray(item.data)))
+            ) {
+              throw csError(
+                'CS_VALIDATION',
+                `${job} has a malformed job payload`,
+                {},
+                { retryable: true },
+              )
+            }
+            outputs.push(await runner[job](item.data))
+          }
+          return outputs.length === 1 ? outputs[0] : outputs
+        })
       } catch (cause) {
         errors.push({
           job,

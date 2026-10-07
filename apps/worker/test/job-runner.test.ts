@@ -13,7 +13,7 @@
  * | handlers are registered **before** schedules | pg-boss produces crons into a queue with no consumer |
  * | a retryable failure is re-thrown, a permanent one is not | a PayPal 404 retried forever, or a blip that loses the job |
  * | `wh.reconcile` re-drives stored-but-unenqueued rows | §8.12 step 5's "200 even if processing fails" becomes unsafe |
- * | an unwired ledger job is a logged no-op | the webhook half goes down because the ledger half was mis-wired |
+ * | an unwired ledger job rejects retryably | missing ledger wiring is falsely recorded as completed work |
  *
  * The two rows about retry are the ones worth reading twice. They are the only place in this work package
  * where "a `Result` that is `ok: false`" could be silently treated as success, and pg-boss would then mark the
@@ -143,14 +143,15 @@ describe('createJobRunner — every job name is wired', () => {
     // PayPal, so a payload edited in the queue cannot move money. This asserts the read happened.
     const h = workerHarness()
     const runner = createJobRunner({ webhooks: h.deps })
-    const settled = await runner[JOB_PROCESS]({
-      webhookEventId: 'whe_missing',
-      resourceId: 'CAP-1',
-      resourceType: 'capture',
-      eventType: 'PAYMENT.CAPTURE.COMPLETED',
-    })
-    // CS_NOT_FOUND for a row that does not exist: permanent, so it completes rather than retrying.
-    expect(settled).toMatchObject({ ok: false, completed: true, code: 'CS_NOT_FOUND' })
+    await expect(
+      runner[JOB_PROCESS]({
+        webhookEventId: 'whe_missing',
+        resourceId: 'CAP-1',
+        resourceType: 'capture',
+        eventType: 'PAYMENT.CAPTURE.COMPLETED',
+      }),
+    ).rejects.toMatchObject({ code: 'CS_NOT_FOUND', retryable: true })
+    // An absent durable subject means this queued event has not been processed.
     expect(h.calls).toContain('events.findById')
     // The payload's resourceId was never used as a source of state — no PayPal call was made from it.
     expect(h.calls).not.toContain('getCapture')
@@ -220,16 +221,17 @@ describe('createJobRunner — every job name is wired', () => {
     await expect(runner[JOB_RELEASE_RESERVATIONS](undefined)).rejects.toThrow('ledger is down')
   })
 
-  it('QUEUE-2 an unwired ledger job is a logged no-op, so the webhook half still starts', async () => {
-    // The alternative — throwing — makes a wiring mistake in the ledger half take down the webhook half.
+  it('EC-WH-5 an unwired ledger job retries while the webhook half can still start', async () => {
     const h = workerHarness()
     const { logger, lines } = recordingLogger()
     const runner = createJobRunner({ webhooks: h.deps, logger })
     for (const job of [JOB_RELEASE_RESERVATIONS, JOB_BUDGET_RECONCILE] as JobName[]) {
-      const settled = await runner[job](undefined)
-      expect(settled).toMatchObject({ skipped: true })
+      await expect(runner[job](undefined)).rejects.toMatchObject({
+        code: 'CS_INTERNAL',
+        retryable: true,
+      })
     }
-    expect(lines.filter((l) => l.level === 'warn')).toHaveLength(2)
+    expect(lines.filter((l) => l.level === 'error')).toHaveLength(2)
   })
 })
 
