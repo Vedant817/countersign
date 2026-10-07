@@ -30,7 +30,7 @@ import {
 } from '@countersign/core'
 import type { CheckoutSessionRow, JsonValue, ProductRow } from '@countersign/db'
 
-import { gateJwks, recordSigner } from '../src/decision-record'
+import { decodeL3, gateJwks, recordSigner } from '../src/decision-record'
 import {
   createInMemoryGateWorld,
   type InMemoryGateWorld,
@@ -602,6 +602,35 @@ export async function makeWorld(
     ...(options.signWithRealKey ? { signRecord: recordSigner(keys.gate.key, keys.gate.kid) } : {}),
   })
 
+  // Test-only vi stand-in for the old flat claim fixtures. Production never falls back to JWS
+  // claims. Captured or explicitly supplied disclosures are passed through unchanged.
+  const verify = world.deps.verify
+  world.deps.verify = async (request) => {
+    const result = await verify(request)
+    if (!result.ok) return result
+    const l3a = result.value.disclosed.l3a
+    if (Object.keys(l3a ?? {}).length > 0) return result
+    const decoded = decodeL3(request.l3a ?? '')
+    const claims = decoded.ok ? decoded.claims : {}
+    return {
+      ok: true,
+      value: {
+        ...result.value,
+        disclosed: {
+          ...result.value.disclosed,
+          l3a: {
+            delegate_payload: [
+              {
+                vct: 'mandate.payment.1',
+                payment_amount: { amount: claims.amount_minor, currency: claims.currency },
+                payee: { id: claims.payee_id },
+              },
+            ],
+          },
+        },
+      },
+    }
+  }
   return Object.assign(world, { keys, tokens })
 }
 

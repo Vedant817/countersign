@@ -84,6 +84,7 @@ import { recordSigner } from '../../src/decision-record'
 import { evaluate } from '../../src/evaluate'
 import { NO_DISCLOSED_CONSTRAINTS } from '../../src/signed-constraints'
 import type { GateDecision, GateDeps, GateInput } from '../../src/types'
+import { capturedPaymentProof } from './captured-payment-proof'
 
 /* ------------------------------------------------------------------------------------------ */
 /* The live vi-service                                                                           */
@@ -194,6 +195,7 @@ function unwrap(what: string, result: Result<GateDecision, CsError>): GateDecisi
 /* ------------------------------------------------------------------------------------------ */
 
 async function main(): Promise<number> {
+  await capturedPaymentProof()
   const { chain, stop } = await startLiveViService()
   const failures: string[] = []
   const line = '-'.repeat(100)
@@ -499,6 +501,8 @@ async function main(): Promise<number> {
       chainValid: false,
       pending: [],
       signedConstraints: NO_DISCLOSED_CONSTRAINTS,
+      disclosedL3a: null,
+      disclosedL3b: null,
     }
     const ctx: CheckContext = {
       input: gateInput,
@@ -521,6 +525,10 @@ async function main(): Promise<number> {
     )
     console.log('')
     console.log(`state.chainValid                    : ${state.chainValid}`)
+    console.log('state.disclosedL3a source            : verify.disclosed.l3a')
+    console.log(
+      `state.disclosedL3a.delegate_payload  : ${JSON.stringify(state.disclosedL3a?.['delegate_payload'])}`,
+    )
     console.log(`state.pending (the D19 obligation)   : ${JSON.stringify(state.pending)}`)
     console.log(`state.signedConstraints.source      : ${state.signedConstraints.source}`)
     console.log(
@@ -572,19 +580,15 @@ async function main(): Promise<number> {
       failures.push(`check 11 did not report discharging the obligation: ${check11?.detail}`)
     }
 
-    // Check 8 cannot be evaluated while check 6 cannot resolve an amount (see OUTSTANDING below). What
-    // matters is that it **failed closed** rather than passing on the cached cap: an unreadable
-    // obligation must never read as a pass, which is the D19 failure mode.
-    const check8 = outcome.checks.find((c) => c.n === 8)
-    if (check8?.passed === true || check8?.notApplicable === true) {
-      failures.push(
-        `check 8 passed or was skipped despite an undischarged budget obligation: ${check8?.detail}`,
-      )
+    // The live payment is under the signed budget. Check 6 must resolve it and check 8 enforce it.
+    for (const n of [6, 8]) {
+      const check = outcome.checks.find((c) => c.n === n)
+      if (check?.passed !== true) failures.push(`check ${n} did not pass: ${check?.detail}`)
     }
-    if (!outcome.reasons.some((r) => r.code === 'GATE_CHECK_UNSATISFIABLE')) {
-      failures.push(
-        'check 8 did not report an unsatisfiable state, so the decision did not fail closed',
-      )
+    for (const n of [7, 8, 9]) {
+      const check = outcome.checks.find((c) => c.n === n)
+      if (check?.detail?.includes('no amount resolved'))
+        failures.push(`check ${n} still lacks an amount`)
     }
 
     // --- PASS 2 — fail closed, against the same live service -------------------------------------
@@ -675,7 +679,7 @@ async function main(): Promise<number> {
     // --- outstanding defects this harness did NOT fix ----------------------------------------
 
     // Printed unconditionally. A proof that only shows what it fixed invites the reader to assume the rest
-    // of the decision is healthy, and on this run it is not: checks 5, 6, 8 and 9 fail for reasons that
+    // of the decision is healthy, and the outcome may still fail for reasons that
     // have nothing to do with the chain tokens and were invisible until a live service answered.
     const outstanding = outcome.checks
       .filter((check) => !check.passed && check.notApplicable !== true && check.n !== 4)
@@ -691,29 +695,7 @@ async function main(): Promise<number> {
       console.log('')
       console.log('  Pre-existing defects in OTHER checks, found by driving a live service, and')
       console.log('  deliberately NOT fixed here — each needs its own decision record and tests.')
-      console.log('  The two root causes, for whoever picks them up:')
-      console.log(
-        '   * check 5: `merchantKeySetFromJwks` reads `entry["public_jwk"]`, but vi\'s GET /v1/jwks',
-      )
-      console.log(
-        '     emits the JWK members inline (`kty`,`crv`,`x`,`y`,`alg`,`use`) beside `role` and',
-      )
-      console.log('     `status`. Every merchant entry is dropped, so `currentKid` is "" and')
-      console.log('     `acceptedKids` is empty — a perfectly real `kid` is reported as unknown.')
-      console.log(
-        "   * check 6: `l3aAmount` reads top-level `amount_minor`/`currency`/`payee_id`, but vi's",
-      )
-      console.log(
-        '     real L3a carries them in `delegate_payload[1]` as `payment_amount.{amount,currency}`',
-      )
-      console.log(
-        '     and `payee.id` (vct `mandate.payment.1`). The amount is unresolvable, which is why',
-      )
-      console.log(
-        '     checks 7, 8 and 9 report "no amount resolved by check 6" — they are collateral, not',
-      )
-      console.log('     independent failures.')
-      console.log('  The BLOCK above is caused by these, not by check 4.')
+      console.log('  Amount resolution passed; any remaining BLOCK reason is listed above.')
     }
     console.log('')
 

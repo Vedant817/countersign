@@ -421,6 +421,8 @@ function freshState(): CheckState {
     chainValid: false,
     pending: [],
     signedConstraints: NO_DISCLOSED_CONSTRAINTS,
+    disclosedL3a: null,
+    disclosedL3b: null,
   }
 }
 

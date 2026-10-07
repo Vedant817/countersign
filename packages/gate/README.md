@@ -406,25 +406,42 @@ calls `GET /v1/jwks`.
 It exits non-zero on any failed assertion and prints an `OUTSTANDING` section naming every check still
 failing, so a green run cannot be read as "the whole Gate is healthy".
 
-## Two findings in this package, pinned rather than fixed
+## Verified disclosed payment (D-038)
 
-Driving a live service surfaced two further defects, in **other** checks, with unrelated root causes. Both
-are pre-existing and both block every real decision, so neither is cosmetic — but each changes enforcement
-behaviour and needs its own decision record and tests, so this change does not fix them.
+Check 4 retains `VerifyResponse.disclosed.l3a`, the token payload vi resolved while verifying this
+chain, alongside the signed L2 constraints. A missing or unreadable payment blocks check 4; it is
+never `notApplicable`. `src/signed-payment.ts::readSignedPayment` requires exactly one
+`delegate_payload[*]` with `vct: mandate.payment.1`. Its transformed result carries integer `Money`
+and the payee, or `found: false` with a named `why`. No SD-JWT resolver or top-level claim fallback
+exists in the Gate.
 
-1. **Check 5 cannot recognise a merchant key.** `decision-record.ts::merchantKeySetFromJwks` reads
-   `entry['public_jwk']`, but `apps/vi`'s `GET /v1/jwks` emits the JWK members **inline** (`kty`, `crv`,
-   `x`, `y`, `alg`, `use`) beside `role` and `status`. Every merchant entry is therefore dropped, so
-   `currentKid` is `''` and `acceptedKids` is empty — and a perfectly real `kid` is reported as "neither the
-   current nor a retired-but-valid merchant key".
-2. **Check 6 cannot read the L3a's amount.** `checks.ts::l3aAmount` reads top-level
-   `amount_minor`/`currency`/`payee_id`, but vi's real L3a carries them in `delegate_payload[1]` (vct
-   `mandate.payment.1`) as `payment_amount.{amount, currency}` and `payee.id`. The amount is unresolvable,
-   so checks 7, 8 and 9 report "no amount resolved by check 6" — they are collateral damage, not
-   independent failures.
+Check 5 binds the disclosed `payee.id` to the session merchant. Check 6 compares
+`payment_amount.amount` / `currency` and `payee.id` against the session's `total_minor` / `currency` /
+`merchant_id`, retaining price-lock expiry and refusing currency conversion. Integer wire values pass
+through `bigintFromJson`; fractional, unsafe numeric, negative and malformed amounts block. The
+reserved amount remains the session's total.
 
-Either one alone would keep every decision a `BLOCK`. The proof reports them rather than asserting a full
-`ALLOW`, because it cannot produce one.
+`test/disclosed-payment.test.ts` adds seven named regressions, including the **untouched** real
+`vi-verify-budget-capture.json`: its $133.00 payment now passes check 6 against a $133.00 session.
+That capture still correctly BLOCKs because its signed budget is $130.00. Existing L2 budget tests
+that vary the cart now explicitly use a synthetic matching disclosed L3a rather than claiming that
+the captured $133.00 payment matches a $30.00 cart.
+
+Run the captured and fresh live proofs together:
+
+```sh
+pnpm --filter @countersign/gate exec tsx test/support/live-vi-proof.ts
+```
+
+The live proof reuses `live-vi-chain.py` and the production `gateDepsFromRepos`/`ViClient` binding,
+with in-memory repository and budget ports. No database or PayPal call is needed. It requires checks
+6 and 8 to pass and checks 7/8/9 to have an amount. The captured proof supplies the unmodified response
+to `evaluate`; it does not claim fresh cryptographic verification of that historical capture.
+
+**A full live ALLOW is still unverified and currently blocked:** check 5 expects a top-level
+`checkout_hash` that the live L3b lacks, and check 7 expects a `jti` claim that the live L3a lacks
+(D-034). The proof prints these actual remaining failures. Passing this payment proof proves amount
+resolution and signed-budget enforcement, not resolution of those independent blockers.
 
 ## A finding in `packages/db`, pinned rather than fixed
 
