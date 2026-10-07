@@ -384,6 +384,10 @@ def b64u_decode(text: str) -> bytes:
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
+def sha256_b64url(data: bytes) -> str:
+    return b64u(hashlib.sha256(data).digest())
+
+
 def reverse_keys(value: Any) -> Any:  # noqa: ANN401
     """Every object's keys, reversed. Arrays keep their order — it is significant."""
     if isinstance(value, list):
@@ -659,26 +663,28 @@ def phase_two(doc: dict[str, Any]) -> None:  # noqa: ANN401
     # price lock", which is a false alarm rather than a finding.
     committed = _find_checkout_hash(l3b)
 
-    if committed is None:
-        skip("checkout_binding", "the bundle has no L3b committing to a checkout_hash")
+    checkout_raw = bundle.get("checkout_jwt")
+    l3b_raw = bundle.get("l3b")
+    if not isinstance(checkout_raw, str) or not checkout_raw or not isinstance(l3b_raw, str) or not l3b_raw:
+        skip("checkout_binding", "no checkout JWT or no L3b, so no pair of artefacts to compare")
     elif not jwt:
-        fail("checkout_binding", "L3b commits to a price lock but the bundle carries no checkout JWT")
+        fail("checkout_binding", "the checkout JWT could not be read")
+    elif committed is None:
+        fail("checkout_binding", "L3b commits to no checkout_hash, so nothing binds this cart")
+    elif re.fullmatch(r"[A-Za-z0-9_-]+[.][A-Za-z0-9_-]+[.][A-Za-z0-9_-]+", checkout_raw) is None:
+        fail("checkout_binding", "the checkout hash requires the complete ASCII compact JWT")
     else:
-        from_jwt = jwt.get("checkout_hash")
-        if from_jwt is None:
-            ok(
-                "checkout_binding",
-                "L3b commits to checkout_hash %s and a price lock is present; the price lock's own "
-                "signature is checked in phase 3" % str(committed)[:16],
-            )
-        elif from_jwt == committed:
-            ok("checkout_binding", "L3b commits to the price lock in this bundle (%s)" % str(committed)[:16])
-        else:
-            fail(
-                "checkout_binding",
-                "L3b committed to %s but the price lock carries %s — the agent authorised a different cart"
-                % (committed, from_jwt),
-            )
+        # Hash the COMPLETE JWT, including its signature. Never trust a checkout_hash payload claim:
+        # the merchant can sign a different cart with that same claim. This is the producer's preimage.
+        presented = sha256_b64url(checkout_raw.encode("ascii"))
+        expect(
+            presented == committed,
+            "checkout_binding",
+            "SHA-256 of the complete checkout JWT's ASCII bytes matches L3b's checkout_hash (%s); "
+            "signature verification is separate" % committed,
+            "L3b committed to %s but the complete checkout JWT hashes to %s — the agent authorised a different cart"
+            % (committed, presented),
+        )
 
     _gate_record_binding(bundle)
     _readback_binding(bundle)
