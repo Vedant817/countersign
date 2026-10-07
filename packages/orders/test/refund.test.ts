@@ -681,3 +681,37 @@ function ledger(h: Harness): Array<{ kind: string; amount_minor: string }> {
 function describeErr(r: { ok: boolean; error?: { code: string; message: string } }): string {
   return r.ok ? '' : `${r.error?.code}: ${r.error?.message}`
 }
+
+describe('EC-REF-2: reservations protect the cumulative capture amount before money moves', () => {
+  it('EC-REF-2: several partial attempts never refund more than the capture', async () => {
+    const h = await capturedFor()
+    const results = []
+    for (const [i, amount] of [2_000n, 2_000n, 2_000n, 1_000n].entries()) {
+      results.push(
+        await refund(PAYPAL.captureId, money(amount, 'USD'), 'RETURN', MERCHANT, h.deps, {
+          idempotencyKey: `attempt-${i}`,
+        }),
+      )
+    }
+    expect(results.map((r) => r.ok)).toEqual([true, true, false, true])
+    expect([...h.world.rows.refunds.values()].reduce((sum, r) => sum + r.amount_minor, 0n)).toBe(
+      5_000n,
+    )
+    expect([...h.world.rows.captures.values()][0]?.refunded_minor).toBe(5_000n)
+    expect(h.paypal.callsTo('/refund')).toHaveLength(3)
+  })
+
+  it('EC-REF-2: concurrent over-limit partial attempts are rejected BEFORE PayPal', async () => {
+    const h = await capturedFor()
+    const results = await Promise.all(
+      ['a', 'b'].map((key) =>
+        refund(PAYPAL.captureId, money(3_000n, 'USD'), 'RETURN', MERCHANT, h.deps, {
+          idempotencyKey: key,
+        }),
+      ),
+    )
+    expect(results.filter((r) => r.ok)).toHaveLength(1)
+    expect(h.paypal.callsTo('/refund')).toHaveLength(1)
+    expect([...h.world.rows.captures.values()][0]?.refunded_minor).toBe(3_000n)
+  })
+})

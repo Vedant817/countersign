@@ -37,6 +37,14 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { createInMemoryOrderWorld } from '../../orders/src/deps'
+import {
+  defenderRefundsFromOrders,
+  disputeRefundKey,
+  disputeRefundRequestId,
+} from '../../orders/src/dispute-refund'
+import { harness as ordersHarness } from '../../orders/test/harness'
+
 import { fixedClock, type Clock, type CsError, type Money } from '@countersign/core'
 import type {
   AuditLogRow,
@@ -623,6 +631,7 @@ interface RefundCall {
   readonly amount: Money
   readonly ruleId: string
   readonly actor: string
+  readonly idempotencyKey: string
 }
 
 interface RefundRecorder {
@@ -633,6 +642,8 @@ interface RefundRecorder {
     reason: string
     actor: string
     disputeId: string
+    paypalDisputeId: string
+    idempotencyKey: string
     ruleId: string
   }): Promise<
     | { ok: true; value: { refundId: string; paypalRefundId: string; amount: Money } }
@@ -657,6 +668,7 @@ function refundRecorder(): RefundRecorder {
         amount: input.amount,
         ruleId: input.ruleId,
         actor: input.actor,
+        idempotencyKey: input.idempotencyKey,
       })
       return {
         ok: true,
@@ -671,6 +683,7 @@ function refundRecorder(): RefundRecorder {
 }
 
 interface Harness {
+  readonly client: PayPalClient
   readonly world: InMemoryDefenderWorld
   readonly paypal: FakePayPal
   readonly refunds: RefundRecorder
@@ -729,7 +742,7 @@ function harness(
     },
     ...(over.llm === undefined ? {} : { llm: over.llm }),
   }
-  return { world, paypal, refunds, deps }
+  return { world, paypal, refunds, deps, client }
 }
 
 /** `approve` is the merchant's click. Named, so a test that forgets one is obvious on the page. */
@@ -772,7 +785,7 @@ function expectOk<T>(r: {
 
 /** The one row a run wrote, or `undefined`. */
 function onlyAction(world: InMemoryDefenderWorld): DisputeActionRow | undefined {
-  return [...world.rows.actions.values()].at(0)
+  return [...world.rows.actions.values()].find((a) => !a.idempotency_key.endsWith(':refund:claim'))
 }
 
 /**
@@ -828,7 +841,7 @@ describe('the posture gate: a model cannot choose what gets filed', () => {
     expect(byPosture('ACCEPT_CLAIM')).toBe('/v1/customer/disputes/{id}/accept-claim')
     expect(byPosture('MESSAGE_ONLY')).toBe('/v1/customer/disputes/{id}/send-message')
     expect(byPosture('OFFER')).toBe('/v1/customer/disputes/{id}/make-offer')
-    expect(byPosture('REFUND')).toBe('/v2/payments/captures/{id}/refund')
+    expect(byPosture('REFUND')).toBe('/v1/customer/disputes/{id}/accept-claim')
     expect(byPosture('REVIEW')).toBeNull()
     // **Exactly one posture is the contest upload.**
     const uploads = (Object.keys(POSTURE_DISPOSITION) as Posture[]).filter(
@@ -1354,7 +1367,7 @@ describe('§18 q24: route returns REFUND, so the only PayPal call is the refund'
     [`POST /v2/payments/captures/${PAYPAL.captureId}/refund`]: refundResponse('129.99'),
   })
 
-  it('one recorded call, POST /v2/payments/captures/{id}/refund, and the row carries the refund id', async () => {
+  it('EC-REF-4: one dispute refund port call and the result row carries the refund id', async () => {
     /**
      * **R-INR-1**: `MERCHANDISE_OR_SERVICE_NOT_RECEIVED` with no tracking for the disputed line. §8.15's row is
      * `MERCHANT_FAULT → REFUND`, and the rationale says "there is no case to make: the parcel was ours and it
@@ -1375,7 +1388,7 @@ describe('§18 q24: route returns REFUND, so the only PayPal call is the refund'
     // **The refund is the only call.** `paypalCalls` is appended at the call site, so this counts what happened
     // rather than asserting what was intended.
     expect(outcome.disposition).toBe('REFUND')
-    expect(outcome.paypalCalls).toEqual(['refundCapture'])
+    expect(outcome.paypalCalls).toEqual(['acceptClaim'])
     expect(h.refunds.calls).toHaveLength(1)
     expect(h.refunds.calls[0]?.amount).toEqual({ minor: 12_999n, currency: 'USD' })
     expect(h.refunds.calls[0]?.captureId).toBe(CAPTURE_ID)
@@ -1399,9 +1412,9 @@ describe('§18 q24: route returns REFUND, so the only PayPal call is the refund'
     expect(response['disposition']).toBe('REFUND')
     expect(response['paypal_call']).toBe('sent')
     expect(response['paypal_refund_id']).toBe(PAYPAL.refundId)
-    expect(response['paypal_calls']).toEqual(['refundCapture'])
+    expect(response['paypal_calls']).toEqual(['acceptClaim'])
     const request = jsonb(row?.request)
-    expect(request['paypal_call']).toBe('refundCapture')
+    expect(request['paypal_call']).toBe('acceptClaim')
     expect(request['refund_amount_minor']).toBe('12999')
     expect(request['rule_id']).toBe('R-INR-1')
     expect(request['rationale']).toContain('R-INR-1')
@@ -2437,5 +2450,199 @@ describe('the seam: the client under test is the real one', () => {
     for (const call of posts) {
       expect(call.headers['paypal-request-id'], `${call.path} had no request id`).toBeTruthy()
     }
+  })
+})
+
+// Real Orders composition, real PayPalClient request building, and our own rows; no database startup.
+function disputeRefundHarness(over: { ambiguous?: boolean; timeout?: boolean } = {}) {
+  const seed = baseSeed({
+    dispute: { reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED', amount_minor: 10_000n },
+    capture: { amount_minor: 20_000n },
+    shipment: null,
+  })
+  const orderBody = (withRefund: boolean) => ({
+    id: PAYPAL.orderId,
+    status: 'COMPLETED',
+    purchase_units: [{ payments: { refunds: withRefund ? [{ id: PAYPAL.refundId }] : [] } }],
+  })
+  const h = harness(seed, {
+    [`GET ${D}`]: [
+      disputeResponse({
+        dispute_amount: { currency_code: 'USD', value: '100.00' },
+        disputed_transactions: [{ seller_transaction_id: PAYPAL.captureId }],
+        allowed_response_options: { accept_claim: { accept_claim_types: ['REFUND'] } },
+        links: [{ rel: 'accept-claim', method: 'POST', href: `${SANDBOX_BASE}${D}/accept-claim` }],
+      }),
+      disputeResponse({
+        status: 'RESOLVED',
+        dispute_outcome: {
+          outcome_code: 'RESOLVED_BUYER_FAVOUR',
+          amount_refunded: { currency_code: 'USD', value: '100.00' },
+        },
+      }),
+    ],
+    [`POST ${D}/accept-claim`]: over.timeout
+      ? { throws: new Error('socket lost after submission') }
+      : linksResponse(),
+    [`GET /v2/checkout/orders/${PAYPAL.orderId}`]: [
+      { body: orderBody(false) },
+      { body: orderBody(!over.ambiguous) },
+    ],
+    [`GET /v2/payments/refunds/${PAYPAL.refundId}`]: {
+      body: {
+        id: PAYPAL.refundId,
+        status: 'COMPLETED',
+        amount: { currency_code: 'USD', value: '100.00' },
+        links: [
+          {
+            rel: 'up',
+            href: `${SANDBOX_BASE}/v2/payments/captures/${PAYPAL.captureId}`,
+            method: 'GET',
+          },
+        ],
+      },
+    },
+  })
+  const world = createInMemoryOrderWorld()
+  world.rows.orders.set(ORDER_ID, orderRow())
+  world.rows.captures.set(CAPTURE_ID, captureRow({ amount_minor: 20_000n }))
+  world.rows.disputes.set(
+    DISPUTE_ID,
+    disputeRow({ reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED', amount_minor: 10_000n }),
+  )
+  const orderDeps = { ...ordersHarness().deps, clock: CLOCK, store: world.store, paypal: h.client }
+  const adapter = defenderRefundsFromOrders(orderDeps, h.client)
+  const portCalls: Parameters<FileDeps['refunds']['refund']>[0][] = []
+  const deps: FileDeps = {
+    ...h.deps,
+    refunds: {
+      refund: async (input) => {
+        portCalls.push(input)
+        return adapter.refund(input)
+      },
+    },
+  }
+  return { h, world, deps, portCalls, adapter }
+}
+
+describe('EC-REF-4 / EC-IDEM-4: QA-orders-1 and QA-orders-2 land together', () => {
+  it('EC-REF-4: QA-orders-1 REFUND posture resolves an open dispute through accept-claim', async () => {
+    const t = disputeRefundHarness()
+    const result = await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.decision.ruleId).toBe('R-INR-1')
+    expect(result.value.refund?.status).toBe('COMPLETED')
+    expect(result.value.refund?.paypalRefundId).toBe(PAYPAL.refundId)
+    expect(t.h.paypal.callsTo('/accept-claim')).toHaveLength(1)
+    expect(t.h.paypal.callsTo('/captures/')).toHaveLength(0)
+    expect(t.world.rows.captures.get(CAPTURE_ID)?.refunded_minor).toBe(10_000n)
+    expect(t.h.world.rows.disputes.get(DISPUTE_ID)?.defense_state).toBe('CLOSED_REFUNDED')
+  })
+
+  it('EC-IDEM-4: QA-orders-2 two fileDispute runs pay the $100 claim exactly once', async () => {
+    const t = disputeRefundHarness()
+    const first = await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    const second = await fileDispute(DISPUTE_ID, { ...t.deps }, MERCHANT_CLICK)
+    expect(first.ok && second.ok).toBe(true)
+    expect(t.portCalls).toHaveLength(1)
+    expect(t.portCalls[0]?.amount).toEqual({ minor: 10_000n, currency: 'USD' })
+    expect(t.h.paypal.callsTo('/accept-claim')).toHaveLength(1)
+    expect(t.world.rows.refunds.size).toBe(1)
+    if (second.ok) expect(second.value.alreadyFiled).toBe(true)
+  })
+
+  it('EC-REF-1: a $100 partial claim on a $200 capture refunds $100', async () => {
+    const t = disputeRefundHarness()
+    await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    expect(t.world.rows.captures.get(CAPTURE_ID)?.amount_minor).toBe(20_000n)
+    expect(t.world.rows.captures.get(CAPTURE_ID)?.refunded_minor).toBe(10_000n)
+    expect([...t.world.rows.refunds.values()][0]?.amount_minor).toBe(10_000n)
+    const body = t.h.paypal.bodyOf<Record<string, unknown>>('/accept-claim')
+    expect(body).toEqual({ accept_claim_type: 'REFUND' }) // full claim, not full capture, per PayPal
+  })
+
+  it('EC-IDEM-4: a changed payload for the same dispute is clearly refused without another refund', async () => {
+    const t = disputeRefundHarness()
+    await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    const row = t.h.world.rows.disputes.get(DISPUTE_ID)
+    if (!row) throw new Error('missing test dispute')
+    t.h.world.rows.disputes.set(DISPUTE_ID, {
+      ...row,
+      amount_minor: 15_000n,
+      raw: { changed: true },
+    })
+    const second = await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    expect(second.ok).toBe(true)
+    if (second.ok) {
+      expect(second.value.refusal?.reason).toContain('different claim payload')
+      expect(second.value.awaitingHuman).toBe(true)
+    }
+    expect(t.portCalls).toHaveLength(1)
+    expect(t.h.paypal.callsTo('/accept-claim')).toHaveLength(1)
+    const changedOrdersCall = await t.adapter.refund({
+      ...t.portCalls[0]!,
+      amount: { minor: 15_000n, currency: 'USD' },
+      idempotencyKey: disputeRefundKey(DISPUTE_ID, { minor: 15_000n, currency: 'USD' }),
+    })
+    expect(changedOrdersCall.ok).toBe(false)
+    if (!changedOrdersCall.ok) expect(changedOrdersCall.error.code).toBe('CS_CONFLICT')
+  })
+
+  it('EC-IDEM-5: stable dispute refund request id is deterministic and asserted on the wire', async () => {
+    const t = disputeRefundHarness()
+    await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    const amount = { minor: 10_000n, currency: 'USD' } as const
+    expect(t.portCalls[0]?.idempotencyKey).toBe(`cs:${DISPUTE_ID}:refund:10000:USD`)
+    expect(disputeRefundRequestId(DISPUTE_ID, amount)).toBe(
+      disputeRefundRequestId(DISPUTE_ID, { ...amount }),
+    )
+    expect(disputeRefundRequestId(DISPUTE_ID, amount)).not.toBe(
+      disputeRefundRequestId(DISPUTE_ID, { minor: 10_001n, currency: 'USD' }),
+    )
+    expect(t.h.paypal.requestIdOf('/accept-claim')).toBe(disputeRefundRequestId(DISPUTE_ID, amount))
+    expect(t.h.world.rows.actions.has(disputeRefundRequestId(DISPUTE_ID, amount))).toBe(true)
+    const retry = await t.adapter.refund(t.portCalls[0]!)
+    expect(retry.ok).toBe(true)
+    expect(t.h.paypal.callsTo('/accept-claim')).toHaveLength(1)
+  })
+
+  it('EC-IDEM-4: concurrent jobs acquire one durable refund intent before the port', async () => {
+    const t = disputeRefundHarness()
+    await Promise.all([
+      fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK),
+      fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK),
+    ])
+    expect(t.portCalls).toHaveLength(1)
+    expect(t.h.paypal.callsTo('/accept-claim')).toHaveLength(1)
+  })
+
+  it('EC-REF-3: missing refund read-back stays PENDING and retries make no second payment', async () => {
+    const t = disputeRefundHarness({ ambiguous: true })
+    const first = await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    expect(first.ok).toBe(true)
+    if (first.ok) {
+      expect(first.value.refund?.status).toBe('PENDING')
+      expect(first.value.refund?.paypalRefundId).toBeUndefined()
+      expect(first.value.awaitingHuman).toBe(true)
+    }
+    expect(t.h.world.rows.disputes.get(DISPUTE_ID)?.defense_state).not.toBe('CLOSED_REFUNDED')
+    await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    expect(t.portCalls).toHaveLength(1)
+    expect(t.h.paypal.callsTo('/accept-claim')).toHaveLength(1)
+  })
+
+  it('EC-IDEM-3: a lost accept-claim response retains the reservation and is never blindly retried', async () => {
+    const t = disputeRefundHarness({ timeout: true })
+    const first = await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    expect(first.ok).toBe(true)
+    if (first.ok) {
+      expect(first.value.awaitingHuman).toBe(true)
+      expect(first.value.refusal?.manual).toBe(true)
+    }
+    await fileDispute(DISPUTE_ID, t.deps, MERCHANT_CLICK)
+    expect(t.portCalls).toHaveLength(1)
+    expect(t.h.paypal.callsTo('/accept-claim')).toHaveLength(1)
+    expect([...t.world.rows.refunds.values()][0]?.status).toBe('PENDING')
   })
 })

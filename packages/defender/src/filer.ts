@@ -114,7 +114,7 @@
  *
  * `dispute_actions.action` has **no `REFUND` member** (§7.2's enum is `FILE|OFFER|ACCEPT|MESSAGE|APPEAL|
  * ACK_RETURN|SUPPORTING_INFO|ESCALATE`), so a `REFUND` disposition records `ACCEPT` — the claim stood, we did
- * not fight it — with `request.paypal_call = 'refundCapture'`, `disposition = 'REFUND'` and
+ * not fight it — with `request.paypal_call = 'acceptClaim'`, `disposition = 'REFUND'` and
  * `response.paypal_refund_id` carrying the id. Adding a `REFUND` member is a `packages/db` change and
  * therefore not this work package's to make (AGENTS.md rule 8); it is recorded in `README-FILER.md`.
  *
@@ -279,9 +279,8 @@ export type EvidenceUploadPermit =
  * `POST /v1/customer/disputes/{id}/{action}` per disposition, and `null` where there is no PayPal call.
  *
  * This is the table §18 question 31 asks about, in the form the filer consumes: **a posture routes to its own
- * endpoint or to none.** `REFUND` maps to a *payments* refund rather than a dispute endpoint, because that is
- * what §8.15's R-INR-1 / R-SNAD-AGENT rows mean by "→ REFUND": pay the buyer, on the capture, through
- * `packages/orders`.
+ * endpoint or to none.** `REFUND` resolves the case through `accept-claim`, with the exact claim reserved
+ * and accounted for by `packages/orders`. EC-REF-4 continues to block direct capture refunds.
  */
 export const POSTURE_DISPOSITION: Readonly<
   Record<Posture, { readonly action: DisputeActionName | null; readonly endpoint: string | null }>
@@ -291,7 +290,7 @@ export const POSTURE_DISPOSITION: Readonly<
   ACCEPT_CLAIM: { action: 'ACCEPT', endpoint: '/v1/customer/disputes/{id}/accept-claim' },
   MESSAGE_ONLY: { action: 'MESSAGE', endpoint: '/v1/customer/disputes/{id}/send-message' },
   OFFER: { action: 'OFFER', endpoint: '/v1/customer/disputes/{id}/make-offer' },
-  REFUND: { action: 'ACCEPT', endpoint: '/v2/payments/captures/{id}/refund' },
+  REFUND: { action: 'ACCEPT', endpoint: '/v1/customer/disputes/{id}/accept-claim' },
   REVIEW: { action: null, endpoint: null },
 })
 
@@ -589,8 +588,10 @@ export interface FileOutcome {
   /** The `REFUND` disposition's result, straight off `DefenderRefunds`. */
   readonly refund?: {
     readonly refundId: string
-    readonly paypalRefundId: string
+    readonly paypalRefundId?: string
     readonly amount: Money
+    readonly status?: 'PENDING' | 'COMPLETED'
+    readonly requestId?: string
   }
   /** EC-DSP-1's `refund_ids`, whether or not a proof packet went out. */
   readonly proofOfRefund?: {
@@ -783,6 +784,38 @@ export async function fileDispute(
     warnings: [],
   }
 
+  // A durable intent is checked for EVERY posture: a changed body may change the router's posture.
+  const claimed = await deps.store.actions.findByIdempotencyKey(refundClaimKey(row.id))
+  if (!claimed.ok) return claimed
+  if (claimed.value) {
+    const request = claimed.value.request as Record<string, unknown> | null
+    const changed =
+      request?.['refund_amount_minor'] !== row.amount_minor.toString() ||
+      request?.['refund_currency'] !== row.currency ||
+      request?.['capture_id'] !== row.capture_id ||
+      request?.['paypal_dispute_id'] !== row.paypal_dispute_id
+    return finish(run, {
+      disposition: 'REFUND',
+      filed: false,
+      alreadyFiled: true,
+      awaitingApproval: false,
+      awaitingHuman: changed || row.defense_state !== 'CLOSED_REFUNDED',
+      ...(changed || row.defense_state !== 'CLOSED_REFUNDED'
+        ? {
+            refusal: {
+              code: 'DEF_WRONG_STATE' as const,
+              reason: changed
+                ? 'This dispute refund is bound to a different claim payload; no second payment is permitted.'
+                : 'This dispute refund was already reserved. Reconcile its result before taking further action.',
+              manual: true,
+              userMessage: 'A refund was already submitted for this dispute. Review its status.',
+            },
+          }
+        : {}),
+      logLine: 'EC-IDEM-4: existing dispute refund intent; no money call',
+    })
+  }
+
   // --- 1b. EC-DSP-11 ------------------------------------------------------------------------------
   const withdrawal = withdrawalRefusal(buyerWithdrew(row.raw))
   if (withdrawal !== null) {
@@ -923,6 +956,10 @@ export async function fileDispute(
 }
 
 /** Which disposition a posture means. Derived from {@link POSTURE_DISPOSITION} so there is one table. */
+function refundClaimKey(disputeId: string): string {
+  return `cs:${disputeId}:refund:claim`
+}
+
 function dispositionFor(decision: LiabilityDecision): Disposition {
   switch (decision.posture) {
     case 'CONTEST':
@@ -1088,12 +1125,34 @@ async function dispatchRefund(run: Run, actor: string): Promise<Result<FileOutco
   }
 
   const amount: Money = { minor: run.row.amount_minor, currency: run.row.currency }
+  const idempotencyKey = `cs:${run.row.id}:refund:${amount.minor}:${amount.currency}`
+  // UNIQUE dispute-only claim key closes concurrent jobs and changed-body retries BEFORE the port.
+  const claimed = await run.deps.store.actions.record({
+    id: derivedActionId(refundClaimKey(run.row.id)),
+    dispute_id: run.row.id,
+    action: 'ACCEPT',
+    request: {
+      disposition: 'REFUND',
+      refund_amount_minor: amount.minor.toString(),
+      refund_currency: amount.currency,
+      capture_id: run.row.capture_id,
+      paypal_dispute_id: run.row.paypal_dispute_id,
+      refund_idempotency_key: idempotencyKey,
+    },
+    response: { refund_reserved: true, paypal_call: 'unknown' },
+    actor,
+    idempotency_key: refundClaimKey(run.row.id),
+    at: run.at,
+  })
+  if (!claimed.ok) return claimed
   const result = await run.deps.refunds.refund({
     captureId,
     amount,
     reason: `Dispute ${run.row.paypal_dispute_id}: rule ${run.decision.ruleId} decided ${run.decision.posture}.`,
     actor,
     disputeId: run.row.id,
+    paypalDisputeId: run.row.paypal_dispute_id,
+    idempotencyKey,
     ruleId: run.decision.ruleId,
   })
   if (!result.ok) {
@@ -1102,18 +1161,20 @@ async function dispatchRefund(run: Run, actor: string): Promise<Result<FileOutco
       filed: false,
       alreadyFiled: false,
       awaitingApproval: false,
-      awaitingHuman: false,
+      awaitingHuman: true,
       actor,
       token,
-      refusal: refusalFromError(result.error),
+      refusal: { ...refusalFromError(result.error), manual: true },
       logLine: `REFUND refused: ${result.error.code}`,
     })
   }
-  run.paypalCalls.push('refundCapture')
+  if (result.value.paypalCall) run.paypalCalls.push(result.value.paypalCall)
+  else if (result.value.status === undefined) run.paypalCalls.push('acceptClaim')
 
+  const completed = result.value.status !== 'PENDING' && result.value.paypalRefundId !== undefined
   const defense = await run.deps.store.disputes.setDefenseState(
     run.row.id,
-    'CLOSED_REFUNDED',
+    completed ? 'CLOSED_REFUNDED' : run.row.defense_state,
     run.at,
   )
   if (!defense.ok) return defense
@@ -1123,15 +1184,21 @@ async function dispatchRefund(run: Run, actor: string): Promise<Result<FileOutco
     filed: false,
     alreadyFiled: false,
     awaitingApproval: false,
-    awaitingHuman: false,
+    awaitingHuman: !completed,
     actor,
     token,
     refund: {
       refundId: result.value.refundId,
-      paypalRefundId: result.value.paypalRefundId,
+      ...(result.value.paypalRefundId === undefined
+        ? {}
+        : { paypalRefundId: result.value.paypalRefundId }),
+      ...(result.value.status === undefined ? {} : { status: result.value.status }),
+      ...(result.value.requestId === undefined ? {} : { requestId: result.value.requestId }),
       amount: result.value.amount,
     },
-    logLine: `REFUND sent: PayPal refund ${result.value.paypalRefundId}`,
+    logLine: completed
+      ? `REFUND completed: PayPal refund ${result.value.paypalRefundId}`
+      : 'Dispute refund accepted; refund read-back pending reconciliation',
   })
 }
 
@@ -1561,7 +1628,8 @@ async function finish(run: Run, done: Done): Promise<Result<FileOutcome, CsError
   let actionRow: FileOutcome['actionRow']
 
   if (actionName !== null && done.token !== undefined) {
-    const baseKey = disputeActionRequestId(row.id, done.token, done.version ?? 1)
+    const baseKey =
+      done.refund?.requestId ?? disputeActionRequestId(row.id, done.token, done.version ?? 1)
     const sent = done.filed || paypalCalls.length > 0
     const key = sent ? baseKey : `${baseKey}:nofile`
     const recorded = await deps.store.actions.record({
@@ -1671,7 +1739,7 @@ function requestBodyOf(
     ...(done.refund === undefined
       ? {}
       : {
-          paypal_call: 'refundCapture',
+          paypal_call: paypalCalls[0] ?? 'none',
           refund_amount_minor: done.refund.amount.minor.toString(),
           refund_currency: done.refund.amount.currency,
         }),

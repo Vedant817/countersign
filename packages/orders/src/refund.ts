@@ -56,6 +56,7 @@ import { refundRequestId } from '@countersign/paypal'
 
 import { deterministicIds, toJsonValue } from './deps'
 import type { Actor, OrdersDeps, RefundReport, RefundReason } from './types'
+import { reserveRefund } from './refund-reservation'
 
 /**
  * `amount` is either an exact amount or `'FULL'`.
@@ -177,50 +178,28 @@ async function refundInternal(
     return err(disputeBlocked(dispute.value.paypal_dispute_id, row))
   }
 
-  const refundable = refundableMinor(row)
-  const requested = resolveAmount(input.amount, refundable, row.currency)
-  if (requested === null) {
-    return err(overRefund(row, refundable, input.amount))
-  }
-
   const refundId = deterministicIds.refund(input.idempotencyKey, deps.clock.nowMs()) as RefundRowId
-
-  // A repeated call with the same idempotency key is the same refund row, so the second call returns the
-  // first one's result instead of paying twice (EC-IDEM-5).
-  const existing = await findRefundByRequestId(deps, input.captureId, refundId)
-  if (existing) {
+  const reserved = await reserveRefund(
+    {
+      captureId: input.captureId,
+      refundId,
+      amount: input.amount,
+      reason: input.reason,
+      actor: input.initiatedBy,
+    },
+    deps,
+  )
+  if (!reserved.ok) return reserved
+  const requestId = refundRequestId(input.captureId, refundId)
+  if (!reserved.value.created) {
     return ok({
-      refund: existing,
-      capture: row,
-      refundableAfter: refundableMinor(row),
-      requestId: refundRequestId(input.captureId, refundId),
+      refund: reserved.value.refund,
+      capture: reserved.value.capture,
+      refundableAfter: refundableMinor(reserved.value.capture),
+      requestId,
     })
   }
-
-  const requestId = refundRequestId(input.captureId, refundId)
-
-  // The row first. `repos/orders.ts::createRefund` documents this ordering: a crash between the call and the
-  // write must leave a PENDING row the job can find, never a money movement with no record.
-  const inserted = await deps.store.refunds.insert({
-    id: refundId,
-    capture_id: row.id,
-    // Provisional, then replaced by the real id. `paypal_refund_id` is NOT NULL with a unique index, and a
-    // placeholder that cannot collide with a PayPal id (lowercase `pending:` prefix) is what lets the row
-    // exist before the call.
-    paypal_refund_id: `${PENDING_REFUND_PREFIX}${refundId}`,
-    amount_minor: requested.minor,
-    currency: row.currency,
-    status: 'PENDING',
-    // `reason_code` is **our** vocabulary, not a PayPal field: the refund request carries no reason (audit
-    // §15), so this is what the receipt and the evidence packet read. See `REFUND_REASONS`.
-    reason_code: input.reason,
-    initiated_by: input.initiatedBy.initiatedBy,
-    ...(input.initiatedBy.actor !== undefined ? { actor: input.initiatedBy.actor } : {}),
-    ...(input.initiatedBy.note !== undefined ? { note: input.initiatedBy.note } : {}),
-    created_at: at,
-    updated_at: at,
-  })
-  if (!inserted.ok) return inserted
+  const requested: Money = { minor: reserved.value.refund.amount_minor, currency: row.currency }
 
   const refunded = await deps.paypal.refundCapture(
     input.captureId,
@@ -270,7 +249,7 @@ async function refundInternal(
     refundId,
     status,
     paypalRefund.id,
-    toJsonValue(paypalRefund),
+    toJsonValue({ ...paypalRefund, cs_capture_applied: true }),
   )
   if (!stamped.ok) return stamped
 
@@ -427,38 +406,6 @@ export function refundableMinor(
   return remaining < 0n ? 0n : remaining
 }
 
-/** EC-REF-5: the last refund takes the exact remainder, so the total is exact to the cent. */
-function resolveAmount(
-  requested: RefundAmount,
-  refundable: bigint,
-  currency: CaptureRow['currency'],
-): Money | null {
-  if (requested === 'FULL') return { minor: refundable, currency }
-  if (requested.currency !== currency) return null
-  if (requested.minor > refundable) return null
-  if (requested.minor <= 0n) return null
-  return requested
-}
-
-/** AT-M11.4's refusal: local, exact, and with no HTTP request behind it. */
-function overRefund(capture: CaptureRow, refundable: bigint, requested: RefundAmount): CsError {
-  const asked = requested === 'FULL' ? capture.amount_minor : requested.minor
-  return csError(
-    'CS_VALIDATION',
-    `Refund of ${asked} exceeds the refundable remainder of capture ${capture.id} (${refundable} left)`,
-    {
-      table: 'captures',
-      captureId: capture.id,
-      requestedMinor: asked.toString(),
-      remainingMinor: refundable.toString(),
-      currency: capture.currency,
-      ec: 'EC-REF-2',
-      paypalCalled: false,
-    },
-    { userMessage: `Only ${refundable} remains refundable.` },
-  )
-}
-
 /** EC-REF-4's refusal, naming the two endpoints that do work. */
 function disputeBlocked(paypalDisputeId: string, capture: CaptureRow): CsError {
   const base = `/v1/customer/disputes/${paypalDisputeId}`
@@ -479,19 +426,6 @@ function refundStatusFor(status: string | undefined): RefundRow['status'] {
   if (status === 'PENDING') return 'PENDING'
   if (status === 'FAILED') return 'FAILED'
   return 'COMPLETED'
-}
-
-/** Find an existing refund row by its request id's `refundId` slot. */
-async function findRefundByRequestId(
-  deps: OrdersDeps,
-  captureId: string,
-  refundId: string,
-): Promise<RefundRow | null> {
-  const capture = await deps.store.captures.findByPaypalId(captureId)
-  if (!capture.ok || !capture.value) return null
-  const rows = await deps.store.refunds.findByCapture(capture.value.id)
-  if (!rows.ok) return null
-  return rows.value.find((r) => r.id === refundId) ?? null
 }
 
 /**
