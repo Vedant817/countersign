@@ -85,8 +85,6 @@ import {
   type DisclosedConstraints,
 } from './signed-constraints'
 import { PAYMENT_SOURCE, readSignedPayment } from './signed-payment'
-import { CHECKOUT_SOURCE, readSignedCheckout } from './signed-checkout'
-import { deriveL3ReplayId } from './replay-id'
 
 /* ------------------------------------------------------------------------------------------ */
 /* The table, as data                                                                             */
@@ -189,8 +187,6 @@ export interface CheckState {
   signedConstraints: DisclosedConstraints
   /** vi's resolved signed token, from VerifyResponse.disclosed.l3a in check 4 (D-038). */
   disclosedL3a: Record<string, unknown> | null
-  /** vi's resolved L3b checkout mandate, from the same verification response as L3a. */
-  disclosedL3b: Record<string, unknown> | null
 }
 
 export interface CheckStateMandate {
@@ -696,7 +692,6 @@ export async function check4ChainVerify(ctx: CheckContext): Promise<CheckResult>
   // budget we now enforce", and that has to survive a chain-invalid verdict too.
   ctx.state.signedConstraints = disclosedConstraints(report.disclosed?.l2)
   ctx.state.disclosedL3a = report.disclosed?.l3a ?? null
-  ctx.state.disclosedL3b = report.disclosed?.l3b ?? null
 
   if (!report.chain_valid) {
     return fail(
@@ -989,15 +984,17 @@ export async function check5CheckoutBinding(ctx: CheckContext): Promise<CheckRes
   ctx.state.l3b = l3b.ok ? l3b.claims : null
   if (!l3b.ok) return fail(5, chainInvalid(`L3b is not a compact JWS: ${l3b.error}`))
 
-  const binding = readSignedCheckout(ctx.state.disclosedL3b)
-  if (!binding.found) {
-    return missing(5, `${binding.why}; session ${session.id} locked ${session.checkout_hash ?? '(absent)'}`)
+  if (typeof l3b.claims.checkout_hash !== 'string' || l3b.claims.checkout_hash.length === 0) {
+    return fail(
+      5,
+      chainInvalid(`L3b carries no checkout_hash claim, so it is not bound to any cart`),
+    )
   }
-  if (!session.checkout_hash || binding.checkoutHash !== session.checkout_hash) {
+  if (l3b.claims.checkout_hash !== session.checkout_hash) {
     return fail(
       5,
       chainInvalid(
-        `L3b binds checkout_hash ${binding.checkoutHash} but session ${session.id} locked ${session.checkout_hash || '(absent)'}`,
+        `L3b binds checkout_hash ${l3b.claims.checkout_hash} but session ${session.id} locked ${session.checkout_hash}`,
       ),
     )
   }
@@ -1013,7 +1010,7 @@ export async function check5CheckoutBinding(ctx: CheckContext): Promise<CheckRes
   }
   return pass(
     5,
-    `bound to session ${session.id} via ${CHECKOUT_SOURCE}, merchant kid ${decoded.kid}, signed payee ${payment.payeeId}`,
+    `bound to session ${session.id}, merchant kid ${decoded.kid}, signed payee ${payment.payeeId}`,
   )
 }
 
@@ -1130,9 +1127,13 @@ export async function check7Replay(ctx: CheckContext): Promise<CheckResult> {
     l3a = decoded.claims
     ctx.state.l3a = l3a
   }
-  const replayId = deriveL3ReplayId(ctx.input.l3a)
-  if (!replayId.ok) return fail(7, replayId.error)
-  const jti = replayId.value
+  const jti = typeof l3a.jti === 'string' ? l3a.jti : null
+  if (jti === null) {
+    return fail(
+      7,
+      chainInvalid('L3a carries no jti, so this authorisation cannot be replay-protected'),
+    )
+  }
 
   const row: NewAttemptForGate = {
     id: ctx.input.attemptId,
