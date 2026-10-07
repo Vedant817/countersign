@@ -53,6 +53,7 @@ import {
   type GateInput,
   type GateJwks,
   type InMemoryGateWorld,
+  type InMemoryGateWorldSeed,
   type MerchantKeySet,
 } from '@countersign/gate'
 import { PayPalClient } from '@countersign/paypal'
@@ -559,11 +560,17 @@ export function compiledWithAmbiguity(): CompiledMandate {
 /* 7. The harness                                                                                  */
 /* ============================================================================================ */
 
+type HarnessVerifyOptions = Omit<NonNullable<InMemoryGateWorldSeed['verify']>, 'disclosed'> & {
+  readonly disclosed?: Partial<NonNullable<InMemoryGateWorldSeed['verify']>['disclosed']>
+}
+
 export interface HarnessOptions {
   /** Which outcome the Gate should reach. `REVIEW` is velocity's, so it needs six recent attempts. */
   readonly gateOutcome?: 'ALLOW' | 'BLOCK' | 'REVIEW'
   /** Flip exactly one thing so a BLOCK test can name the check it broke. */
   readonly mandateStatus?: 'ACTIVE' | 'REVOKED' | 'SUSPENDED'
+  /** vi's response, including disclosures resolved from the supplied signed chain. */
+  readonly verify?: HarnessVerifyOptions
   readonly routes?: Routes
   readonly nowSec?: number
   /** The compiled mandate the scripted compiler returns. Defaults to a clean one. */
@@ -627,6 +634,7 @@ export async function harness(options: HarnessOptions = {}): Promise<Harness> {
   const now = new Date(nowSec * 1000)
   const k = await keys()
   const outcome = options.gateOutcome ?? 'ALLOW'
+  const { disclosed: verifyDisclosed, ...verifyOverrides } = options.verify ?? {}
 
   const products: ProductRow[] = [
     {
@@ -683,6 +691,28 @@ export async function harness(options: HarnessOptions = {}): Promise<Harness> {
     // A **real** signature over the decision record, so the I-1 assertion verifies it instead of decoding it
     // and trusting the decode.
     signRecord: recordSigner(k.gate.key, GATE_KID),
+    verify: {
+      ...verifyOverrides,
+      disclosed: {
+        l1: {},
+        l2: {
+          delegate_payload: [{ vct: 'mandate.payment.1', constraints: [] }],
+        },
+        l3a: {
+          delegate_payload: [
+            {
+              vct: 'mandate.payment.1',
+              payment_amount: { amount: CART_MINOR.toString(), currency: 'USD' },
+              payee: { id: MERCHANT_ID },
+            },
+          ],
+        },
+        l3b: {
+          delegate_payload: [{ vct: 'mandate.checkout.1', checkout_hash: CHECKOUT_HASH }],
+        },
+        ...verifyDisclosed,
+      },
+    },
     ...(outcome === 'REVIEW' ? { attempts: recentAttempts(nowSec) } : {}),
   })
 
