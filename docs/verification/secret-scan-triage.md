@@ -96,9 +96,15 @@ The Gate and VI JWK rules also check private JWK members `d`, `p`, `q`, `dp`, `d
 the PEM rule remains limited to private-key PEM markers. The legitimate-value check was performed
 with temporary, non-secret examples outside the repository.
 
+Each of the seven rule groups (eight rule IDs) also fired on its corresponding synthetic secret
+vector. `pnpm secret-scan` exits 1 with an installation message when Gitleaks is missing; a planted
+fake `SESSION_SECRET` was caught with exit 1. Gitleaks is not a project dependency; it was installed
+via winget for verification.
+
 ## Final scan
 
 `pnpm secret-scan` passes: 0 working-tree findings and 0 history findings. This is not a blanket
 clean bill for every future change: the scan remains active outside the 16 exact allowlisted files,
-but is quiet for all rules inside them. Review those paths before adding credentials or new fixture
-data.
+but is quiet for all rules inside them. A credential later added to one of these files would evade
+detection until its exception is reviewed. Review those paths before adding credentials or new
+fixture data.
