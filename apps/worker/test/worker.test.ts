@@ -36,8 +36,18 @@ describe('startWorker — boot', () => {
     expect(boss.worked).toHaveLength(7)
     expect(boss.scheduled).toHaveLength(1)
     expect(boss.started).toBe(1)
-    // `start()` last: pg-boss begins polling on it, so a handler registered afterwards races the first fetch.
-    expect(boss.order.at(-1)).toBe('start')
+    // `start()` FIRST, and this assertion used to say the opposite.
+    //
+    // The old comment read "`start()` last: pg-boss begins polling on it, so a handler registered
+    // afterwards races the first fetch." That reasoning does not survive contact with pg-boss 12:
+    // **both** `work()` and `schedule()` need an open connection, and `boss.schedule()` rejects with
+    // `Database connection is not opened` before `start()`. The order this test asserted therefore
+    // could not boot at all — and the fake boss never reproduced the rejection, so the test was
+    // asserting that a broken sequence works.
+    //
+    // This is the D-034 pattern once more: the test encoded a property the real dependency never had.
+    // The fake below now rejects `schedule()` before `start()`, which is what pg-boss does.
+    expect(boss.order[0]).toBe('start')
     expect(started.value.registration.errors).toHaveLength(0)
     expect(lines.filter((l) => l.msg === 'worker started')).toHaveLength(1)
   })
@@ -76,7 +86,13 @@ describe('startWorker — boot', () => {
     expect(started.error.code).toBe('CS_INTERNAL')
     // And it says which job, because "the five-minute sweep is not running" is the diagnosis.
     expect(lines.some((l) => l.msg === 'worker registration incomplete')).toBe(true)
-    expect(boss.started).toBe(0)
+    // This used to assert `boss.started === 0`, which was the old boot order's whole point: nothing
+    // was started until every registration had succeeded. Now `start()` comes first — pg-boss 12
+    // refuses `schedule()` without a connection — so the queue *is* running when registration fails,
+    // and the obligation is inverted: the boot must **stop** it rather than leave a half-wired
+    // worker polling. A queue left started is the failure this test exists to prevent.
+    expect(boss.started).toBe(1)
+    expect(boss.stopped).toBe(1)
   })
 
   it('WORKER-1 a queue that will not start is a retryable failure, so a supervisor restarts us', async () => {

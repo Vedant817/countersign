@@ -629,6 +629,24 @@ export async function check3DeviceActive(ctx: CheckContext): Promise<CheckResult
  * only be *reported*. {@link chainTokens} turns each absence into a `VI_CHAIN_INVALID` whose message says
  * which column or lookup came back empty, so an operator sees "the L2 is missing from `mandates`" rather
  * than a validation error about a field that is never populated.
+ *
+ * ### The checkout JWT is part of the chain, so the session is loaded here
+ *
+ * `checkout_jwt` is the price lock the L3b commits to, and `/v1/verify` needs it: `apps/vi`'s
+ * `_constraints` evaluates the **checkout-side** constraints against the cart in that JWT, and with
+ * `checkout_jwt: null` it answers `satisfied: false` with the violation *"Checkout constraints could not
+ * be enforced: no checkout_jwt was supplied"*. So `chain_valid` comes back `false` on every real request
+ * and this check fails every time — a second, independent blocker on the same path, found only by
+ * driving a live service.
+ *
+ * It was null because this check read `ctx.state.checkout`, which nothing populates until check 5. Calling
+ * {@link loadSession} costs **no extra query**: it memoises, and checks 5, 6, 7 and 10 all read the same
+ * row through it. Twelve checks still cost one session read.
+ *
+ * An absent session is not fatal here. `null` is the honest value for "we have no price lock to present",
+ * check 5 is the check that reports it, and this check's own verdict about the chain is unaffected — vi
+ * answers `chain_valid: false` with the reason, which is the truthful answer for a chain that omits its
+ * price lock.
  */
 export async function check4ChainVerify(ctx: CheckContext): Promise<CheckResult> {
   const mandate = ctx.state.mandate
@@ -644,12 +662,19 @@ export async function check4ChainVerify(ctx: CheckContext): Promise<CheckResult>
   const tokens = await chainTokens(ctx)
   if (!tokens.ok) return fail(4, tokens.error, `cannot verify the chain: ${tokens.error.message}`)
 
+  // The price lock is part of the chain. Read through the memoising `loadSession`, so checks 5, 6, 7 and
+  // 10 still share one query rather than this adding a fifth.
+  const session = await loadSession(ctx)
+
   const request = {
     l1: tokens.value.l1,
     l2: tokens.value.l2,
     l3a: ctx.input.l3a,
     l3b: ctx.input.l3b,
-    checkout_jwt: ctx.state.checkout?.checkout_jwt ?? null,
+    // `null` when there is no session, which is the honest value: `verifyRequestSchema` allows it, and vi
+    // answers `chain_valid: false` naming the missing price lock. Check 5 is the check that reports an
+    // absent cart, and it does so from the same memoised row.
+    checkout_jwt: session?.checkout_jwt ?? null,
     strict: true,
   }
   const verified = await ctx.deps.verify(request)

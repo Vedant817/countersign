@@ -385,27 +385,37 @@ describe('the merchant key set (check 5)', () => {
         kid: 'issuer-1',
         role: 'ISSUER',
         status: 'ACTIVE',
-        public_jwk: { kty: 'OKP', crv: 'Ed25519', x: 'a' },
+        kty: 'OKP',
+        crv: 'Ed25519',
+        x: 'a',
       },
       {
         kid: 'merchant-new',
         role: 'MERCHANT',
         status: 'ACTIVE',
-        public_jwk: { kty: 'OKP', crv: 'Ed25519', x: 'b' },
+        kty: 'OKP',
+        crv: 'Ed25519',
+        x: 'b',
       },
       {
         kid: 'merchant-old',
         role: 'MERCHANT',
         status: 'RETIRED',
-        public_jwk: { kty: 'OKP', crv: 'Ed25519', x: 'c' },
+        kty: 'OKP',
+        crv: 'Ed25519',
+        x: 'c',
       },
       {
         kid: 'merchant-bad',
         role: 'MERCHANT',
         status: 'COMPROMISED',
-        public_jwk: { kty: 'OKP', crv: 'Ed25519', x: 'd' },
+        kty: 'OKP',
+        crv: 'Ed25519',
+        x: 'd',
       },
-      { kid: 'merchant-nokey', role: 'MERCHANT', status: 'ACTIVE', public_jwk: null },
+      // No key members at all. Still the "unusable entry" case the filter exists for, now in the
+      // shape `apps/vi` would actually produce for a malformed entry.
+      { kid: 'merchant-nokey', role: 'MERCHANT', status: 'ACTIVE' },
     ])
 
     expect(set.currentKid).toBe('merchant-new')

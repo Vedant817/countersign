@@ -357,23 +357,74 @@ JWT exists to prevent.
   returned a fabricated `disclosed.l2` alongside `chain_valid: true` would defeat this. That is a
   `GateDeps` wiring problem rather than a logic one — `deps.ts::gateDepsFromRepos` binds it to
   `ViClient.verify` — but it is the assumption the signed ceiling rests on.
-- **Check 4 cannot yet obtain a real verify response: it sends `l1: ''` and `l2: ''`.** `checks.ts`'s
-  `request` object hard-codes empty strings for both, while `verifyRequestSchema` declares them
-  `boundedString(...)` = `z.string().min(1)`. So `ViClient.verify` fails the **client-side** request
-  check and returns `err(CS_VALIDATION)` **without making a fetch at all**, and check 4 records
-  `verify call failed: CS_VALIDATION`.
+- ~~**Check 4 cannot yet obtain a real verify response: it sends `l1: ''` and `l2: ''`.**~~ **Fixed.**
+  `check4ChainVerify` used to hard-code empty strings for both, while `verifyRequestSchema` declares them
+  `boundedString(...)` = `z.string().min(1)`. So `ViClient.verify` failed the **client-side** request
+  check and returned `err(CS_VALIDATION)` **without making a fetch at all**. Every decision was `BLOCK`,
+  `disclosed.l2` was never read, and the D19 obligation gate never fired.
 
-  This is fail-closed and predates the D19 fix (it is in `27f3e12`, WP-10), and it is not what this file
-  is about — but it means **`disclosed.l2` is currently unreachable in production**, so the signed ceiling
-  is enforced against `budget_accounts.cap_minor` and `mandates.constraints` alone in every real
-  deployment. The D19 reader is correct and covered by a real capture; it simply never sees a live
-  response. Fixing it needs `mandates.l2_serialized` and `l1_credentials.sd_jwt`, which means a new
-  `GateDeps` port in `types.ts` plus its binding in `deps.ts` and a `CheckStateMandate` member — and
-  §8.10's `GateInput` carries no `l1`/`l2`, so this is a spec-shaped change rather than a local edit.
+  The tokens come from stored mandate state, as §8.10 intends: `l2` from `mandates.l2_serialized`, read
+  off the single mandate query check 1 already makes and carried on `CheckStateMandate.l2Serialized`; `l1`
+  from the new `GateDeps.findL1ForDeviceWallet(deviceId, walletId)` port, bound in `deps.ts` to
+  `repos/devices.ts::findL1ForDeviceWallet` (§7.2's unique index on `(device_id, wallet_id)` is what
+  makes the two-key lookup a lookup). `GateInput` is unchanged — it carries only the agent's own `l3a`
+  and `l3b`, which is correct: the other two are the buyer's device's.
 
-  **No test in this package can catch it**, because `deps.ts`'s in-memory world implements `verify`
-  without a request schema — the accepting-double hazard, reached from the other direction: the double is
-  not merely lenient about signatures, it never inspects the request at all.
+  Two absences are now explicit `VI_CHAIN_INVALID` BLOCKs naming **which** token is missing, rather than
+  an empty string sent to a schema that refuses it: `l2_serialized` empty → the column is named;
+  no `l1_credentials` row for the device×wallet → the lookup and both keys are named. Neither reaches
+  `/v1/verify`.
+
+  `test/chain-tokens.test.ts` is the regression test that could not have existed before: it runs a real
+  `ViClient` over a real socket, asserts **one fetch happened**, and asserts the bytes that left satisfy
+  `verifyRequestSchema` with non-empty `l1`/`l2` that are _this mandate's_ tokens. Separately, the
+  in-memory world's `verify` now runs `verifyRequestSchema` itself, so a malformed chain request fails
+  every gate test rather than none.
+
+## Proving it against a live vi-service
+
+`test/support/live-vi-proof.ts` is the companion to the unit tests, and it exists because the defect above
+was invisible to every one of them. Run it with:
+
+```
+pnpm --filter @countersign/gate exec tsx test/support/live-vi-proof.ts
+```
+
+It starts `apps/vi`'s real FastAPI app under uvicorn on `127.0.0.1:0`, drives **every signing route** over
+HTTP (`/v1/keys/agent` → `/v1/l1/issue` → `/v1/l2/prepare` → `/v1/l2/finalize` → `/v1/checkout-jwt` →
+`/v1/l3/create` → `POST /v1/verify`) through `test/support/live-vi-chain.py`, then runs the **production**
+`deps.ts::gateDepsFromRepos` binding — not `createInMemoryGateWorld` — through `evaluate`. So `deps.verify`,
+`deps.findL1ForDeviceWallet` and `deps.merchantKeys` are the real bindings over a real `ViClient`, and the
+only in-memory pieces are the Postgres repositories and the `BudgetStore`, because there is no database in
+a proof run.
+
+`fastapi.testclient` is deliberately not used: `TestClient` never listens, so a real `ViClient` cannot
+reach it, and the whole point is that the client's bytes leave the process. The harness counts fetches
+**per path**, because a single total cannot answer "did `/v1/verify` go out?" — and check 5 legitimately
+calls `GET /v1/jwks`.
+
+It exits non-zero on any failed assertion and prints an `OUTSTANDING` section naming every check still
+failing, so a green run cannot be read as "the whole Gate is healthy".
+
+## Two findings in this package, pinned rather than fixed
+
+Driving a live service surfaced two further defects, in **other** checks, with unrelated root causes. Both
+are pre-existing and both block every real decision, so neither is cosmetic — but each changes enforcement
+behaviour and needs its own decision record and tests, so this change does not fix them.
+
+1. **Check 5 cannot recognise a merchant key.** `decision-record.ts::merchantKeySetFromJwks` reads
+   `entry['public_jwk']`, but `apps/vi`'s `GET /v1/jwks` emits the JWK members **inline** (`kty`, `crv`,
+   `x`, `y`, `alg`, `use`) beside `role` and `status`. Every merchant entry is therefore dropped, so
+   `currentKid` is `''` and `acceptedKids` is empty — and a perfectly real `kid` is reported as "neither the
+   current nor a retired-but-valid merchant key".
+2. **Check 6 cannot read the L3a's amount.** `checks.ts::l3aAmount` reads top-level
+   `amount_minor`/`currency`/`payee_id`, but vi's real L3a carries them in `delegate_payload[1]` (vct
+   `mandate.payment.1`) as `payment_amount.{amount, currency}` and `payee.id`. The amount is unresolvable,
+   so checks 7, 8 and 9 report "no amount resolved by check 6" — they are collateral damage, not
+   independent failures.
+
+Either one alone would keep every decision a `BLOCK`. The proof reports them rather than asserting a full
+`ALLOW`, because it cannot produce one.
 
 ## A finding in `packages/db`, pinned rather than fixed
 

@@ -84,6 +84,17 @@ export interface PgBossLike {
   start(): Promise<unknown>
   stop(options?: { graceful?: boolean; timeout?: number }): Promise<unknown>
   send(name: string, data?: object | null, options?: PgBossSendOptions): Promise<string | null>
+  /**
+   * Create the queue if it does not exist. **Required by pg-boss 12 before `work()`** — a worker whose queue is
+   * missing fails on its first fetch with `Queue <name> does not exist`, and it fails as an **unhandled
+   * `error` event** on the boss rather than as a rejected promise, so it cannot be caught by the `try`/`catch`
+   * around `work()` and takes the process down with a stack trace.
+   *
+   * Optional on the port, and deliberately so: a double that predates pg-boss 12 has no such method, and this
+   * is a structural port rather than a promise about one library version. A port member that is absent is
+   * skipped, which is exactly right for a capability that only newer queues have.
+   */
+  createQueue?(name: string): Promise<unknown>
   work(
     name: string,
     options: PgBossWorkOptions,
@@ -121,6 +132,8 @@ export interface PgBossQueueOptions {
    * an async factory at all.
    */
   readonly load?: () => Promise<{ PgBoss: new (connectionString: string) => PgBossLike }>
+  /** Where an adapter-level failure is reported. Defaults to the root logger. */
+  readonly logger?: Logger
 }
 
 /**
@@ -130,6 +143,17 @@ export interface PgBossQueueOptions {
  * loaded and constructed inside this function, so importing `apps/worker` from a test, or `apps/web`'s route
  * handler from anywhere, costs nothing and connects to nothing. The first *use* of the returned object
  * starts the connection.
+ *
+ * ### The `error` listener, which is not optional politeness
+ *
+ * pg-boss is an `EventEmitter` and reports a worker that cannot run — a missing queue, a closed pool — by
+ * emitting `error`. Node treats an `EventEmitter`'s unhandled `error` event as **fatal**: the process dies
+ * with a raw stack trace and no exit code of ours choosing. That is how `Queue wh.auth-expiry does not exist`
+ * killed this worker instead of being reported.
+ *
+ * So an `error` listener is attached here, where the emitter is created, and the failure is logged with the
+ * queue name. It deliberately does **not** stop the process: a queue that is temporarily unreachable is
+ * pg-boss's to retry, and deciding that is {@link classifyForQueue}'s job, not an `EventEmitter` handler's.
  */
 export async function createPgBossQueue(options: PgBossQueueOptions): Promise<PgBossLike> {
   const load =
@@ -141,7 +165,26 @@ export async function createPgBossQueue(options: PgBossQueueOptions): Promise<Pg
       return { PgBoss: mod.PgBoss }
     })
   const { PgBoss } = await load()
-  return new PgBoss(options.connectionString)
+  const boss = new PgBoss(options.connectionString)
+
+  const emitter = boss as unknown as {
+    on?: (event: string, listener: (error: unknown) => void) => unknown
+  }
+  if (typeof emitter.on === 'function') {
+    const logger = options.logger
+    emitter.on('error', (error: unknown) => {
+      const queue =
+        error && typeof error === 'object' && 'queue' in error
+          ? String((error as { queue: unknown }).queue)
+          : undefined
+      logger?.error('pg-boss reported a failure', {
+        queue,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
+
+  return boss
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -368,9 +411,25 @@ export function summarise(
 export interface RegistrationReport {
   readonly handlers: readonly JobName[]
   readonly schedules: readonly JobName[]
-  /** Registration failures, by job. A handler with no schedule is not a failure. */
-  readonly errors: readonly { readonly job: JobName; readonly error: CsError }[]
+  /**
+   * Registration failures, by job. A handler with no schedule is not a failure.
+   *
+   * `phase` is not decoration: the two phases fail for unrelated reasons and the boot path reacts differently
+   * to each. A handler that will not register is fatal immediately — no amount of waiting helps, because
+   * `work()` needs no connection. A schedule that will not register is *usually* a symptom of there being no
+   * connection yet, which `start()` is about to fix, so the boot path retries those once after starting.
+   */
+  readonly errors: readonly {
+    readonly job: JobName
+    readonly phase: 'handler' | 'schedule'
+    readonly error: CsError
+  }[]
 }
+
+/**
+ * Which phase(s) of registration to perform. Both by default; the boot path splits them.
+ */
+export type RegisterPhase = 'handlers' | 'schedules' | 'both'
 
 /**
  * Register every handler, then every cron.
@@ -382,32 +441,62 @@ export interface RegistrationReport {
  *
  * Nothing here starts the boss. `start()` is the caller's, so a test can register against a double and
  * assert the calls without a connection.
+ *
+ * `only` exists because pg-boss's `schedule()` writes to `pgboss.schedule` and so needs an **open**
+ * connection, while `work()` needs none and must precede `start()`. Those two requirements pull in opposite
+ * directions, and `startWorker` resolves that by registering here, starting, then retrying the schedules that
+ * were refused. See {@link startWorker}.
  */
 export async function registerJobs(
   boss: PgBossLike,
   runner: Record<JobName, QueueHandler>,
   schedules: readonly { readonly job: JobName; readonly cron: string }[],
+  only: RegisterPhase = 'both',
 ): Promise<RegistrationReport> {
-  const errors: { job: JobName; error: CsError }[] = []
+  const errors: { job: JobName; phase: 'handler' | 'schedule'; error: CsError }[] = []
 
-  for (const job of Object.keys(runner).sort() as JobName[]) {
-    try {
-      await boss.work(job, { batchSize: 10 }, async (job_) => runner[job](job_.data))
-    } catch (cause) {
-      errors.push({ job, error: queueError(`registering the ${job} handler failed`, cause) })
+  if (only !== 'schedules') {
+    for (const job of Object.keys(runner).sort() as JobName[]) {
+      // pg-boss 12 will not let a worker fetch from a queue that does not exist, and it reports that from the
+      // fetch loop rather than from `work()`, so the queue is created here where a refusal can still be a
+      // `Result`. Skipped when the port does not offer it — see `PgBossLike.createQueue`.
+      if (boss.createQueue) {
+        try {
+          await boss.createQueue(job)
+        } catch (cause) {
+          errors.push({
+            job,
+            phase: 'handler',
+            error: queueError(`creating the ${job} queue failed`, cause),
+          })
+          continue
+        }
+      }
+      try {
+        await boss.work(job, { batchSize: 10 }, async (job_) => runner[job](job_.data))
+      } catch (cause) {
+        errors.push({
+          job,
+          phase: 'handler',
+          error: queueError(`registering the ${job} handler failed`, cause),
+        })
+      }
     }
   }
 
   const registered: JobName[] = []
-  for (const spec of schedules) {
-    try {
-      await boss.schedule(spec.job, spec.cron)
-      registered.push(spec.job)
-    } catch (cause) {
-      errors.push({
-        job: spec.job,
-        error: queueError(`registering the ${spec.job} schedule failed`, cause),
-      })
+  if (only !== 'handlers') {
+    for (const spec of schedules) {
+      try {
+        await boss.schedule(spec.job, spec.cron)
+        registered.push(spec.job)
+      } catch (cause) {
+        errors.push({
+          job: spec.job,
+          phase: 'schedule',
+          error: queueError(`registering the ${spec.job} schedule failed`, cause),
+        })
+      }
     }
   }
 

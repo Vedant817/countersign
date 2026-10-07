@@ -1131,3 +1131,94 @@ sentinel pinned against `packages/compiler` by relative path so the two cannot d
 The offline `verify.py` has no dispute row, so `paypal_dispute_binding` exists on the page only. The
 raw download could carry `disputeId` as one added member. And `gate_record_attempt` stays a `WARN` even
 after everything above, which is **correct rather than incomplete**.
+
+## D-038 — Two more shape defects, found only by running against a live vi-service
+
+**Date:** 2026-10-07 · **Raised by:** the check-4 live proof · **Spec item:** §8.10 checks 5 and 6, §8.3
+**Decision:** The JWKS reader now consumes the RFC 7517 shape `apps/vi` actually emits. Check 6’s
+amount/payee source is recorded below as **open** — the fix belongs where vi already resolved the
+chain, not in the Gate.
+
+**These are the fifth and sixth instances of the D-034 pattern**, and the sixth is the most expensive
+because the fixture and the code agreed with *each other* while both disagreed with the service.
+
+### Check 5 — `merchantKeySetFromJwks` read a `public_jwk` wrapper that vi never sends
+
+`apps/vi/src/vi_service/keys.py::jwks_entry` returns a flat RFC 7517 entry — `kid`, `kty`, `crv`, `x`,
+`y`, `alg`, `use`, plus `role` and `status` as siblings. There is no wrapper. The reader looked for
+`entry['public_jwk']`, so **every merchant entry was dropped**: `currentKid` came back `''`,
+`acceptedKids` was empty, and check 5 reported every real `kid` as unknown.
+
+**It failed silently and it failed plausibly.** "Drop entries with no usable public JWK" was already
+the documented, correct behaviour for an unusable entry — so the code was right about a shape the
+service never emits, and the test fixture used the same invented shape as the reader. Two artefacts
+agreeing with each other is exactly what makes a wrong shape survive review.
+
+Two things had to be right, not one:
+
+- **Read the members, inline.** `kty`, `crv`, `x` present and non-empty; `y` required **only** when
+  `kty === 'EC'`, because a P-256 key has it and an Ed25519 (`OKP`) key does not.
+- **Then keep the entry whole.** The first attempt rebuilt a tidy `{ kty, crv, x, y }`, which dropped
+  `alg` — and `jose`'s `importJWK` needs `alg` for an OKP key, so a perfectly good merchant key parsed
+  as unusable and check 5 rejected a signature the merchant had actually produced. **A caught by a
+  test.** The lesson is general: a reader's job is to decide whether an entry is usable, not to
+  rewrite what it was given.
+
+### A third finding, recorded rather than fixed: the fixtures sign with the wrong algorithm
+
+**`apps/vi` signs merchant keys with ES256 (P-256). The Gate's merchant fixtures use Ed25519.** So the
+merchant-signature path has never been exercised against the algorithm actually in use, and a
+merchant whose key is ES256 would have been rejected by a reader that only ever saw `OKP`. The reader
+now handles both, which is correct; **aligning the fixtures to ES256 is not done here** and is listed
+as remaining work rather than being folded in silently, because changing a signing fixture changes
+what every merchant test asserts.
+
+### Check 6 — open, and the reason is structural
+
+`l3aAmount` read top-level `amount_minor` / `currency` / `payee_id`. A **real** L3a has none of those:
+
+```
+top level: nonce, aud, sd_hash, iat, delegate_payload, _sd_alg, iss, exp
+delegate_payload[1]: {"...":"f_ajOKe2eZgxpvskpVNN_WirEn8GL7VDrc6WdDoGvak"}
+```
+
+**The L3a is an SD-JWT.** The amount is inside a *disclosure*, and in the signed token its slot is a
+hash reference. `decodeL3` reads the JWS payload without resolving disclosures, so the amount is not
+merely under a different name — it is **not present in the bytes the Gate decodes**.
+
+That is why checks 7, 8 and 9 all report "no amount resolved by check 6": they are collateral, not
+independent failures, and fixing them individually would be treating the symptom.
+
+**The fix is not in the Gate.** vi already resolved the chain, and `verify_response.disclosed.l3a`
+carries it:
+
+```
+delegate_payload[1]: { payee: {id, name, website},
+                      payment_amount: { amount: 13300, currency: "USD" },
+                      payment_instrument: {...}, transaction_id, vct }
+```
+
+So check 4 should store the disclosed L3a alongside the L2 it already stores for the D19 budget, and
+checks 5 and 6 should read amount and payee from there. **Reimplementing SD-JWT disclosure resolution
+inside the Gate would be strictly worse**: it would duplicate vi's crypto in a second place, and a
+divergence would be a security bug rather than a parse error. Recorded as open rather than fixed in
+this pass, because it changes which artefact checks 5 and 6 are entitled to trust, and that deserves
+its own decision and its own test.
+
+### The pattern, now with a cost
+
+Six defects, one shape. Each was a surface reporting the outcome the mechanism was designed to report,
+not the outcome that occurred:
+
+| # | Defect | Found by |
+|---|---|---|
+| 1 | signed budget unenforced (QA-gate-1) | reading the code against D19 |
+| 2 | `jti` never present (D-034) | grepping the pinned library |
+| 3 | `max > 2^53` accepted (D-032) | generating 83 real library outputs |
+| 4 | disclosure withheld (QA2-VI-1) | running the auditor probe |
+| 5 | `l1`/`l2` sent empty (check 4) | a **live** vi-service |
+| 6 | JWKS shape (check 5) | a **live** vi-service |
+
+**Every one found by a live or captured value. None found by a unit test**, because in all six the
+fixture was written to make an assertion easy rather than to match what the dependency emits. D-034
+recorded the rule; these two are what it costs to not have had it.

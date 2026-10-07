@@ -577,6 +577,21 @@ export async function verifyWithMerchantKey(
  * rotation does not invalidate every cart already in flight (EC-KEY-2). Entries with no usable public JWK
  * are dropped rather than kept as a hole, because a key set entry that cannot verify anything would
  * silently make a check pass for the wrong reason.
+ *
+ * ## The JWK members are INLINE, not nested
+ *
+ * `apps/vi/src/vi_service/keys.py::jwks_entry` returns `kid`, `kty`, `crv`, `x`, `y`, `alg`, `use`,
+ * `role` and `status` as siblings on one flat object — it is a RFC 7517 JWKS with two non-standard
+ * members added. There is **no `public_jwk` wrapper.**
+ *
+ * This function read `entry['public_jwk']`, so every merchant entry was silently dropped: `currentKid`
+ * came back `''`, `acceptedKids` was empty, and check 5 reported every real `kid` as unknown. Nothing
+ * failed loudly, because "drop entries with no usable public JWK" was already the documented behaviour
+ * for an unusable entry — the code was right about a shape `apps/vi` never emits.
+ *
+ * That is the sixth instance of the D-034 pattern (see `docs/DECISIONS.md`), and it was found only by
+ * running against a live vi-service rather than a hand-built fixture. The fix reads the RFC 7517 shape,
+ * and a test asserts against a **real captured `/v1/jwks` response** rather than an invented one.
  */
 export function merchantKeySetFromJwks(
   entries: readonly Record<string, unknown>[],
@@ -588,12 +603,25 @@ export function merchantKeySetFromJwks(
     const role = entry['role']
     const status = entry['status']
     const kid = entry['kid']
-    const publicJwk = entry['public_jwk']
+    const kty = entry['kty']
+    const crv = entry['crv']
+    const x = entry['x']
+    const y = entry['y']
     if (role !== 'MERCHANT') continue
     if (status === 'COMPROMISED') continue
     if (typeof kid !== 'string' || kid.length === 0) continue
-    if (typeof publicJwk !== 'object' || publicJwk === null) continue
-    jwks[kid] = publicJwk as PublicJwk
+    // RFC 7517: the key members ARE the entry. `apps/vi` adds `role` and `status` as siblings.
+    // All four must be present and non-empty — a partial key verifies nothing, and admitting one
+    // would make check 5 pass for the wrong reason, which is what this `continue` guards against.
+    if (typeof kty !== 'string' || kty.length === 0) continue
+    if (typeof crv !== 'string' || crv.length === 0) continue
+    if (typeof x !== 'string' || x.length === 0) continue
+    // `y` is required for an EC (P-256) key and **absent** for an OKP (Ed25519) one. Requiring it
+    // unconditionally would reject every Ed25519 merchant key, and assuming it absent would admit a
+    // half-specified P-256 key that cannot verify. The reader handles both because the Gate's own
+    // fixtures are Ed25519 while `apps/vi` signs ES256 — see docs/DECISIONS.md D-038.
+    if (kty === 'EC' && (typeof y !== 'string' || y.length === 0)) continue
+    jwks[kid] = entry as unknown as PublicJwk
     acceptedKids.push(kid)
     if (status === 'ACTIVE') currentKid = kid
   }

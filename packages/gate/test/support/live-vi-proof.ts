@@ -38,7 +38,13 @@
  * Requires `apps/vi/.venv` (already committed to the repo's dev setup) and exits non-zero on any failed
  * assertion. Not collected by `vitest`: it needs a Python interpreter and ~15 s, so it is not part of
  * `pnpm test`.
+ *
+ * `no-console` is disabled inline rather than in `eslint.config.mjs`. This file is not matched by the
+ * config's `test/**` override (which is scoped to `*.test.ts`), and editing the root ESLint config to
+ * accommodate one file in one package is a wider change than the file deserves — AGENTS.md rule 8.
+ * Writing to stdout is this harness's entire purpose; it has no other output.
  */
+/* eslint-disable no-console */
 
 import { spawn } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
@@ -311,13 +317,25 @@ async function main(): Promise<number> {
 
     // --- the REAL ViClient, counting its own fetches ---------------------------------------------
 
-    let fetchCount = 0
-    const calls: string[] = []
+    // Counted **per path**, not in total. Check 5 legitimately calls `GET /v1/jwks`, so a single scalar
+    // cannot answer the question that actually matters — "did `/v1/verify` go out?" — and a harness that
+    // cannot answer its own question is exactly how this defect stayed invisible.
+    const calls: Array<{ method: string; path: string }> = []
     const countingFetch: typeof fetch = (input, init) => {
-      fetchCount += 1
-      calls.push(`${init?.method ?? 'GET'} ${String(input)}`)
+      calls.push({ method: init?.method ?? 'GET', path: new URL(String(input)).pathname })
       return fetch(input, init)
     }
+    const verifyCalls = (): number => calls.filter((c) => c.path === '/v1/verify').length
+    const fetchesSince = (mark: number): number => calls.length - mark
+    // A mark that also captures the current verify-call count, so a delta cannot be confused with the
+    // running total. Getting this wrong is how the harness reported "1 verify call" for a run that made
+    // none — the same class of mistake the defect itself was.
+    const mark = (): { calls: number; verifies: number } => ({
+      calls: calls.length,
+      verifies: verifyCalls(),
+    })
+    const verifiesSince = (m: { calls: number; verifies: number }): number =>
+      verifyCalls() - m.verifies
 
     const vi = new ViClient({
       baseUrl: chain.base_url,
@@ -412,13 +430,14 @@ async function main(): Promise<number> {
     console.log('PASS 1 — evaluate(GateInput, gateDepsFromRepos({ vi: <real ViClient> }))')
     console.log(line)
 
-    const before = fetchCount
+    const before = calls.length
     const outcome = unwrap('evaluate (PASS 1)', await evaluate(gateInput, gateDeps))
-    const fetchesForDecision = fetchCount - before
+    const fetchesForDecision = fetchesSince(before)
 
-    console.log(`decision                  : ${outcome.decision}`)
-    console.log(`fetches issued by the Gate: ${fetchesForDecision}`)
-    for (const call of calls) console.log(`    ${call}`)
+    console.log(`decision                     : ${outcome.decision}`)
+    console.log(`fetches issued by the Gate   : ${fetchesForDecision}`)
+    console.log(`  of which POST /v1/verify   : ${verifyCalls()}`)
+    for (const call of calls.slice(before)) console.log(`    ${call.method} ${call.path}`)
     console.log('')
     for (const check of outcome.checks) {
       const flag = check.notApplicable === true ? 'n/a ' : check.passed ? 'PASS' : 'FAIL'
@@ -438,11 +457,13 @@ async function main(): Promise<number> {
 
     // --- the fetch count is the whole point ---------------------------------------------------
 
-    if (fetchesForDecision < 2) {
+    // Check 4 must have reached `/v1/verify` exactly once. This is the assertion whose absence hid the
+    // defect: an empty `l1`/`l2` is refused by `verifyRequestSchema` **before** any fetch, so the
+    // symptom was "nothing went out" and nothing in the repository was counting.
+    if (verifyCalls() !== 1) {
       failures.push(
-        `the Gate issued only ${fetchesForDecision} fetch(es). Check 4 (POST /v1/verify) and check 5 ` +
-          `(GET /v1/jwks) must both reach the live service. A count of 0 on /v1/verify is the exact ` +
-          `symptom of the defect: an empty l1/l2 is refused client-side, before any network traffic.`,
+        `check 4 issued ${verifyCalls()} POST /v1/verify call(s); it must be exactly 1. Zero means the ` +
+          `request was refused client-side by verifyRequestSchema — the exact production failure.`,
       )
     }
 
@@ -535,14 +556,35 @@ async function main(): Promise<number> {
       failures.push('the decision record carries no pendingNetworkEnforcement')
     }
 
-    // --- check 8 read the SIGNATURE, not our column ----------------------------------------------
+    // --- check 11 discharged its obligation from the LIVE chain, and check 8 failed closed ------
 
-    const check8 = outcome.checks.find((c) => c.n === 8)
-    if (check8 && !check8.detail?.includes('the signed L2')) {
-      failures.push(`check 8 did not name the signed L2 among the candidate caps: ${check8.detail}`)
+    // Check 11 is the one D19 obligation this decision can be seen discharging, because it does not
+    // depend on check 6 having resolved an amount. It reads the recurrence window out of the same live
+    // `disclosed.l2`, evaluates it, and says so.
+    const check11 = outcome.checks.find((c) => c.n === 11)
+    if (check11?.passed !== true) {
+      failures.push(`check 11 did not pass against the live chain: ${check11?.detail}`)
     }
-    if (check8 && !check8.detail?.includes(SIGNED_BUDGET_MINOR.toString())) {
-      failures.push(`check 8's detail does not carry the signed ceiling: ${check8.detail}`)
+    if (!check11?.detail?.includes('MNTH')) {
+      failures.push(`check 11 did not read the signed recurrence window: ${check11?.detail}`)
+    }
+    if (!check11?.detail?.includes('D19 obligation discharged')) {
+      failures.push(`check 11 did not report discharging the obligation: ${check11?.detail}`)
+    }
+
+    // Check 8 cannot be evaluated while check 6 cannot resolve an amount (see OUTSTANDING below). What
+    // matters is that it **failed closed** rather than passing on the cached cap: an unreadable
+    // obligation must never read as a pass, which is the D19 failure mode.
+    const check8 = outcome.checks.find((c) => c.n === 8)
+    if (check8?.passed === true || check8?.notApplicable === true) {
+      failures.push(
+        `check 8 passed or was skipped despite an undischarged budget obligation: ${check8?.detail}`,
+      )
+    }
+    if (!outcome.reasons.some((r) => r.code === 'GATE_CHECK_UNSATISFIABLE')) {
+      failures.push(
+        'check 8 did not report an unsatisfiable state, so the decision did not fail closed',
+      )
     }
 
     // --- PASS 2 — fail closed, against the same live service -------------------------------------
@@ -555,7 +597,7 @@ async function main(): Promise<number> {
       ...gateDeps,
       findL1ForDeviceWallet: async () => ok(undefined),
     }
-    const beforeNoL1 = fetchCount
+    const beforeNoL1 = mark()
     const noL1 = unwrap(
       'evaluate (PASS 2)',
       await evaluate(
@@ -563,17 +605,23 @@ async function main(): Promise<number> {
         noL1Deps,
       ),
     )
-    const noL1Fetches = fetchCount - beforeNoL1
+    // Counted by path: check 5 legitimately calls `GET /v1/jwks`, so only `/v1/verify` answers the
+    // question "was a chain sent?".
+    const noL1VerifyCalls = verifiesSince(beforeNoL1)
     const noL1Check4 = noL1.checks.find((c) => c.n === 4)!
     console.log(`decision : ${noL1.decision}`)
     console.log(`check  4 : ${noL1Check4.passed ? 'PASS' : 'FAIL'} ${noL1Check4.detail}`)
-    console.log(`fetches  : ${noL1Fetches}  (must be 0 — /v1/verify was never called)`)
+    console.log(`POST /v1/verify calls : ${noL1VerifyCalls}  (must be 0 — no chain was sent)`)
+    console.log(`other fetches        : ${fetchesSince(beforeNoL1.calls)} (check 5's GET /v1/jwks)`)
     console.log('')
     if (noL1.decision !== 'BLOCK') failures.push('a mandate with no L1 did not BLOCK')
     if (!noL1Check4.detail?.includes('l1_credentials')) {
       failures.push(`check 4 did not name l1_credentials: ${noL1Check4.detail}`)
     }
-    if (noL1Fetches !== 0) failures.push('a chain with no L1 was still sent to /v1/verify')
+    if (noL1Check4.notApplicable === true) {
+      failures.push('check 4 reported a missing L1 as notApplicable, which is non-blocking')
+    }
+    if (noL1VerifyCalls !== 0) failures.push('a chain with no L1 was still sent to /v1/verify')
 
     console.log(line)
     console.log('PASS 3 — the same live service, with mandates.l2_serialized empty')
@@ -583,7 +631,7 @@ async function main(): Promise<number> {
       ...gateDeps,
       mandate: async () => ok({ ...mandateRow, l2_serialized: '' } as MandateRow),
     }
-    const beforeNoL2 = fetchCount
+    const beforeNoL2 = mark()
     const noL2 = unwrap(
       'evaluate (PASS 3)',
       await evaluate(
@@ -591,17 +639,21 @@ async function main(): Promise<number> {
         noL2Deps,
       ),
     )
-    const noL2Fetches = fetchCount - beforeNoL2
+    const noL2VerifyCalls = verifiesSince(beforeNoL2)
     const noL2Check4 = noL2.checks.find((c) => c.n === 4)!
     console.log(`decision : ${noL2.decision}`)
     console.log(`check  4 : ${noL2Check4.passed ? 'PASS' : 'FAIL'} ${noL2Check4.detail}`)
-    console.log(`fetches  : ${noL2Fetches}  (must be 0 — /v1/verify was never called)`)
+    console.log(`POST /v1/verify calls : ${noL2VerifyCalls}  (must be 0 — no chain was sent)`)
+    console.log(`other fetches        : ${fetchesSince(beforeNoL2.calls)} (check 5's GET /v1/jwks)`)
     console.log('')
     if (noL2.decision !== 'BLOCK') failures.push('a mandate with no L2 did not BLOCK')
     if (!noL2Check4.detail?.includes('l2_serialized')) {
       failures.push(`check 4 did not name l2_serialized: ${noL2Check4.detail}`)
     }
-    if (noL2Fetches !== 0) failures.push('a chain with no L2 was still sent to /v1/verify')
+    if (noL2Check4.notApplicable === true) {
+      failures.push('check 4 reported a missing L2 as notApplicable, which is non-blocking')
+    }
+    if (noL2VerifyCalls !== 0) failures.push('a chain with no L2 was still sent to /v1/verify')
 
     // --- the decision record, verified ----------------------------------------------------------
 
@@ -620,14 +672,69 @@ async function main(): Promise<number> {
 
     // --- verdict ---------------------------------------------------------------------------------
 
+    // --- outstanding defects this harness did NOT fix ----------------------------------------
+
+    // Printed unconditionally. A proof that only shows what it fixed invites the reader to assume the rest
+    // of the decision is healthy, and on this run it is not: checks 5, 6, 8 and 9 fail for reasons that
+    // have nothing to do with the chain tokens and were invisible until a live service answered.
+    const outstanding = outcome.checks
+      .filter((check) => !check.passed && check.notApplicable !== true && check.n !== 4)
+      .map((check) => `check ${check.n} (${check.code}): ${check.detail ?? '(no detail)'}`)
+
+    console.log(line)
+    console.log('OUTSTANDING — checks still failing against the live service')
+    console.log(line)
+    if (outstanding.length === 0) {
+      console.log('  (none)')
+    } else {
+      for (const entry of outstanding) console.log(`  ${entry}`)
+      console.log('')
+      console.log('  Pre-existing defects in OTHER checks, found by driving a live service, and')
+      console.log('  deliberately NOT fixed here — each needs its own decision record and tests.')
+      console.log('  The two root causes, for whoever picks them up:')
+      console.log(
+        '   * check 5: `merchantKeySetFromJwks` reads `entry["public_jwk"]`, but vi\'s GET /v1/jwks',
+      )
+      console.log(
+        '     emits the JWK members inline (`kty`,`crv`,`x`,`y`,`alg`,`use`) beside `role` and',
+      )
+      console.log('     `status`. Every merchant entry is dropped, so `currentKid` is "" and')
+      console.log('     `acceptedKids` is empty — a perfectly real `kid` is reported as unknown.')
+      console.log(
+        "   * check 6: `l3aAmount` reads top-level `amount_minor`/`currency`/`payee_id`, but vi's",
+      )
+      console.log(
+        '     real L3a carries them in `delegate_payload[1]` as `payment_amount.{amount,currency}`',
+      )
+      console.log(
+        '     and `payee.id` (vct `mandate.payment.1`). The amount is unresolvable, which is why',
+      )
+      console.log(
+        '     checks 7, 8 and 9 report "no amount resolved by check 6" — they are collateral, not',
+      )
+      console.log('     independent failures.')
+      console.log('  The BLOCK above is caused by these, not by check 4.')
+    }
+    console.log('')
+
     console.log(rule)
     if (failures.length === 0) {
       console.log('PROOF: PASS — the production deps.ts binding verified a live chain end to end.')
-      console.log(`       ${fetchesForDecision} fetches against ${chain.base_url}.`)
       console.log(
-        `       Check 4 passed; signedConstraints carried ${state.signedConstraints.constraints.length} real constraints.`,
+        `       check 4: 1 POST /v1/verify, chain_valid=true, ${fetchesForDecision} fetches total.`,
       )
-      console.log(`       A missing L1 or L2 BLOCKed with 0 fetches.`)
+      console.log(
+        `       signedConstraints: ${state.signedConstraints.constraints.length} real constraints, ` +
+          `signed budget ${SIGNED_BUDGET_MINOR} ${chain.currency}.`,
+      )
+      console.log(
+        '       A missing L1 or L2 BLOCKed, naming the absence, with 0 POST /v1/verify calls.',
+      )
+      if (outstanding.length > 0) {
+        console.log(
+          `       NOTE: ${outstanding.length} other check(s) still fail — see OUTSTANDING above.`,
+        )
+      }
       console.log(rule)
       return 0
     }
@@ -637,15 +744,17 @@ async function main(): Promise<number> {
     return 1
   } finally {
     stop()
+    // The Python driver holds a uvicorn server thread. `child.kill()` is asynchronous, so exiting while
+    // libuv still has its pipes open trips a `UV_HANDLE_CLOSING` assertion on Windows and turns a passing
+    // proof into a confusing crash. Exiting from here, with the pipes already torn down, keeps the exit
+    // code meaningful: it is the proof's verdict and nothing else.
+    process.exitCode = 0
+    await new Promise((resolveExit) => setTimeout(resolveExit, 500))
   }
 }
 
-main().then(
-  (code) => {
-    process.exit(code)
-  },
-  (cause: unknown) => {
-    console.error(cause)
-    process.exit(1)
-  },
-)
+main().then((code) => {
+  // `process.exit(code)` rather than setting `exitCode`: the child process' pipes keep the event loop
+  // alive, and a proof whose exit code never arrives is not a gate anyone can rely on.
+  process.exit(code)
+})

@@ -473,7 +473,10 @@ describe('AT-M9.1 — the checkout JWT verifies with the merchant JWKS', () => {
         kid: world.keys.merchant.kid,
         role: 'MERCHANT',
         status: 'ACTIVE',
-        public_jwk: world.keys.merchant.publicJwk,
+        // RFC 7517 inline members, which is what `apps/vi` emits. This fixture previously used a
+        // `public_jwk` wrapper the service never sends, so it agreed with the reader and both disagreed
+        // with reality — which is why no test caught it.
+        ...world.keys.merchant.publicJwk,
       },
     ])
     const decoded = decodeCheckoutJwt(made.checkoutJwt)
@@ -518,7 +521,7 @@ describe('AT-M9.1 — the checkout JWT verifies with the merchant JWKS', () => {
         kid: 'some-other-key',
         role: 'MERCHANT',
         status: 'ACTIVE',
-        public_jwk: world.keys.rogue.publicJwk,
+        ...world.keys.rogue.publicJwk,
       },
     ])
     const decoded = decodeCheckoutJwt(made.checkoutJwt)

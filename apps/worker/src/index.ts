@@ -32,6 +32,8 @@
  * with a missing `DATABASE_URL` fails **loudly and immediately** (spec §6) rather than starting a worker that
  * will 500 on its first tick an hour later.
  */
+import { pathToFileURL } from 'node:url'
+
 import {
   env,
   epochSecFrom,
@@ -74,7 +76,13 @@ import {
 } from '@countersign/webhooks'
 
 import { budgetAccountIds, dbWebhookAudit, dbWebhookStore, isReconcileCandidate } from './adapters'
-import { createJobRunner, createPgBossQueue, registerJobs, type PgBossLike } from './job-runner'
+import {
+  createJobRunner,
+  createPgBossQueue,
+  registerJobs,
+  type PgBossLike,
+  type RegistrationReport,
+} from './job-runner'
 import { CRON_SPECS, isPlausibleCron, type CronSpec } from './schedule'
 
 export { dbWebhookAudit, dbWebhookStore, isReconcileCandidate }
@@ -97,7 +105,7 @@ export {
   type PgBossSendOptions,
   type PgBossWorkOptions,
   type QueueHandler,
-  type RegistrationReport,
+  type RegisterPhase,
   type RunnerDeps,
 } from './job-runner'
 
@@ -161,12 +169,31 @@ export interface WorkerDeps {
  * 1. Validate the cron expressions. pg-boss reports a malformed expression on the **first tick**, which for a
  *    nightly job is up to a day away - so a typo is caught here instead of discovered by absence.
  * 2. Create the runner (pure; touches nothing global).
- * 3. Register every handler, then every schedule ({@link registerJobs} does both, in that order).
- * 4. `start()` **last**. pg-boss starts polling on `start()`, so a handler registered after that point races
- *    the first fetch of a job it was going to consume anyway.
+ * 3. `start()` the queue.
+ * 4. Register every handler, then every schedule ({@link registerJobs} does both, in that order).
  *
- * @returns `err` if registration failed for any job. A partially-registered worker is worse than none: it
- *   looks alive, and the gaps are exactly the crons that quietly stop fixing lost webhooks.
+ * ### Why `start()` comes first, and what it cost
+ *
+ * This used to register handlers and schedules *before* `start()`, on the reasoning that "pg-boss begins
+ * polling on `start()`, so a handler registered afterwards races the first fetch." That reasoning does not
+ * survive contact with pg-boss 12: **both** `work()` and `schedule()` need an open connection.
+ *
+ * - `boss.schedule()` inserts into `pgboss.schedule` and rejects with `Database connection is not opened`.
+ * - `boss.work()` constructs a `Worker` and starts its fetch loop immediately, so `Worker.fetch` calls
+ *   `assertDb` before the first poll — and it fails as an **unhandled `error` event** on the boss rather than
+ *   rejecting the promise, so the surrounding `try`/`catch` cannot see it and the process dies with a stack
+ *   trace instead of a `Result`.
+ *
+ * So registering before starting does not merely race; it cannot work, and it fails on *every* boot against a
+ * real queue. That is why this process had never actually run: `productionDeps()` used to throw before it
+ * got here, and once that was fixed the queue refused every registration and the worker exited 78.
+ *
+ * There is no fetch race in the ordering now used, because pg-boss fetches **per registered worker**: with no
+ * `work()` registered, `start()` polls nothing. Registering after `start()` is how pg-boss is meant to be used.
+ *
+ * @returns `err` if `start()` fails or if any handler or schedule will not register. A partially-registered
+ *   worker is worse than none: it looks alive, and the gaps are exactly the crons that quietly stop fixing
+ *   lost webhooks.
  */
 export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsError>> {
   const logger = deps.logger ?? deps.webhooks.logger
@@ -188,7 +215,8 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
     }
   }
 
-  const boss = deps.boss ?? (await createPgBossQueue({ connectionString: env().DATABASE_URL }))
+  const boss =
+    deps.boss ?? (await createPgBossQueue({ connectionString: env().DATABASE_URL, logger }))
   // Every optional handler is forwarded explicitly. A `RunnerDeps` member the boot path silently dropped
   // would show up as a cron that logs "job has no handler wired" every five minutes, which is exactly the
   // quiet failure that let `release.reservations` go missing in the first place.
@@ -200,20 +228,9 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
     ...(deps.reconcileBudget ? { reconcileBudget: deps.reconcileBudget } : {}),
   })
 
-  const registration = await registerJobs(boss, runner, crons)
-  if (registration.errors.length > 0) {
-    logger?.error('worker registration incomplete', {
-      errors: registration.errors.map((e) => ({
-        job: e.job,
-        code: e.error.code,
-        message: e.error.message,
-      })),
-      handlers: registration.handlers.length,
-      schedules: registration.schedules.length,
-    })
-    return { ok: false, error: registration.errors[0]!.error }
-  }
-
+  // The queue is opened first, because in pg-boss 12 both `work()` and `schedule()` need an open connection and
+  // there is no fetch race in registering afterwards: pg-boss polls per registered worker, so `start()` with
+  // nothing registered polls nothing.
   try {
     await boss.start()
   } catch (cause) {
@@ -232,6 +249,35 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
         cause,
       },
     }
+  }
+
+  const registration: RegistrationReport = await registerJobs(boss, runner, crons)
+  if (registration.errors.length > 0) {
+    // Every refusal is reported by name. "The five-minute sweep is not running" is the whole diagnosis, and it
+    // is invisible from the outside — state just stops being repaired.
+    logger?.error('worker registration incomplete', {
+      errors: registration.errors.map((e) => ({
+        job: e.job,
+        phase: e.phase,
+        code: e.error.code,
+        message: e.error.message,
+      })),
+      handlers: registration.handlers.length,
+      schedules: registration.schedules.length,
+    })
+    // The queue is already open at this point, because it has to be for anything to register. A boot that then
+    // fails must not leave it running: `main` returns a non-zero code and the process exits, but a caller that
+    // does not exit — a test, or a supervisor that keeps the process alive to report — would otherwise leave a
+    // started queue polling queues whose handlers were never registered.
+    try {
+      await boss.stop({ graceful: true })
+      logger?.info('worker stopped', { because: 'registration failed' })
+    } catch (cause) {
+      logger?.error('could not close the queue after a failed registration', {
+        cause: String(cause),
+      })
+    }
+    return { ok: false, error: registration.errors[0]!.error }
   }
 
   logger?.info('worker started', {
@@ -634,10 +680,29 @@ async function runBudgetReconcile(logger: Logger): Promise<Result<unknown, CsErr
   return ok({ accounts_checked: ids.value.length, drift: drifted.length, drifted })
 }
 
-/** Run {@link main} and exit with its code. The only place `process.exit` is called from this file. */
-const isEntryPoint =
-  process.argv[1] !== undefined &&
-  import.meta.url === `file://${process.argv[1]}`.replace(/\\/g, '/')
+/**
+ * Run {@link main} and exit with its code. The only place `process.exit` is called from this file.
+ *
+ * ### `pathToFileURL`, and why the obvious version was silently wrong
+ *
+ * This used to read:
+ *
+ * ```ts
+ * import.meta.url === `file://${process.argv[1]}`.replace(/\\/g, '/')
+ * ```
+ *
+ * which builds `file://C:/…` — two slashes and a bare drive letter. Node's `import.meta.url` is
+ * `file:///C:/…` — three. The two strings can never be equal on Windows, so `isEntryPoint` was always
+ * `false` there and `main()` never ran: `pnpm start` (which is `tsx src/index.ts`) exited **0 and did
+ * nothing at all**, with no output, looking exactly like a clean shutdown. `import '@countersign/worker'`
+ * stays inert, which is the property the WORKER-3 laziness rule wants — but the entry point has to be
+ * recognised too, or the process that owns every webhook has never booted on a Windows developer machine.
+ *
+ * `pathToFileURL` is the function that exists to do this correctly, including the Windows drive letter and
+ * UNC paths, so the comparison is now made in one canonical form on both sides.
+ */
+const entryPath = process.argv[1]
+const isEntryPoint = entryPath !== undefined && import.meta.url === pathToFileURL(entryPath).href
 if (isEntryPoint) {
   main().then(
     (code) => {

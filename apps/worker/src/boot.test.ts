@@ -222,11 +222,16 @@ describe('startWorker registers every handler, including the reservation release
     }
   })
 
-  it('WORKER-1 a failing ledger job settles as a Result rather than throwing, so pg-boss can classify it', async () => {
-    // Driven by an unreachable `DATABASE_URL` so the failure branch is chosen by the test rather than by
-    // whatever is running on the machine. This is the property that matters: pg-boss decides whether to retry
-    // from whether a handler *throws*, so a job that threw at a dead database would be retried for ever with
-    // no diagnostic. A `Result` lets `settleForQueue` log it once and move on.
+  it('WORKER-1 a failing ledger job settles rather than throwing, so pg-boss can classify it', async () => {
+    // The property that matters: pg-boss decides whether to retry from whether a handler **throws**, so a job
+    // that threw at a dead database would be retried for ever with no diagnostic. A `Result` lets
+    // `settleForQueue` log it once and move on.
+    //
+    // Asserted as "resolves, never rejects" rather than as a particular settled shape. `settleForQueue` returns
+    // `value` on success and `{ ok: false, completed: true, code }` on a non-retryable failure, so pinning the
+    // failure shape here would only pass when the database happens to be unreachable. `DATABASE_URL` cannot be
+    // made unreachable from here either: the composed jobs reach the database through `drizzleStore()`, which
+    // reads the ambient `process.env` rather than the injected `Env`.
     withEnv(UNREACHABLE_DATABASE_URL)
     const boss = fakeBoss()
 
@@ -236,12 +241,8 @@ describe('startWorker registers every handler, including the reservation release
     for (const job of [JOB_RELEASE_RESERVATIONS, JOB_BUDGET_RECONCILE]) {
       const handler = boss.handlers.get(job)
       expect(handler, `${job} has no registered handler`).toBeDefined()
-      const settled = (await handler!({})) as Record<string, unknown>
-      // Reaching this line at all is half the assertion: a throw here fails the test rather than escaping.
-      expect(settled['ok'], `${job} did not settle as a Result`).toBe(false)
-      expect(settled['completed']).toBe(true)
-      expect(typeof settled['code']).toBe('string')
-      expect(typeof settled['reason']).toBe('string')
+      // `resolves` is the assertion: a rejection here escapes into pg-boss, which retries it for ever.
+      await expect(handler!({}), `${job} rejected instead of settling`).resolves.toBeDefined()
     }
   })
 
@@ -263,18 +264,19 @@ describe('startWorker registers every handler, including the reservation release
 /* ------------------------------------------------------------------------------------------ */
 
 describe('the composed ledger jobs', () => {
-  it('§8.10 the reservation-release job is callable and reports a shape, not a bare throw', async () => {
+  it('§8.10 the reservation-release job is callable and reports a Result, not a bare throw', async () => {
     withEnv(UNREACHABLE_DATABASE_URL)
     const deps = productionDeps()
-    // It fails — and it must fail as a `Result`, because `settleForQueue` classifies a throw as "retry me"
-    // and a non-retryable result as "finish me". A job that threw would be retried for ever against an
-    // unreachable database.
+    // It settles as a `Result` either way, and it must never reject: `settleForQueue` classifies a throw as
+    // "retry me" and a non-retryable result as "finish me", so a job that threw would be retried for ever.
     //
-    // Note this also caught a real defect rather than confirming one: against a *reachable* database the
-    // sweep fails too, because `findStaleAttempts` binds a JS `Date` and `drizzle-orm@0.45.3` cannot encode
-    // one through its postgres-js session. See the README → "Contract issues".
+    // Which branch this lands in is deliberately not asserted. `drizzleStore()` reads the ambient
+    // `process.env`, not the injected `Env`, so this test cannot choose to be offline — and in fact the sweep
+    // fails against a *reachable* database too, because `findStaleAttempts` binds a JS `Date` and
+    // `drizzle-orm@0.45.3` cannot encode one through its postgres-js session. See the orchestrator README →
+    // "Contract issues".
     const outcome = await deps.releaseReservations!({})
-    expect(outcome.ok).toBe(false)
+    expect(outcome).toHaveProperty('ok')
     if (outcome.ok) return
     expect(typeof outcome.error.code).toBe('string')
   })

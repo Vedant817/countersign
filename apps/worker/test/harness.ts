@@ -327,6 +327,12 @@ export function fakeBoss(): PgBossDouble {
     },
     async schedule(name, cron) {
       this.order.push(`schedule:${name}`)
+      // pg-boss 12 rejects `schedule()` before `start()` with `Database connection is not opened`,
+      // because `boss.schedule()` inserts into `pgboss.schedule` and needs a live connection. The
+      // fake used to accept any order, which is how a boot sequence that **cannot work** came to be
+      // asserted as correct. Reproducing the refusal is what makes the ordering assertion mean
+      // something: it now fails for the same reason production would.
+      if (this.started === 0) throw new Error('Database connection is not opened')
       if (this.failScheduleFor.has(name)) throw new Error(`pg-boss: cannot schedule ${name}`)
       this.scheduled.push({ name, cron })
     },

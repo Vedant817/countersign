@@ -109,6 +109,28 @@ some other package's `deps.ts`.
    `release.reservations` runs every five minutes. §8.10 holds; the granularity is the cron's. Stated in the
    test that pins both sides.
 
+6. **`drizzle-orm@0.45.3` cannot bind a JS `Date`, so `releaseExpiredReservations` cannot run against a real
+   database.** Found by running the sweep against a live Postgres rather than a double. `findStaleAttempts`
+   binds `olderThan: Date`, and drizzle's postgres-js session hands the value to postgres.js's binary `Bind`
+   untouched, where `Buffer.byteLength(Date)` throws `ERR_INVALID_ARG_TYPE`. Isolated to three probes:
+
+   | probe                                                            | result                          |
+   | ---------------------------------------------------------------- | ------------------------------- |
+   | raw `postgres.js`, `unsafe(sql, [new Date()])`                   | **OK**                          |
+   | drizzle `where(sql\`col < ${new Date()}\`)`                      | **FAIL** `ERR_INVALID_ARG_TYPE` |
+   | drizzle `where(sql\`col < ${date.toISOString()}::timestamptz\`)` | **OK**                          |
+
+   So the driver is sound and the ORM binding is not. This is not confined to one query: `Date` parameters
+   appear throughout `packages/db/src/repos/` (`attempts`, `audit`, `budget`, `checkout`, `devices`,
+   `disputes`, `agents`), so any repository method that filters on a timestamp is dead against a real
+   database. `packages/db` is not this work package's file, so it is reported rather than patched; a fix
+   belongs in the repositories (bind an ISO string with an explicit `timestamptz` cast) or in the ORM pin.
+
+   **Why the tests here did not catch it, and why that is not a defence:** every repository member reaches the
+   store through a port, and this package's harness supplies `storeDouble`. The suite proves the _sequence_,
+   which is what this package owns. It cannot prove the binding, because the binding is somebody else's
+   layer. That gap is exactly why the composition has to be booted against a real database at least once.
+
 ## The Gate stays LLM-free
 
 `OrchestratorDeps` has exactly one member that reaches a language model: `compiler`, through

@@ -242,6 +242,9 @@ describe('registerJobs — the order that makes startup survivable', () => {
     // A schedule that fires before its work() exists creates a job nobody consumes, and the backlog grows
     // silently. Asserting the interleaving is the only way this cannot regress.
     const boss = fakeBoss()
+    // pg-boss needs an open connection before `schedule()`, which is why `startWorker` starts the queue
+    // before registering anything. The fake reproduces that refusal, so this line is required here too.
+    await boss.start()
     const runner = createJobRunner({ webhooks: workerHarness().deps })
     await registerJobs(boss, runner, CRON_SPECS)
 
@@ -257,6 +260,9 @@ describe('registerJobs — the order that makes startup survivable', () => {
 
   it('QUEUE-3 wh.process gets a handler even though it has no cron', async () => {
     const boss = fakeBoss()
+    // pg-boss needs an open connection before `schedule()`, which is why `startWorker` starts the queue
+    // before registering anything. The fake reproduces that refusal, so this line is required here too.
+    await boss.start()
     const runner = createJobRunner({ webhooks: workerHarness().deps })
     const report = await registerJobs(boss, runner, CRON_SPECS)
     expect(report.handlers).toContain(JOB_PROCESS)
@@ -265,6 +271,9 @@ describe('registerJobs — the order that makes startup survivable', () => {
 
   it('QUEUE-3 a handler pg-boss refuses is reported, and the others still register', async () => {
     const boss = fakeBoss()
+    // pg-boss needs an open connection before `schedule()`, which is why `startWorker` starts the queue
+    // before registering anything. The fake reproduces that refusal, so this line is required here too.
+    await boss.start()
     boss.failWorkFor.add(JOB_RECONCILE)
     const runner = createJobRunner({ webhooks: workerHarness().deps })
     const report = await registerJobs(boss, runner, CRON_SPECS)
@@ -279,6 +288,9 @@ describe('registerJobs — the order that makes startup survivable', () => {
 
   it('QUEUE-3 a rejected schedule does not stop the remaining schedules', async () => {
     const boss = fakeBoss()
+    // pg-boss needs an open connection before `schedule()`, which is why `startWorker` starts the queue
+    // before registering anything. The fake reproduces that refusal, so this line is required here too.
+    await boss.start()
     boss.failScheduleFor.add(JOB_BUDGET_RECONCILE)
     const runner = createJobRunner({ webhooks: workerHarness().deps })
     const report = await registerJobs(boss, runner, CRON_SPECS)
@@ -288,6 +300,9 @@ describe('registerJobs — the order that makes startup survivable', () => {
 
   it('QUEUE-3 registration does not start pg-boss; start() is the caller’s decision', async () => {
     const boss = fakeBoss()
+    // **No `start()` here, and that is the assertion.** This case passes an empty CRON_SPECS, so no
+    // `schedule()` is attempted and pg-boss pre-`start()` refusal is never reached. Everywhere else in
+    // this file the queue is started first, because production does that and the fake enforces it.
     await registerJobs(boss, createJobRunner({ webhooks: workerHarness().deps }), CRON_SPECS)
     expect(boss.started).toBe(0)
   })
@@ -296,6 +311,9 @@ describe('registerJobs — the order that makes startup survivable', () => {
     // This is what makes the double usable: it can invoke the real handler without a database.
     const h = workerHarness()
     const boss = fakeBoss()
+    // pg-boss needs an open connection before `schedule()`, which is why `startWorker` starts the queue
+    // before registering anything. The fake reproduces that refusal, so this line is required here too.
+    await boss.start()
     await registerJobs(boss, createJobRunner({ webhooks: h.deps }), CRON_SPECS)
     const handler = boss.handlers.get(JOB_VERIFY)
     expect(handler).toBeDefined()
