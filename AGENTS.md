@@ -24,8 +24,9 @@ Section numbers quoted throughout the code (e.g. "§8.6", "EC-CAP-1", "D19") ref
    no force-push, no `git stash drop`, no history rewriting. Never delete untracked work.
    To undo something, use `git revert` or a new commit.
 4. Never commit secrets. Secrets come from environment variables only (spec §6). `.env*` is ignored
-   except `.env.example`. A secret scan runs in CI and before every push.
-5. Nothing lands without a typecheck, lint, format check, full test run, secret scan and a build.
+   except `.env.example`. CI scans on pushes and PRs; run `pnpm secret-scan` locally before pushing.
+5. Nothing lands without a typecheck, lint, format check, full test run, a passing `pnpm secret-scan`
+   and a build.
 
 ## Engineering rules (spec §8.0)
 

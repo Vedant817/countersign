@@ -1,22 +1,19 @@
 # gitleaks configuration — spec §8.0, AGENTS.md rule 4.
 #
-# The scan runs in CI on every push and PR, over full history. This file tunes it in two directions,
-# and the balance between them matters:
+# CI scans full history on every push and PR. `pnpm secret-scan` scans locally. This file tunes the
+# default rules only with narrowly-scoped exceptions:
 #
-#  - **Fewer false positives**, because a scan that cries wolf gets disabled, and a disabled scan is
-#    worse than none. Every allowlist entry below is specific to a shape that is demonstrably not a
-#    credential.
-#  - **No genuine secret is allowlisted.** If a real key ever matches one of these patterns, that is a
-#    bug in the allowlist and the fix is to remove the entry, not to widen it.
+#  - **Fewer false positives**, without excluding entire documentation, fixture, or lockfile paths.
+#  - **No genuine secret is allowlisted.** Any new exception must match a specific non-credential.
 #
-# `--redact` in CI prints only a fingerprint, never the value, so a leak cannot be read out of the log
-# by anyone with workflow access.
+# `--redact` prevents a reported value from being printed in local logs or CI.
 
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Non-credential strings that match a generic secret pattern"
+regexTarget = "match"
 
 # --- PayPal client IDs are not secrets ---
 #
@@ -26,30 +23,93 @@ description = "Non-credential strings that match a generic secret pattern"
 # this file.
 regexes = [
   # Sandbox and live client ids: A + 13 alphanumerics + a dash + a long suffix.
-  '''\bA[A-Z0-9]{13}-[A-Za-z0-9_-]{20,}\b''',
+  '''^A[A-Z0-9]{13}-[A-Za-z0-9_-]{20,}$''',
 ]
 
+# Reviewed non-credentials in these exact files. Gitleaks suppresses every rule in an allowlisted
+# file, so re-triage any content changes before extending this list. Other fixture paths remain scanned.
+[[allowlists]]
+description = "Reviewed docs, local test credentials, and signed sandbox fixture data"
 paths = [
-  # Our own specification. It quotes example keys, endpoint shapes and header names, and is the
-  # single largest text file in the repository, so a generic pattern will hit it.
-  '''docs/spec/''',
-  # The verification report cites PayPal doc URLs and enum values.
-  '''docs/verification/''',
-  # Lockfiles contain integrity hashes, which are high-entropy base64 by construction. They are
-  # checksummed by pnpm/uv on every install, so tampering with them is not the threat this scan covers.
-  '''pnpm-lock\.yaml''',
-  '''uv\.lock''',
-  # Fixtures are captured sandbox responses. They MUST still be scanned for real credentials — a
-  # captured Authorization header would be a real leak — so this path is deliberately NOT allowlisted.
+  '''^\.env\.example$''',
+  '''^\.github/workflows/ci\.yml$''',
+  '''^\.github/workflows/sandbox-nightly\.yml$''',
+  '''^apps/vi/tests/test_l3\.py$''',
+  '''^apps/web/app/status/status\.test\.ts$''',
+  '''^apps/worker/src/boot\.test\.ts$''',
+  '''^docker-compose\.yml$''',
+  '''^docs/verification/paypal-api-2026-10-04\.md$''',
+  '''^packages/core/test/env\.test\.ts$''',
+  '''^packages/defender/test/evidence-doc\.test\.ts$''',
+  '''^packages/gate/src/decision-record\.ts$''',
+  '''^packages/gate/test/fixtures/vi-binding-replay-capture\.json$''',
+  '''^packages/gate/test/fixtures/vi-verify-budget-capture\.json$''',
+  '''^packages/paypal/src/idempotency\.ts$''',
+  '''^packages/verifier/test/fixtures/chain\.json$''',
+  '''^packages/vi-client/test/fixtures/README\.md$''',
 ]
 
-# Committed build output carries the same strings as source.
-paths_ignore = []
+# Named-secret rules supplement Gitleaks defaults for the configuration this project actually uses.
+[[rules]]
+id = "countersign-paypal-client-secret"
+description = "PayPal client secret assignment"
+regex = '''(?i)\bPAYPAL_CLIENT_SECRET\b\s*[:=]\s*["']?([A-Za-z0-9._~+/=-]{16,})'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["PAYPAL_CLIENT_SECRET"]
 
-# Documentation and fixtures legitimately contain placeholder secrets. These are anchored to the
-# exact placeholder values used in .env.example and docker-compose.yml, so a real key can never match.
-regexTarget = 'match'
+[[rules]]
+id = "countersign-openai-api-key"
+description = "OpenAI API key assignment"
+regex = '''(?i)\bOPENAI_API_KEY\b\s*[:=]\s*["']?((?:sk|sess)-[A-Za-z0-9_-]{20,})'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["OPENAI_API_KEY"]
 
-# A webhook id is an identifier used for signature verification, not the signature itself. It is still
-# treated as a secret in code (it is in SECRET_ENV_KEYS) so it never reaches a log, but its *shape*
-# matches too many generic rules to be useful in the scan.
+[[rules]]
+id = "countersign-vi-kek"
+description = "VI key-encryption key assignment"
+regex = '''(?i)\bVI_KEK\b\s*[:=]\s*["']?([A-Za-z0-9+/]{42,}={0,2})'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["VI_KEK"]
+
+[[rules]]
+id = "countersign-session-secret"
+description = "Session secret assignment"
+regex = '''(?i)\bSESSION_SECRET\b\s*[:=]\s*["']?([A-Za-z0-9._~+/=-]{24,})'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["SESSION_SECRET"]
+
+[[rules]]
+id = "countersign-database-url-credentials"
+description = "Database URL with embedded credentials"
+regex = '''(?i)\bDATABASE_URL\b\s*[:=]\s*["']?[A-Za-z][A-Za-z0-9+.-]*://[^:@\s/]+:([^@\s/]+)@[^ \t"'#]+'''
+secretGroup = 1
+keywords = ["DATABASE_URL"]
+
+[[rules]]
+id = "countersign-gate-private-jwk"
+description = "Gate signing private JWK"
+regex = '''(?i)\bGATE_SIGNING_KEY\b[\s\S]{0,256}?"(?:d|p|q|dp|dq|qi|k)"\s*:\s*"([A-Za-z0-9_-]{32,})"'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["GATE_SIGNING_KEY"]
+
+[[rules]]
+id = "countersign-vi-kid-private-jwk"
+description = "VI private JWK attached to a key identifier"
+# KIDs are public identifiers; only private material next to them is a secret.
+regex = '''(?i)\bVI_[A-Z0-9_]*_KID\b[\s\S]{0,256}?"(?:d|p|q|dp|dq|qi|k)"\s*:\s*"([A-Za-z0-9_-]{32,})"'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["VI_"]
+
+[[rules]]
+id = "countersign-vi-kid-private-pem"
+description = "VI private PEM attached to a key identifier"
+regex = '''(?i)\bVI_[A-Z0-9_]*_KID\b[\s\S]{0,256}?(-----BEGIN [A-Z ]*PRIVATE KEY-----\s*[A-Za-z0-9+/=\r\n]{32,}-----END [A-Z ]*PRIVATE KEY-----)'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["VI_"]

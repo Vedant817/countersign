@@ -33,7 +33,7 @@
     "ec:gen": "node scripts/gen-edge-cases.mjs",
     "ec:check": "node scripts/gen-edge-cases.mjs --check",
     "money:check": "node scripts/check-money-discipline.mjs",
-    "secret-scan": "gitleaks detect --source . --redact --config .gitleaks.toml"
+    "secret-scan": "node scripts/secret-scan.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
