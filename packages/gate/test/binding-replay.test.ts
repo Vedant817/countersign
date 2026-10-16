@@ -99,8 +99,13 @@ it('EC-PRICE-1: real disclosed L3b binding passes merchant key and signature che
   const badSignature = await realWorld()
   const session = await badSignature.deps.checkout(realInput.checkoutId)
   if (!session.ok || !session.value) throw new Error('missing test session')
-  const forgedJwt = `${capture.verify_request.checkout_jwt.slice(0, -10)}X${capture.verify_request.checkout_jwt.slice(-9)}`
-  const forged = { ...session.value, checkout_jwt: forgedJwt }
+  const parts = capture.verify_request.checkout_jwt.split('.')
+  const signature = Buffer.from(parts[2]!, 'base64url')
+  signature[0] = signature[0]! ^ 1
+  const forged = {
+    ...session.value,
+    checkout_jwt: `${parts[0]}.${parts[1]}.${signature.toString('base64url')}`,
+  }
   badSignature.deps.checkout = async () => ok(forged)
   expect(row(await decide(badSignature), 5).detail).toContain('signature')
 })

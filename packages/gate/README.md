@@ -294,6 +294,9 @@ or checkout disclosure blocks; neither is ever `notApplicable`.
   `base64url(sha256(issuer_jwt))` (the ASCII bytes before the first `~`), matching `apps/vi`'s
   `L3CreateResponse.jti` identically. The unique constraint on `checkout_attempts_l3_jti_key` ensures
   atomic replay rejection with `GATE_REPLAY` without a separate race-prone SELECT.
+  A rejected replay never reaches RESERVE, including a temporary reservation followed by RELEASE.
+  The exact issuer bytes identify an authorisation; a fresh `/v1/l3/create` response gets a fresh id.
+  PayPal request retries continue to use the deterministic `PayPal-Request-Id` from §8.6.
 
 Run the captured and fresh live proofs together:
 
@@ -304,6 +307,20 @@ pnpm --filter @countersign/gate exec tsx test/support/live-vi-proof.ts
 The live proof reuses `live-vi-chain.py` and the production `gateDepsFromRepos`/`ViClient` binding,
 with in-memory repository and budget ports. Pass 1 of the live proof now achieves an end-to-end **`ALLOW`**
 verdict with all 12 checks evaluated, 0 outstanding failures, and the signed decision record verified.
+It prints the real L3b JSON path, the vi and Gate replay ids and their byte-for-byte equality, then
+replays the token and requires `GATE_REPLAY` with the RESERVE entry count unchanged. It also confirms
+that retrying `/v1/l3/create` produces a new authorisation and a different id. The captured $133.00
+payment still BLOCKs against its signed $130.00 cap. No PayPal call or real PostgreSQL UNIQUE insert
+is exercised by this harness; its repository ports model that insert atomically in memory.
+
+`test/binding-replay.test.ts` consumes `test/fixtures/vi-binding-replay-capture.json`, captured from
+real HTTP service responses with public tokens and JWKS only. For the two touched fields it pins
+both positive readings and the actual absence of a top-level `checkout_hash` or a token `jti` claim.
+Regenerate that capture without a database using:
+
+```sh
+apps/vi/.venv/Scripts/python.exe packages/gate/test/support/capture-binding.py
+```
 
 ## A finding in `packages/db`, pinned rather than fixed
 
