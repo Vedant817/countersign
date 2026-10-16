@@ -29,6 +29,7 @@ definitions before this package. This one is not new logic — it is the sequenc
 | `ingestAndDefend(source, deps, options)` | `getDispute` → `ingestDisputeToDefender` → `fileDispute`                                                                                | the first `err`; a refused filing is `ok`                                             |
 | `releaseExpiredReservations(deps, now)`  | `findStaleAttempts(now − 30 min)` → already-released filter → `expireStaleReservations` → `setAttemptState('AUTH_EXPIRED')`             | never on a per-reservation failure; failures are collected into `errors`              |
 | `gateDecisionFromRow(row)`               | —                                                                                                                                       | `null` for a row it cannot read                                                       |
+| `orchestratorStoreFromRepos()`           | —                                                                                                                                       | nothing; it _is_ the production `OrchestratorStore`                                   |
 | `compilerFrom(deps)`                     | —                                                                                                                                       | binds the real `compile` / `readBack` / `hasBlockingAmbiguities`                      |
 
 ## I-1, and where it is proved

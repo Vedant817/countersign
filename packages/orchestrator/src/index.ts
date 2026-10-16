@@ -72,6 +72,7 @@ export {
   type IngestAndDefendDeps,
 } from './dispute'
 export { releaseExpiredReservations, RESERVATION_TTL_SECONDS } from './reservations'
+export { orchestratorStoreFromRepos, chainValidFromRecord } from './store'
 
 // --- the ports -----------------------------------------------------------------------------------
 export {
