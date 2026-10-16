@@ -123,3 +123,34 @@ overstated itself, which is the failure mode that matters.
 H-04 (GitHub remote), H-08 (VI upstream clock override), H-09 (PayPal dispute-simulator scopes +
 buyer consent), H-10 (PayPal `PayPal-Request-Id` length). Everything from WP-00 to WP-10 is built;
 WP-06s and everything needing live sandbox is not started.
+
+- **2026-10-16** — **Landed 16 commits that had been written but never reached `main`.** The branch
+  `wp/10-gate-disclosed-payment-review` held them; `main` was still at `4c60f4d`'s successor `2012b0d`
+  and the reflog showed the earlier merge attempt had checked out `main` and returned without merging.
+  Also recovered and committed **197 insertions of uncommitted work** that existed only in the working
+  tree — the Gate's replay-id derivation from the issuer bytes with its captured-token fixture test, and
+  the worker's `settleRequiredWork` (a job that could not finish is retried, not acknowledged). It was
+  green, so it was verified and committed rather than described as mine.
+- **2026-10-16** — **`gate_decisions` had a writer definition and no caller.** `OrchestratorStore` is the
+  only port in `@countersign/orchestrator` with no other package's `deps.ts` to satisfy it, so the test
+  harness's double was the only implementation — and `createOrderFromDecision` re-reads that row by id,
+  refusing with `CS_NOT_FOUND`. Every `ALLOW` would have been followed by a failure and no order could
+  ever exist. `orchestratorStoreFromRepos` is that writer (`5e492d7`). Three things it gets right that
+  the obvious version does not: the two writes abort on error rather than committing an unlinked
+  decision; a missing attempt row returns `ok(undefined)` having written nothing, read *before* the
+  insert because `repo()` turns a throw into a returned `err`; and `chain_valid` is decoded out of the
+  signed record rather than derived, because the harness double's hardcoded `true` would be a fabrication
+  in production.
+- **2026-10-16** — **The app layer is thinner than this table implies, and that is now stated rather
+  than discovered late.** No app imports `gate`, `orders`, `defender`, `compiler`, `agent` or
+  `orchestrator`. `apps/web` serves `/`, `/judge`, `/status` and `/v/[packetId]` — the verifier and a
+  status page. The purchase path has no HTTP surface and the Gate has no call site in any app, so
+  "the Gate allows a purchase end to end" means the orchestrator's own suite against in-memory ports,
+  not a drivable product. `OrchestratorDeps` still needs `gateDepsFromRepos` +
+  `orderStoreFromRepos` + a `BudgetStore` + `CompileDeps` assembled and handed to a route. That is the
+  next piece of work, and it is why WP-13/14 and WP-17a–f remain genuinely unstarted.
+- **2026-10-16** — **A stale `.d.ts` was failing `pnpm format:check`.** `apps/worker/test/harness.d.ts`
+  carried a 2026-10-07 mtime and a full build does not regenerate it. `tsconfig.base.json` sets
+  `declaration` + `declarationMap`, so any `tsc` run that does not inherit a `noEmit` over a
+  `test/**/*.ts` include drops one beside the source. `git ls-files '*.d.ts'` returns 0 by design —
+  packages ship declarations from `dist/`. Now ignored in both `.gitignore` and `.prettierignore`.
