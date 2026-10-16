@@ -126,6 +126,7 @@ export interface PgBossSendOptions {
 /** The subset of pg-boss's `WorkOptions` this worker sets. */
 export interface PgBossWorkOptions {
   batchSize?: number
+  localConcurrency?: number
   includeMetadata?: boolean
 }
 
@@ -293,6 +294,22 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
   const lookbackDays = deps.lookbackDays ?? DEFAULT_LOOKBACK_DAYS
   const logger = deps.logger ?? deps.webhooks.logger
 
+  // These local failures mean required inputs, storage or wiring were unavailable; the job did not
+  // finish its work. The registry's request-level defaults cannot justify queue completion here.
+  const settleRequiredWork = async <T>(
+    result: Promise<Result<T, CsError>> | Result<T, CsError>,
+    context: { readonly job: JobName; readonly logger?: Logger },
+  ): Promise<unknown> => {
+    const settled = await result
+    if (
+      !settled.ok &&
+      ['CS_VALIDATION', 'CS_NOT_FOUND', 'CS_INTERNAL'].includes(settled.error.code)
+    ) {
+      return settleForQueue(err({ ...settled.error, retryable: true }), context)
+    }
+    return settleForQueue(settled, context)
+  }
+
   const unconfigured = (job: JobName, needed: string): QueueHandler => {
     return async () => {
       return settleForQueue(
@@ -313,7 +330,7 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
   const adapt =
     (job: JobName, handler: JobHandler): QueueHandler =>
     async (data) =>
-      settleForQueue(handler(data), { job, logger })
+      settleRequiredWork(handler(data), { job, logger })
 
   return {
     /**
@@ -322,16 +339,7 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
      */
     [JOB_PROCESS]: async (data) => {
       const processed = await processWebhookEvent(data, deps.webhooks, deps.hooks)
-      if (!processed.ok) {
-        // A malformed pointer or absent durable subject means processing never happened. Preserve the
-        // registry code, but retry this delivery instead of recording completion without handling it.
-        const retryable =
-          processed.error.code === 'CS_VALIDATION' || processed.error.code === 'CS_NOT_FOUND'
-        return settleForQueue(
-          retryable ? err({ ...processed.error, retryable: true }) : processed,
-          { job: JOB_PROCESS, logger },
-        )
-      }
+      if (!processed.ok) return settleRequiredWork(processed, { job: JOB_PROCESS, logger })
       const { outcome, fixedWithoutWebhook } = processed.value
       logger?.info('webhook event processed', {
         webhook_event_id: processed.value.eventId,
@@ -347,17 +355,17 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
 
     /** EC-WH-7: re-verify rows stored `PENDING`, and enqueue the ones that pass. */
     [JOB_VERIFY]: async () =>
-      settleForQueue(retryPendingVerifications(deps.webhooks), { job: JOB_VERIFY, logger }),
+      settleRequiredWork(retryPendingVerifications(deps.webhooks), { job: JOB_VERIFY, logger }),
 
     /** EC-WH-1/EC-WH-5: the 5-minute sweep, plus the stored-but-unenqueued backstop. */
     [JOB_RECONCILE]: async () => {
       const requeued = await reprocessUnstoredWork(deps.webhooks)
-      if (!requeued.ok) return settleForQueue(requeued, { job: JOB_RECONCILE, logger })
+      if (!requeued.ok) return settleRequiredWork(requeued, { job: JOB_RECONCILE, logger })
       const report = await reconcileResources(deps.webhooks, {
         lookbackDays,
         hooks: deps.hooks,
       })
-      if (!report.ok) return settleForQueue(report, { job: JOB_RECONCILE, logger })
+      if (!report.ok) return settleRequiredWork(report, { job: JOB_RECONCILE, logger })
       return settleForQueue(ok(summarise(report.value, { requeued: requeued.value.requeued })), {
         job: JOB_RECONCILE,
         logger,
@@ -366,7 +374,7 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
 
     /** §8.12's 2-minute dispute sweep. */
     [JOB_DISPUTES]: async () =>
-      settleForQueue(reconcileDisputes(deps.webhooks), { job: JOB_DISPUTES, logger }),
+      settleRequiredWork(reconcileDisputes(deps.webhooks), { job: JOB_DISPUTES, logger }),
 
     /**
      * EC-TIME-5. Also runs as the first step of `wh.reconcile`, so a five-minute cycle and this cron overlap
@@ -374,7 +382,7 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
      * a single missed tick from being a missed expiry.
      */
     [JOB_AUTH_EXPIRY]: async () =>
-      settleForQueue(authorizationExpirySweep(deps.webhooks), { job: JOB_AUTH_EXPIRY, logger }),
+      settleRequiredWork(authorizationExpirySweep(deps.webhooks), { job: JOB_AUTH_EXPIRY, logger }),
 
     /** §8.10: "Reservations expire after 30 min without an order (a worker job releases them)". */
     [JOB_RELEASE_RESERVATIONS]:
@@ -497,8 +505,9 @@ export async function registerJobs(
       }
       try {
         // One job per batch isolates retries: pg-boss otherwise fails every job in a batch when any
-        // handler rejects. Still iterate the delivery so an unexpected larger batch loses no jobs.
-        await boss.work(job, { batchSize: 1 }, async (jobs) => {
+        // handler rejects. Ten local workers retain the prior ten-jobs-per-poll capacity. Still iterate
+        // the delivery so an unexpected larger batch loses no jobs.
+        await boss.work(job, { batchSize: 1, localConcurrency: 10 }, async (jobs) => {
           if (!Array.isArray(jobs) || jobs.length === 0) {
             throw csError(
               'CS_VALIDATION',

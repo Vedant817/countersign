@@ -194,7 +194,7 @@ describe('productionDeps', () => {
 })
 
 describe('startWorker registers every handler, including the reservation release', () => {
-  it('WORKER-1 no handler is the "unconfigured" no-op — a wired worker has nothing left to skip', async () => {
+  it('EC-WH-5 production ledger handlers reject retryably when database configuration is missing', async () => {
     withEnv()
     const deps = productionDeps()
     const boss = fakeBoss()
@@ -205,44 +205,46 @@ describe('startWorker registers every handler, including the reservation release
     expect(started.value.registration.errors).toHaveLength(0)
     expect(started.value.registration.handlers).toHaveLength(7)
 
-    // `createJobRunner`'s unconfigured branch answers `{ skipped: true, reason: '<job> is not wired' }`.
-    // Asserting that neither job produced that shape is what proves nothing is silently dead — which is
-    // exactly how `release.reservations` was dead for so long.
-    //
-    // Deliberately asserted against *whatever* the handler returned. `settleForQueue` returns `value` on
-    // success and `{ ok: false, completed: true, code }` on a non-retryable failure, so pinning the success
-    // shape here would make the test pass or fail depending on whether a local Postgres happened to be up.
-    // The failure branch is pinned deterministically in the next test instead.
-    for (const job of [JOB_RELEASE_RESERVATIONS, JOB_BUDGET_RECONCILE]) {
-      const handler = boss.handlers.get(job)
-      expect(handler, `${job} has no registered handler`).toBeDefined()
-      const settled = (await handler!({})) as Record<string, unknown>
-      expect(settled, `${job} resolved as the unconfigured no-op`).not.toHaveProperty('skipped')
-      expect(settled, `${job} resolved to undefined, which is worse than a no-op`).toBeDefined()
+    // productionDeps accepts injected configuration; repositories read process.env. Remove the ambient
+    // variable explicitly so this proof cannot depend on a live Postgres or open a connection.
+    const ambientDatabaseUrl = process.env['DATABASE_URL']
+    delete process.env['DATABASE_URL']
+    try {
+      for (const job of [JOB_RELEASE_RESERVATIONS, JOB_BUDGET_RECONCILE]) {
+        const handler = boss.handlers.get(job)
+        expect(handler, `${job} has no registered handler`).toBeDefined()
+        await expect(handler!({})).rejects.toMatchObject({ code: 'CS_VALIDATION', retryable: true })
+      }
+      expect([...boss.jobs.values()].map((job) => job.state)).toEqual(['retry', 'retry'])
+    } finally {
+      if (ambientDatabaseUrl === undefined) delete process.env['DATABASE_URL']
+      else process.env['DATABASE_URL'] = ambientDatabaseUrl
     }
   })
 
-  it('WORKER-1 a failing ledger job settles rather than throwing, so pg-boss can classify it', async () => {
-    // The property that matters: pg-boss decides whether to retry from whether a handler **throws**, so a job
-    // that threw at a dead database would be retried for ever with no diagnostic. A `Result` lets
-    // `settleForQueue` log it once and move on.
-    //
-    // Asserted as "resolves, never rejects" rather than as a particular settled shape. `settleForQueue` returns
-    // `value` on success and `{ ok: false, completed: true, code }` on a non-retryable failure, so pinning the
-    // failure shape here would only pass when the database happens to be unreachable. `DATABASE_URL` cannot be
-    // made unreachable from here either: the composed jobs reach the database through `drizzleStore()`, which
-    // reads the ambient `process.env` rather than the injected `Env`.
+  it('EC-WH-5 a failing ledger job rejects for pg-boss retry rather than completing', async () => {
+    // Required storage must be available before a ledger job can report completion. The queue rejects
+    // retryably; pg-boss's retry limit bounds retries, and the error remains visible in its output.
     withEnv(UNREACHABLE_DATABASE_URL)
     const boss = fakeBoss()
 
     const started = await startWorker({ ...productionDeps(), boss, crons: [] })
     if (!started.ok) throw new Error(`${started.error.code}: ${started.error.message}`)
 
-    for (const job of [JOB_RELEASE_RESERVATIONS, JOB_BUDGET_RECONCILE]) {
-      const handler = boss.handlers.get(job)
-      expect(handler, `${job} has no registered handler`).toBeDefined()
-      // `resolves` is the assertion: a rejection here escapes into pg-boss, which retries it for ever.
-      await expect(handler!({}), `${job} rejected instead of settling`).resolves.toBeDefined()
+    const ambientDatabaseUrl = process.env['DATABASE_URL']
+    delete process.env['DATABASE_URL']
+    try {
+      for (const job of [JOB_RELEASE_RESERVATIONS, JOB_BUDGET_RECONCILE]) {
+        const handler = boss.handlers.get(job)
+        expect(handler, `${job} has no registered handler`).toBeDefined()
+        await expect(handler!({}), `${job} completed without its database`).rejects.toMatchObject({
+          retryable: true,
+        })
+      }
+      expect([...boss.jobs.values()].map((job) => job.state)).toEqual(['retry', 'retry'])
+    } finally {
+      if (ambientDatabaseUrl === undefined) delete process.env['DATABASE_URL']
+      else process.env['DATABASE_URL'] = ambientDatabaseUrl
     }
   })
 
