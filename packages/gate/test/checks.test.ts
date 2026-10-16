@@ -25,6 +25,7 @@ import type { ProductRow } from '@countersign/db'
 import { CHECK_FAILURE_CODES, CHECK_ORDER } from '../src/checks'
 import type { InMemoryGateWorldSeed } from '../src/deps'
 import { evaluate } from '../src/evaluate'
+import { deriveL3ReplayId } from '../src/replay-id'
 import {
   AGENT_ID,
   CART_MINOR,
@@ -467,17 +468,18 @@ describe('check 7 — the L3 jti is unused (EC-IDEM-1)', () => {
     expect(replay.decision).toBe('BLOCK')
     expect(codes(replay)).toContain('GATE_REPLAY')
     expect(check(replay, 7).passed).toBe(false)
-    expect(world.replays).toEqual(['jti-1'])
+    const replayId = deriveL3ReplayId(input().l3a)
+    if (!replayId.ok) throw new Error(replayId.error.message)
+    expect(world.replays).toEqual([replayId.value])
     // EC-IDEM-1: a replay is a *blocked attempt*, not a second charge. The first reservation stands.
     expect(world.snapshot().reserved).toBe(CART_MINOR)
     expectAllTwelveRan(replay)
   })
 
-  it('BLOCKs when the L3a carries no jti at all, because it cannot be replay-protected', async () => {
-    const decision = await decide(await makeWorld(), { l3a: fakeL3a({ jti: undefined }) })
-
-    expect(codes(decision)).toContain('VI_CHAIN_INVALID')
-    expect(check(decision, 7).detail).toContain('no jti')
+  it('EC-IDEM-1: hashes an L3a without a jti claim, as the real vi library emits', async () => {
+    const decision = await decide(await makeWorld(), { l3a: fakeL3a() })
+    expect(decision.decision).toBe('ALLOW')
+    expect(check(decision, 7).passed).toBe(true)
   })
 })
 

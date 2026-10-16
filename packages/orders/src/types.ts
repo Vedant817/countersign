@@ -323,11 +323,15 @@ export interface OrderStore {
      * half that makes AT-M11.4's "an over-refund is rejected with no PayPal call" structural rather
      * than a check that could be forgotten.
      *
-     * No `tx` parameter: the repository requires an executor (it is an `UPDATE`, and running it outside a
-     * transaction is exactly what the guard is protecting against), so the transaction handle is built by
-     * the adapter rather than passed in. See `orderStoreFromRepos`.
+     * Pass `tx` when applying a dispute refund together with its row status. Otherwise the adapter creates
+     * a transaction for the guarded update. See `orderStoreFromRepos`.
      */
-    applyToCapture(captureId: string, amount: Money, at: Date): Promise<Result<CaptureRow, CsError>>
+    applyToCapture(
+      captureId: string,
+      amount: Money,
+      at: Date,
+      tx?: OrderTx,
+    ): Promise<Result<CaptureRow, CsError>>
   }
 
   shipments: {

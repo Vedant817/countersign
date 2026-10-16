@@ -37,7 +37,7 @@
  * `tsc`-checked statement - the rank write path returns `applied: false` rather than throwing, so the second
  * instance sees a normal `ok`.
  */
-import { csError, ok, type CsError, type Logger, type Result } from '@countersign/core'
+import { csError, err, ok, type CsError, type Logger, type Result } from '@countersign/core'
 import {
   authorizationExpirySweep,
   processWebhookEvent,
@@ -98,7 +98,7 @@ export interface PgBossLike {
   work(
     name: string,
     options: PgBossWorkOptions,
-    handler: (job: { data?: unknown }) => Promise<unknown>,
+    handler: (jobs: PgBossJob[]) => Promise<unknown>,
   ): Promise<unknown>
   schedule(
     name: string,
@@ -106,6 +106,12 @@ export interface PgBossLike {
     data?: object | null,
     options?: PgBossSendOptions,
   ): Promise<unknown>
+}
+
+/** pg-boss 12 delivers Job[], including when batchSize is one. Data remains an object. */
+export interface PgBossJob {
+  readonly id: string
+  readonly data?: unknown
 }
 
 /** The subset of pg-boss's `SendOptions` this worker sets. */
@@ -120,6 +126,7 @@ export interface PgBossSendOptions {
 /** The subset of pg-boss's `WorkOptions` this worker sets. */
 export interface PgBossWorkOptions {
   batchSize?: number
+  localConcurrency?: number
   includeMetadata?: boolean
 }
 
@@ -280,18 +287,42 @@ export interface RunnerDeps {
  *   only safe if something re-drives the rows that were stored and never enqueued (EC-WH-1/EC-WH-5's
  *   crash-window backstop). Folding it into the 5-minute cycle means the backstop shares the cron we already
  *   promised rather than needing its own.
- * - **`release.reservations` and `budget.reconcile` are caller-supplied**, and a missing one is a logged
- *   no-op rather than a crash. A worker that refuses to start because a ledger port was not wired would make
- *   the webhook half unavailable during a wiring mistake in the other half.
+ * - **`release.reservations` and `budget.reconcile` are caller-supplied**. Missing ports fail their jobs
+ *   retryably without preventing the webhook half from starting.
  */
 export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler> {
   const lookbackDays = deps.lookbackDays ?? DEFAULT_LOOKBACK_DAYS
   const logger = deps.logger ?? deps.webhooks.logger
 
+  // These local failures mean required inputs, storage or wiring were unavailable; the job did not
+  // finish its work. The registry's request-level defaults cannot justify queue completion here.
+  const settleRequiredWork = async <T>(
+    result: Promise<Result<T, CsError>> | Result<T, CsError>,
+    context: { readonly job: JobName; readonly logger?: Logger },
+  ): Promise<unknown> => {
+    const settled = await result
+    if (
+      !settled.ok &&
+      ['CS_VALIDATION', 'CS_NOT_FOUND', 'CS_INTERNAL'].includes(settled.error.code)
+    ) {
+      return settleForQueue(err({ ...settled.error, retryable: true }), context)
+    }
+    return settleForQueue(settled, context)
+  }
+
   const unconfigured = (job: JobName, needed: string): QueueHandler => {
     return async () => {
-      logger?.warn('job has no handler wired', { job, needed })
-      return { skipped: true, reason: `${job} is not wired in this process` }
+      return settleForQueue(
+        err(
+          csError(
+            'CS_INTERNAL',
+            `${job} is not wired in this process`,
+            { needed },
+            { retryable: true },
+          ),
+        ),
+        { job, logger },
+      )
     }
   }
 
@@ -299,7 +330,7 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
   const adapt =
     (job: JobName, handler: JobHandler): QueueHandler =>
     async (data) =>
-      settleForQueue(handler(data), { job, logger })
+      settleRequiredWork(handler(data), { job, logger })
 
   return {
     /**
@@ -308,7 +339,7 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
      */
     [JOB_PROCESS]: async (data) => {
       const processed = await processWebhookEvent(data, deps.webhooks, deps.hooks)
-      if (!processed.ok) return settleForQueue(processed, { job: JOB_PROCESS, logger })
+      if (!processed.ok) return settleRequiredWork(processed, { job: JOB_PROCESS, logger })
       const { outcome, fixedWithoutWebhook } = processed.value
       logger?.info('webhook event processed', {
         webhook_event_id: processed.value.eventId,
@@ -324,17 +355,17 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
 
     /** EC-WH-7: re-verify rows stored `PENDING`, and enqueue the ones that pass. */
     [JOB_VERIFY]: async () =>
-      settleForQueue(retryPendingVerifications(deps.webhooks), { job: JOB_VERIFY, logger }),
+      settleRequiredWork(retryPendingVerifications(deps.webhooks), { job: JOB_VERIFY, logger }),
 
     /** EC-WH-1/EC-WH-5: the 5-minute sweep, plus the stored-but-unenqueued backstop. */
     [JOB_RECONCILE]: async () => {
       const requeued = await reprocessUnstoredWork(deps.webhooks)
-      if (!requeued.ok) return settleForQueue(requeued, { job: JOB_RECONCILE, logger })
+      if (!requeued.ok) return settleRequiredWork(requeued, { job: JOB_RECONCILE, logger })
       const report = await reconcileResources(deps.webhooks, {
         lookbackDays,
         hooks: deps.hooks,
       })
-      if (!report.ok) return settleForQueue(report, { job: JOB_RECONCILE, logger })
+      if (!report.ok) return settleRequiredWork(report, { job: JOB_RECONCILE, logger })
       return settleForQueue(ok(summarise(report.value, { requeued: requeued.value.requeued })), {
         job: JOB_RECONCILE,
         logger,
@@ -343,7 +374,7 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
 
     /** §8.12's 2-minute dispute sweep. */
     [JOB_DISPUTES]: async () =>
-      settleForQueue(reconcileDisputes(deps.webhooks), { job: JOB_DISPUTES, logger }),
+      settleRequiredWork(reconcileDisputes(deps.webhooks), { job: JOB_DISPUTES, logger }),
 
     /**
      * EC-TIME-5. Also runs as the first step of `wh.reconcile`, so a five-minute cycle and this cron overlap
@@ -351,7 +382,7 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
      * a single missed tick from being a missed expiry.
      */
     [JOB_AUTH_EXPIRY]: async () =>
-      settleForQueue(authorizationExpirySweep(deps.webhooks), { job: JOB_AUTH_EXPIRY, logger }),
+      settleRequiredWork(authorizationExpirySweep(deps.webhooks), { job: JOB_AUTH_EXPIRY, logger }),
 
     /** §8.10: "Reservations expire after 30 min without an order (a worker job releases them)". */
     [JOB_RELEASE_RESERVATIONS]:
@@ -473,7 +504,39 @@ export async function registerJobs(
         }
       }
       try {
-        await boss.work(job, { batchSize: 10 }, async (job_) => runner[job](job_.data))
+        // One job per batch isolates retries: pg-boss otherwise fails every job in a batch when any
+        // handler rejects. Ten local workers retain the prior ten-jobs-per-poll capacity. Still iterate
+        // the delivery so an unexpected larger batch loses no jobs.
+        await boss.work(job, { batchSize: 1, localConcurrency: 10 }, async (jobs) => {
+          if (!Array.isArray(jobs) || jobs.length === 0) {
+            throw csError(
+              'CS_VALIDATION',
+              `${job} needs a non-empty pg-boss Job[]`,
+              {},
+              { retryable: true },
+            )
+          }
+          const outputs: unknown[] = []
+          for (const item of jobs) {
+            if (
+              !item ||
+              typeof item !== 'object' ||
+              !Object.hasOwn(item, 'data') ||
+              (item.data !== null &&
+                item.data !== undefined &&
+                (typeof item.data !== 'object' || Array.isArray(item.data)))
+            ) {
+              throw csError(
+                'CS_VALIDATION',
+                `${job} has a malformed job payload`,
+                {},
+                { retryable: true },
+              )
+            }
+            outputs.push(await runner[job](item.data))
+          }
+          return outputs.length === 1 ? outputs[0] : outputs
+        })
       } catch (cause) {
         errors.push({
           job,

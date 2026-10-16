@@ -423,11 +423,13 @@ export function findCaptureByPaypalId(
 ): Promise<Result<CaptureRow | undefined, CsError>> {
   return repo(
     async () => {
-      const rows = await (exec ?? db())
+      const query = (exec ?? db())
         .select()
         .from(captures)
         .where(eq(captures.paypal_capture_id, paypalCaptureId))
         .limit(1)
+      // Refund reservations read and insert under the same capture lock (EC-REF-2).
+      const rows = await (exec ? query.for('update') : query)
       return rows[0] as CaptureRow | undefined
     },
     { table: 'captures', paypalCaptureId },

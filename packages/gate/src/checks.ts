@@ -24,7 +24,7 @@
  * | 3 | Device ACTIVE | `devices` | `GATE_REVOKED` |
  * | 4 | vi `/v1/verify` strict: `chain_valid` and `constraints.satisfied` | `deps.verify` | `VI_CHAIN_INVALID` / `VI_CONSTRAINT_VIOLATION` |
  * | 5 | Checkout JWT hash == L3b `checkout_hash`; signed by an accepted merchant kid | `checkout_sessions.checkout_jwt/checkout_hash` + `deps.merchantKeys` | `VI_CHAIN_INVALID` |
- * | 6 | `price_lock_exp > now`; totals == L3a amount; currency equal | `checkout_sessions` + L3a claims | `GATE_PRICE_LOCK_EXPIRED` / `CS_CURRENCY_MISMATCH` |
+ * | 6 | `price_lock_exp > now`; totals == L3a amount; currency equal | `checkout_sessions` + verified `disclosed.l3a` | `GATE_PRICE_LOCK_EXPIRED` / `CS_CURRENCY_MISMATCH` |
  * | 7 | L3 `jti` unused | the `checkout_attempts` insert | `GATE_REPLAY` |
  * | 8 | Budget: `FOR UPDATE`, `reserved+spent+amount ≤ min(signed L2 budget, cap)`, insert RESERVE | `BudgetStore` + the verified chain's `disclosed.l2` | `GATE_BUDGET_EXCEEDED` (+ `VI_CONSTRAINT_VIOLATION` when the signed budget is owed and unreadable) |
  * | 9 | Wallet cap, period, across all mandates | `wallet_caps` + `budget_entries` | `GATE_WALLET_CAP` |
@@ -43,7 +43,6 @@ import {
   csError,
   err,
   formatMoney,
-  isCurrency,
   ok,
   type CsError,
   type CsErrorCode,
@@ -53,7 +52,6 @@ import {
   type Result,
   type WalletId,
 } from '@countersign/core'
-import { schemas } from '@countersign/core'
 import type { ConstraintType } from '@countersign/vi-client'
 import { normaliseSkipped, pendingNetworkEnforcement } from '@countersign/vi-client'
 import { assertAmountMatchesSession, assertPriceLockValid } from '@countersign/db'
@@ -86,6 +84,9 @@ import {
   mergeRecurrenceConstraints,
   type DisclosedConstraints,
 } from './signed-constraints'
+import { PAYMENT_SOURCE, readSignedPayment } from './signed-payment'
+import { CHECKOUT_SOURCE, readSignedCheckout } from './signed-checkout'
+import { deriveL3ReplayId } from './replay-id'
 
 /* ------------------------------------------------------------------------------------------ */
 /* The table, as data                                                                             */
@@ -186,6 +187,12 @@ export interface CheckState {
    * already made.
    */
   signedConstraints: DisclosedConstraints
+  /** vi's resolved signed token, from VerifyResponse.disclosed.l3a in check 4 (D-038). */
+  disclosedL3a: Record<string, unknown> | null
+  /** vi's resolved L3b checkout mandate, from the same verification response as L3a. */
+  disclosedL3b: Record<string, unknown> | null
+  /** A refused unique insert must never reach a second budget reservation. */
+  replayRejected: boolean
 }
 
 export interface CheckStateMandate {
@@ -690,6 +697,8 @@ export async function check4ChainVerify(ctx: CheckContext): Promise<CheckResult>
   // same reason `pending` is: the detail a reader of the signed record needs is "vi disclosed a
   // budget we now enforce", and that has to survive a chain-invalid verdict too.
   ctx.state.signedConstraints = disclosedConstraints(report.disclosed?.l2)
+  ctx.state.disclosedL3a = report.disclosed?.l3a ?? null
+  ctx.state.disclosedL3b = report.disclosed?.l3b ?? null
 
   if (!report.chain_valid) {
     return fail(
@@ -719,6 +728,8 @@ export async function check4ChainVerify(ctx: CheckContext): Promise<CheckResult>
       ),
     )
   }
+  const payment = readSignedPayment(ctx.state.disclosedL3a)
+  if (!payment.found) return missing(4, payment.why)
   return pass(
     4,
     `chain valid (L1 ${tokens.value.l1Source}, L2 mandates.l2_serialized); ${ctx.state.pending.length} network-enforced constraint(s) pending: ${ctx.state.pending.join(', ') || 'none'}`,
@@ -980,21 +991,35 @@ export async function check5CheckoutBinding(ctx: CheckContext): Promise<CheckRes
   ctx.state.l3b = l3b.ok ? l3b.claims : null
   if (!l3b.ok) return fail(5, chainInvalid(`L3b is not a compact JWS: ${l3b.error}`))
 
-  if (typeof l3b.claims.checkout_hash !== 'string' || l3b.claims.checkout_hash.length === 0) {
-    return fail(
+  const binding = readSignedCheckout(ctx.state.disclosedL3b)
+  if (!binding.found) {
+    return missing(
       5,
-      chainInvalid(`L3b carries no checkout_hash claim, so it is not bound to any cart`),
+      `${binding.why}; session ${session.id} locked ${session.checkout_hash ?? '(absent)'}`,
     )
   }
-  if (l3b.claims.checkout_hash !== session.checkout_hash) {
+  if (!session.checkout_hash || binding.checkoutHash !== session.checkout_hash) {
     return fail(
       5,
       chainInvalid(
-        `L3b binds checkout_hash ${l3b.claims.checkout_hash} but session ${session.id} locked ${session.checkout_hash}`,
+        `L3b binds checkout_hash ${binding.checkoutHash} but session ${session.id} locked ${session.checkout_hash || '(absent)'}`,
       ),
     )
   }
-  return pass(5, `bound to session ${session.id}, merchant kid ${decoded.kid}`)
+  const payment = readSignedPayment(ctx.state.disclosedL3a)
+  if (!payment.found) return fail(5, chainInvalid(payment.why))
+  if (payment.payeeId !== session.merchant_id) {
+    return fail(
+      5,
+      chainInvalid(
+        `${PAYMENT_SOURCE} payee ${payment.payeeId} is not this session's merchant ${session.merchant_id}`,
+      ),
+    )
+  }
+  return pass(
+    5,
+    `bound to session ${session.id} via ${CHECKOUT_SOURCE}, merchant kid ${decoded.kid}, signed payee ${payment.payeeId}`,
+  )
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -1014,7 +1039,7 @@ export async function check5CheckoutBinding(ctx: CheckContext): Promise<CheckRes
  * user-signed ₹ limit silently becoming a $ spend is exactly what the signature was supposed to prevent;
  * the buyer is told to create a mandate in the store currency.
  *
- * The payee is compared too, although §8.10 does not list it: `l3a.payee_id` must be this session's
+ * The payee is compared too, although §8.10 does not list it: the disclosed L3a's `payee.id` must be this session's
  * merchant. `mandate.payment.allowed_payees` is checked by vi in check 4, but the Gate holding its own
  * copy of "this cart is for *this* payee" costs three lines and closes I-1's last word — the decision
  * record's `payee` comes from the session, so the record must be derived from the same row.
@@ -1035,10 +1060,10 @@ export async function check6PriceLock(ctx: CheckContext): Promise<CheckResult> {
   const lock = assertPriceLockValid(session, ctx.now)
   if (!lock.ok) failures.push(lock.error)
 
-  const amount = l3aAmount(decoded.claims)
-  if (!amount.ok) failures.push(amount.error)
+  const payment = readSignedPayment(ctx.state.disclosedL3a)
+  if (!payment.found) failures.push(csError(payment.code, payment.why))
   else {
-    const matches = assertAmountMatchesSession(session, amount.value)
+    const matches = assertAmountMatchesSession(session, payment.amount)
     if (!matches.ok) failures.push(matches.error)
 
     // The amount the Gate will reserve is the **merchant's locked total**, not the token's claim.
@@ -1046,15 +1071,15 @@ export async function check6PriceLock(ctx: CheckContext): Promise<CheckResult> {
     // BLOCK the session total is the one that came from server-side state.
     ctx.state.reserveAmount = { minor: session.total_minor, currency: session.currency }
 
-    const payee = decoded.claims.payee_id
-    if (typeof payee !== 'string' || payee !== session.merchant_id) {
+    const payee = payment.payeeId
+    if (payee !== session.merchant_id) {
       failures.push(
         csError(
           'VI_CHAIN_INVALID',
-          `L3a payee ${typeof payee === 'string' ? payee : '(absent)'} is not this session's merchant ${session.merchant_id}`,
+          `${PAYMENT_SOURCE} payee ${payee} is not this session's merchant ${session.merchant_id}`,
           {
             checkoutId: session.id,
-            l3aPayee: typeof payee === 'string' ? payee : null,
+            l3aPayee: payee,
             sessionPayee: session.merchant_id,
           },
         ),
@@ -1076,7 +1101,7 @@ export async function check6PriceLock(ctx: CheckContext): Promise<CheckResult> {
   }
   return pass(
     6,
-    `locked ${formatMoney({ minor: session.total_minor, currency: session.currency })} until ${session.price_lock_exp.toISOString()}`,
+    `locked ${formatMoney({ minor: session.total_minor, currency: session.currency })} until ${session.price_lock_exp.toISOString()}; matches ${PAYMENT_SOURCE}.mandate.payment.1.payment_amount and payee.id`,
   )
 }
 
@@ -1110,13 +1135,9 @@ export async function check7Replay(ctx: CheckContext): Promise<CheckResult> {
     l3a = decoded.claims
     ctx.state.l3a = l3a
   }
-  const jti = typeof l3a.jti === 'string' ? l3a.jti : null
-  if (jti === null) {
-    return fail(
-      7,
-      chainInvalid('L3a carries no jti, so this authorisation cannot be replay-protected'),
-    )
-  }
+  const replayId = deriveL3ReplayId(ctx.input.l3a)
+  if (!replayId.ok) return fail(7, replayId.error)
+  const jti = replayId.value
 
   const row: NewAttemptForGate = {
     id: ctx.input.attemptId,
@@ -1135,6 +1156,7 @@ export async function check7Replay(ctx: CheckContext): Promise<CheckResult> {
   const inserted = await ctx.deps.insertAttempt(row)
   if (!inserted.ok) {
     if (inserted.error.code === 'GATE_REPLAY' || inserted.error.code === 'CS_CONFLICT') {
+      ctx.state.replayRejected = true
       return fail(
         7,
         csError('GATE_REPLAY', `L3 jti ${jti} has already been used for a checkout attempt`, {
@@ -1384,60 +1406,10 @@ export function cartLines(session: CheckoutSessionRow): Array<{ sku: string; qty
   return out
 }
 
-/**
- * The L3a's amount, as integer minor units in a currency, or an error.
- *
- * `bigintFromJson` is core's single sanctioned JSON→bigint conversion. `amount_minor` arrives as a JSON
- * *number* on the wire (vi's `minorUnitsSchema`), and `BigInt(1300.5)` would throw while
- * `Number(1300.5) + 0` would quietly round — so the conversion is explicit and the non-integer case is
- * a `CS_ROUNDING` error rather than a surprise.
- */
-export function l3aAmount(claims: L3Claims): Result<Money, CsError> {
-  const raw = claims.amount_minor
-  const currency = claims.currency
-  if (!isCurrency(currency)) {
-    return {
-      ok: false,
-      error: csError(
-        'CS_VALIDATION',
-        `L3a carries no supported ISO-4217 currency: ${String(currency)}`,
-        { currency: String(currency) },
-      ),
-    }
-  }
-  if (raw === undefined || raw === null) {
-    return { ok: false, error: csError('CS_VALIDATION', 'L3a carries no amount_minor') }
-  }
-  if (typeof raw === 'number' && !Number.isInteger(raw)) {
-    return {
-      ok: false,
-      error: csError(
-        'CS_ROUNDING',
-        `L3a amount_minor ${raw} is not an integer; money is never a float (EC-FX-6)`,
-      ),
-    }
-  }
-  let minor: bigint
-  try {
-    minor = schemas.bigintFromJson(raw as string | number | bigint)
-  } catch (cause) {
-    return {
-      ok: false,
-      error: csError(
-        'CS_VALIDATION',
-        'L3a amount_minor is not integer minor units',
-        { raw: String(raw) },
-        { cause },
-      ),
-    }
-  }
-  if (minor < 0n) {
-    return {
-      ok: false,
-      error: csError('CS_VALIDATION', 'L3a amount_minor is negative', { raw: String(raw) }),
-    }
-  }
-  return { ok: true, value: { minor, currency } }
+/** Read money from vi's resolved signed L3a, never from the issuer JWS's top-level claims. */
+export function l3aAmount(disclosedL3a: unknown): Result<Money, CsError> {
+  const payment = readSignedPayment(disclosedL3a)
+  return payment.found ? ok(payment.amount) : err(csError(payment.code, payment.why))
 }
 
 /** Sign a `checks_hash` input: the twelve rows, nothing else. */

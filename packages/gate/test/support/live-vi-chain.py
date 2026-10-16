@@ -220,23 +220,23 @@ def main() -> None:  # noqa: C901 - a linear script is clearer than a state mach
             },
         )
 
-        l3 = post(
-            "/v1/l3/create",
-            {
-                "agent_kid": agent["kid"],
-                "enc_private_key_b64": agent["enc_private_key_b64"],
-                "l2": finalized["l2"],
-                "checkout_jwt": checkout["checkout_jwt"],
-                "payment": {
-                    "amount_minor": TOTAL_MINOR,
-                    "currency": CURRENCY,
-                    "payee_id": MERCHANT["id"],
-                },
-                "aud": "https://network.countersign.test",
-                "nonce": "l3-nonce-live-1",
-                "agent_id": AGENT_ID,
+        l3_request = {
+            "agent_kid": agent["kid"],
+            "enc_private_key_b64": agent["enc_private_key_b64"],
+            "l2": finalized["l2"],
+            "checkout_jwt": checkout["checkout_jwt"],
+            "payment": {
+                "amount_minor": TOTAL_MINOR,
+                "currency": CURRENCY,
+                "payee_id": MERCHANT["id"],
             },
-        )
+            "aud": "https://network.countersign.test",
+            "nonce": "l3-nonce-live-1",
+            "agent_id": AGENT_ID,
+        }
+        l3 = post("/v1/l3/create", l3_request)
+        # D-033/D-034: repeating creation signs a new authorisation, not a reused replay id.
+        fresh_l3 = post("/v1/l3/create", l3_request)
 
         verify_request = {
             "l1": l1["l1"],
@@ -271,6 +271,8 @@ def main() -> None:  # noqa: C901 - a linear script is clearer than a state mach
             "l3a": l3["l3a"],
             "l3b": l3["l3b"],
             "jti": l3["jti"],
+            "fresh_l3a": fresh_l3["l3a"],
+            "fresh_jti": fresh_l3["jti"],
             "checkout_jwt": checkout["checkout_jwt"],
             "checkout_hash": checkout["checkout_hash"],
             "verify_request": verify_request,

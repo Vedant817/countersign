@@ -54,9 +54,13 @@ async function reservedWorld() {
     h.deps,
   )
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+  if (result.value.stage !== 'ORDERED') {
+    throw new Error(`expected an ordered purchase to seed a reservation, got ${result.value.stage}`)
+  }
   // Undo the last two steps of the pipeline, keeping the `RESERVE` and the decision.
   for (const id of [...h.orderWorld.rows.orders.keys()]) h.orderWorld.rows.orders.delete(id)
-  const attempt = h.orderWorld.rows.attempts.get(ATTEMPT_ID)!
+  const attempt = h.orderWorld.rows.attempts.get(ATTEMPT_ID)
+  if (attempt === undefined) throw new Error(`expected a checkout attempt for ${ATTEMPT_ID}`)
   h.orderWorld.rows.attempts.set(ATTEMPT_ID, { ...attempt, state: 'GATED_ALLOW' })
   return h
 }

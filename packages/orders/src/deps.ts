@@ -383,7 +383,8 @@ export function orderStoreFromRepos(handles: OrderRepoHandles): OrderStore {
       // The repository demands an executor, and the guarded `UPDATE` is the whole point of the method, so
       // the adapter runs it in **its own** transaction. A read-then-write outside one would reintroduce
       // exactly the race the `WHERE` clause exists to close.
-      applyToCapture: async (captureId, amount, at) => {
+      applyToCapture: async (captureId, amount, at, tx) => {
+        if (tx) return handles.applyRefundToCapture(captureId, amount, at, tx)
         // `withTx`'s `T` is the inner `Result`, so a business refusal arrives as `ok(ok(false))`. Flattening
         // it here is what keeps the port's contract `Result<CaptureRow, CsError>` rather than a nested
         // envelope every caller would have to unwrap.
@@ -915,8 +916,15 @@ export function createInMemoryOrderWorld(seed: InMemoryOrderWorldSeed = {}): InM
     })
   }
 
+  let transactionTail: Promise<void> = Promise.resolve()
   const store: OrderStore = {
     async transaction<T>(fn: (tx: OrderTx) => Promise<T>): Promise<Result<T, CsError>> {
+      const previous = transactionTail
+      let release: () => void = () => {}
+      transactionTail = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      await previous
       const saved = snapshot()
       const savedWrites = writes.length
       pendingWrites = []
@@ -936,6 +944,7 @@ export function createInMemoryOrderWorld(seed: InMemoryOrderWorldSeed = {}): InM
             : csError('CS_INTERNAL', 'transaction aborted', { cause: String(cause) }),
         )
       } finally {
+        release()
         pendingWrites = []
       }
     },

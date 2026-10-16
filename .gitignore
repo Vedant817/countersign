@@ -14,6 +14,13 @@ dist/
 .cache/
 *.tsbuildinfo
 next-env.d.ts
+# A declaration beside its source is always a stray emit, never a file to track: packages ship
+# declarations from `dist/` via `tsconfig.build.json`, and `git ls-files "*.d.ts"` returns nothing by
+# design. `tsconfig.base.json` sets `declaration` + `declarationMap`, so any `tsc` run that does not
+# inherit a `noEmit` over a `test/**/*.ts` include drops these into the source tree. They are build
+# output with a nine-day-old mtime, not work.
+*.d.ts
+*.d.ts.map
 .eslintcache
 coverage/
 .nyc_output/

@@ -155,6 +155,15 @@ export {
 export { voidRemainder, voidRequestId } from './void'
 
 export {
+  defenderRefundsFromOrders,
+  disputeRefundKey,
+  disputeRefundRequestId,
+  refundViaDispute,
+  type DisputeRefundInput,
+  type DisputeRefundOutcome,
+} from './dispute-refund'
+
+export {
   PENDING_REFUND_PREFIX,
   REFUND_RETRY_DELAY_SECONDS,
   refund,

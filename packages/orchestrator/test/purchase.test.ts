@@ -417,7 +417,9 @@ describe('I-1 the signed chain arrives as an argument and is never manufactured 
   it('I-1 a Gate BLOCK on an invalid chain still returns the decision, and PayPal is never reached', async () => {
     // EC-MER-2 / EC-MER-1: a merchant presenting a chain that does not verify. The orchestrator's job is to
     // pass it to the Gate and report what came back — not to decide anything itself.
-    const h = await harness()
+    const h = await harness({
+      verify: { chain_valid: false, errors: ['test chain rejected by vi'] },
+    })
     const result = await createOrderFromIntent(
       intent({
         gate: gateInput({ l3b: l3b({ checkout_hash: 'a-different-hash' }) }),
@@ -435,7 +437,21 @@ describe('I-1 the signed chain arrives as an argument and is never manufactured 
   it('I-1 a chain claiming a different amount than the cart is refused, and the recorded amount is the cart', async () => {
     // The Gate's check 6 cross-checks the L3a amount against the cart total. Here the L3a claims $500 for a
     // $30 cart — the injection shape §8.13 is about.
-    const h = await harness()
+    const h = await harness({
+      verify: {
+        disclosed: {
+          l3a: {
+            delegate_payload: [
+              {
+                vct: 'mandate.payment.1',
+                payment_amount: { amount: '50000', currency: 'USD' },
+                payee: { id: 'ATTACKER-MERCHANT' },
+              },
+            ],
+          },
+        },
+      },
+    })
     const result = await createOrderFromIntent(
       intent({
         gate: gateInput({ l3a: l3a({ amount_minor: 50_000, payee_id: 'ATTACKER-MERCHANT' }) }),

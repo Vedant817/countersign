@@ -300,7 +300,29 @@ read as a verified claim and was neither checked nor even correct. `chain_valid`
 is compared against §3.1 I-1's own precondition; `amount`/`currency`/`payee` are three more rows. The signature
 row keeps its scope — \_the record has not been edited* — and says so, pointing at the rows that do the rest.
 
-### `checkout_binding` resolves the L3b, it does not merely decode it
+### `checkout_binding` resolves the L3b and hashes the complete raw checkout JWT (QA4-VERIFIER-1 / EC-PRICE-1)
+
+`delegate_payload` carries `{"...": digest}` references and the `mandate.checkout.1` claim with its
+`checkout_hash` lives in the **disclosure section**. Reading the payload alone finds no `vct` at all, which
+would make the page report "commits to no price lock" for every untampered packet - a false alarm on the one
+page nobody may cry wolf on. `resolveSdJwt` matches digests the way the SD-JWT spec defines them (the **ASCII
+base64url string** is hashed, not the decoded bytes) and substitutes recursively, leaving unresolvable
+references in place rather than dropping them.
+
+The walk is recursive for the same reason: a key-bound L3 may nest its checkout mandate inside a
+key-confirmation wrapper, and a flat scan finds nothing.
+
+**The preimage for `checkout_hash` is the complete ASCII compact JWT.**
+A merchant's signature on a checkout JWT only proves the merchant signed _some_ cart; it does not prove it is the
+cart authorized by L3b. Previously, both offline verifiers read an optional `checkout_hash` claim from the decoded
+JWT payload. When absent (which is normal - `apps/vi/src/vi_service/checkout_jwt.py` never emits `checkout_hash`
+inside the JWT payload, returning it as a separate derived field), the check assumed the price lock did not restate
+the hash and passed. This allowed an attacker to substitute a genuinely merchant-signed checkout JWT for an
+entirely different cart.
+
+Both TypeScript `offlineChecks` and the generated `verify.py` now compute `base64url(sha256(checkout_jwt.encode("ascii")))`
+over the complete compact ASCII JWT and assert exact equality with L3b's committed `checkout_hash`. Any substituted
+price lock - even if legitimately signed by the merchant - produces a distinct hash and fails `checkout_binding`.
 
 `delegate_payload` carries `{"...": digest}` references and the `mandate.checkout.1` claim with its
 `checkout_hash` lives in the **disclosure section**. Reading the payload alone finds no `vct` at all, which

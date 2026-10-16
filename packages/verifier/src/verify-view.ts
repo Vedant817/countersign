@@ -62,6 +62,7 @@ import {
   isSha256Base64Url,
   l1DisclosedClaim,
   resolveSdJwt,
+  sha256Base64Url,
   textSha256Hex,
   wireBundle,
 } from './bundle'
@@ -704,21 +705,13 @@ function requiredMembersCheck(bundle: Readonly<Record<string, unknown>>): Verifi
  * `binding` check and not a `signature` one — it is the check that makes "the mandate authorised *this*
  * price" rather than "the mandate authorised *a* price".
  *
- * ### The three outcomes, and the middle one that matters
+ * The preimage is the ASCII bytes of the COMPLETE compact JWT, including its signature, as used by
+ * `checkout_hash_from_jwt` in the real producer. The producer returns that digest separately and does not
+ * put it in the JWT payload. Even a merchant-signed payload claiming the right hash proves nothing about
+ * this binding: a merchant can sign another cart. Always recompute; never trust a restated claim.
  *
- * | `checkout_hash` in the price lock | verdict | reading |
- * |---|---|---|
- * | equals what L3b committed to | `PASS` | the mandate authorised this cart |
- * | absent from the JWT payload | `PASS` | nothing to compare; the JWT's own ES256 signature is checked by vi and by `verify.py`, and a tampered payload would fail it there |
- * | present and different | `FAIL` | L3b authorised a **different** cart from the one in this packet |
- *
- * The middle row is why this check is a `binding` and not a `signature`. Our `checkout-jwt` route puts
- * `checkout_hash` outside the signed payload (the JWT covers the cart; the hash is what vi recomputes and
- * L3b commits to), so "the JWT does not restate the hash" is the normal case and reporting it as a failure
- * would make the page cry wolf on every real packet.
- *
- * Both sides are **decoded and resolved, never verified** here: the signature check is vi's job and
- * `verify.py`'s, and this only compares two claims that those signatures already cover.
+ * L3b is resolved, not signature-verified here. A matching digest establishes this local comparison only;
+ * full chain verification belongs to vi-service and the pinned-library phase of `verify.py`.
  */
 function checkoutBindingCheck(bundle: Readonly<Record<string, unknown>>): VerifierCheck {
   const jwt = readStringOrNull(bundle, 'checkout_jwt')
@@ -763,8 +756,6 @@ function checkoutBindingCheck(bundle: Readonly<Record<string, unknown>>): Verifi
     )
   }
   const committed = committedCheckoutHash(decodedL3b.payload)
-  const merchantKeyId = decodedJwt.kid
-  const fromJwt = readStringOrNull(decodedJwt.claims, 'checkout_hash')
   if (committed === null) {
     return check(
       'checkout_binding',
@@ -777,30 +768,39 @@ function checkoutBindingCheck(bundle: Readonly<Record<string, unknown>>): Verifi
       '§8.3 AT-M3.7',
     )
   }
-  if (fromJwt !== null && fromJwt !== committed) {
+  // Base64url compact JWS is ASCII. Validate before using the UTF-8 hashing helper: its bytes then equal
+  // the producer's ASCII bytes. Node's 'ascii' encoder alone would silently truncate non-ASCII input.
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(jwt)) {
+    return check(
+      'checkout_binding',
+      'binding',
+      'The price lock is not a compact ASCII JWT',
+      'FAIL',
+      'The checkout hash requires the complete ASCII compact JWT; this value is not one.',
+      'local',
+      '§8.3 AT-M3.7 · AT-M18.1',
+    )
+  }
+  const presented = sha256Base64Url(jwt)
+  if (presented !== committed) {
     return check(
       'checkout_binding',
       'binding',
       'The price lock does not match what L3b committed to',
       'FAIL',
-      `L3b committed to checkout_hash ${short(committed)}, but this price lock carries ${short(fromJwt)}. ` +
+      `L3b committed to checkout_hash ${short(committed)}, but the complete checkout JWT hashes to ${short(presented)}. ` +
         'The agent authorised a different cart from the one in this packet.',
       'local',
       '§8.3 AT-M3.7 · AT-M18.1',
     )
   }
-  const alsoCarries =
-    fromJwt === null
-      ? "the price lock does not restate the hash, so the binding rests on L3b's commitment plus the " +
-        "merchant's signature over the price lock"
-      : 'and the price lock restates it'
   return check(
     'checkout_binding',
     'binding',
-    'The agent authorised exactly this price lock',
+    'The checkout JWT hash matches L3b’s commitment',
     'PASS',
-    `L3b commits to checkout_hash ${short(committed)}, and ${alsoCarries}` +
-      `${merchantKeyId === null ? '' : ` (price lock signed by merchant key ${merchantKeyId})`}.`,
+    `SHA-256 of the complete checkout JWT’s ASCII bytes is ${short(presented)}, exactly L3b’s ` +
+      'checkout_hash. This checks the binding; it does not verify the L3b signature or the whole chain.',
     'local',
     '§8.3 AT-M3.7',
   )

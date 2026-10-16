@@ -44,7 +44,8 @@
  * 4. Both recurrence types are read, with the exact key names the library emits.
  * 5. **No constraint entry in the real response is an SD-hash reference** — which is what makes the
  *    inline walk in `disclosedConstraints` sufficient rather than merely convenient.
- * 6. End to end through `evaluate`: a real capture, a $30.00 cart, a $200.00 account cap and a
+ * 6. End to end through `evaluate`: the captured L2, a synthetic matching disclosed L3a, a
+ *    $30.00 cart, a $200.00 account cap and a
  *    $130.00 signed ceiling ALLOWs with check 8 naming the signature as the binding cap — and the same
  *    capture with the cart raised past $130.00 BLOCKs with `GATE_BUDGET_EXCEEDED`. The account cap is
  *    deliberately looser than the signed ceiling in the passing case, so an ALLOW cannot be attributed
@@ -77,6 +78,7 @@ import {
   input,
   makeWorld,
   withDeps,
+  resolvedTestL3b,
 } from './fixtures'
 
 /* ------------------------------------------------------------------------------------------ */
@@ -143,7 +145,9 @@ function constraintsOf(response: VerifyResponse): unknown[] {
 type World = Awaited<ReturnType<typeof makeWorld>>
 
 /**
- * Decide with the **captured** verify response served to check 4.
+ * Exercise the captured L2 constraints with a synthetic matching disclosed L3a.
+ * These budget-only tests vary the cart; disclosed-payment.test.ts separately uses the untouched
+ * response and its actual $133.00 payment. A changed cart cannot match that captured payment.
  *
  * The cart total has to move with the L3a, because check 6 cross-checks the claimed amount against the
  * session's locked total; a world built with a different total needs an L3a carrying the same number or
@@ -155,7 +159,28 @@ async function decideWithCapture(
   const world: World = await makeWorld({ capMinor: ACCOUNT_CAP_MINOR, cartMinor })
   const result = await evaluate(
     input({ l3a: fakeL3a({ amount_minor: Number(cartMinor) }) }),
-    withDeps(world, { verify: async () => ({ ok: true, value: rawResponse }) }),
+    withDeps(world, {
+      verify: async () => ({
+        ok: true,
+        value: {
+          ...parseResponse(),
+          disclosed: {
+            ...parseResponse().disclosed,
+            // This budget-only scenario uses a synthetic cart and a matching test checkout.
+            l3b: resolvedTestL3b(input().l3b),
+            l3a: {
+              delegate_payload: [
+                {
+                  vct: 'mandate.payment.1',
+                  payment_amount: { amount: cartMinor.toString(), currency: 'USD' },
+                  payee: { id: 'MERCHANT_NORTHWIND' },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    }),
   )
   if (!result.ok) {
     throw new Error(`evaluate() failed: ${result.error.code}: ${result.error.message}`)
@@ -404,7 +429,7 @@ describe('the real /v1/verify response — end to end through evaluate', () => {
     expect(row.detail).toContain('20000 USD')
   })
 
-  it('the same real capture with a $140.00 cart BLOCKs on the signature, not the account cap', async () => {
+  it('the captured L2 with a synthetic $140.00 payment BLOCKs on the signature, not the account cap', async () => {
     const overCeiling = 14_000n
     expect(overCeiling).toBeGreaterThan(SIGNED_CEILING_MINOR)
     // Still under the account cap, so only the signature can be what refused it.

@@ -51,7 +51,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { compactVerify, generateKeyPair } from 'jose'
-import { fixedClock, ok, type Result } from '@countersign/core'
+import { csError, err, fixedClock, ok, type Result } from '@countersign/core'
 import type {
   AgentId,
   AttemptId,
@@ -83,7 +83,10 @@ import {
 import { recordSigner } from '../../src/decision-record'
 import { evaluate } from '../../src/evaluate'
 import { NO_DISCLOSED_CONSTRAINTS } from '../../src/signed-constraints'
+import { deriveL3ReplayId } from '../../src/replay-id'
+import { readSignedCheckout } from '../../src/signed-checkout'
 import type { GateDecision, GateDeps, GateInput } from '../../src/types'
+import { capturedPaymentProof } from './captured-payment-proof'
 
 /* ------------------------------------------------------------------------------------------ */
 /* The live vi-service                                                                           */
@@ -110,6 +113,8 @@ interface LiveChain {
   readonly l3a: string
   readonly l3b: string
   readonly jti: string
+  readonly fresh_l3a: string
+  readonly fresh_jti: string
   readonly checkout_jwt: string
   readonly checkout_hash: string
   readonly verify_response: Record<string, unknown>
@@ -194,6 +199,7 @@ function unwrap(what: string, result: Result<GateDecision, CsError>): GateDecisi
 /* ------------------------------------------------------------------------------------------ */
 
 async function main(): Promise<number> {
+  await capturedPaymentProof()
   const { chain, stop } = await startLiveViService()
   const failures: string[] = []
   const line = '-'.repeat(100)
@@ -353,9 +359,12 @@ async function main(): Promise<number> {
 
     // --- the production wiring --------------------------------------------------------------------
 
+    const budgetStore = createInMemoryBudgetStore({ accounts: [budgetAccount] })
+    // Atomic in-memory stand-in for the UNIQUE index. No SQL or migrations run in this proof.
+    const insertedJtis = new Set<string>()
     const gateDeps: GateDeps = gateDepsFromRepos({
       clock: fixedClock(nowSec),
-      budgetStore: createInMemoryBudgetStore({ accounts: [budgetAccount] }),
+      budgetStore,
       requireMandate: async () => ok(mandateRow),
       findAgentById: async () => ok(agentRow),
       findDeviceById: async () => ok(deviceRow),
@@ -370,8 +379,12 @@ async function main(): Promise<number> {
       requireCheckoutSession: async () => ok(sessionRow),
       findProductsBySku: async () => ok([productRow]),
       countCommitsSince: async () => ok(0),
-      createAttempt: async (attempt) =>
-        ok({
+      createAttempt: async (attempt) => {
+        if (insertedJtis.has(attempt.l3_jti)) {
+          return err(csError('GATE_REPLAY', 'checkout_attempts_l3_jti_key rejected the duplicate'))
+        }
+        insertedJtis.add(attempt.l3_jti)
+        return ok({
           id: attempt.id,
           mandate_id: attempt.mandate_id,
           agent_id: attempt.agent_id,
@@ -387,7 +400,8 @@ async function main(): Promise<number> {
           gate_decision_id: null,
           created_at: new Date(nowSec * 1000),
           updated_at: new Date(nowSec * 1000),
-        } as unknown as CheckoutAttemptRow),
+        } as unknown as CheckoutAttemptRow)
+      },
       findAttemptByL3Jti: async () => ok(undefined),
       countRecentAttempts: async () => ok(0),
       listAttemptsForMandate: async () => ok([]),
@@ -454,6 +468,41 @@ async function main(): Promise<number> {
     )
     console.log(`reason codes              : ${JSON.stringify(outcome.reasons.map((r) => r.code))}`)
     console.log('')
+    if (outcome.decision !== 'ALLOW')
+      failures.push(`live purchase is ${outcome.decision}, not ALLOW`)
+    for (const n of [5, 6, 7, 8]) {
+      const check = outcome.checks.find((c) => c.n === n)
+      if (!check?.passed) failures.push(`check ${n} did not pass: ${check?.detail}`)
+    }
+
+    const disclosed = chain.verify_response['disclosed'] as Record<string, unknown>
+    const l3b = disclosed['l3b'] as Record<string, unknown>
+    const delegates = l3b['delegate_payload'] as Record<string, unknown>[]
+    const index = delegates.findIndex((entry) => entry['vct'] === 'mandate.checkout.1')
+    const binding = readSignedCheckout(l3b)
+    console.log(
+      `verify.disclosed.l3b.delegate_payload[${index}].vct = ${JSON.stringify(delegates[index]?.['vct'])}`,
+    )
+    console.log(
+      `verify.disclosed.l3b.delegate_payload[${index}].checkout_hash = ${JSON.stringify(delegates[index]?.['checkout_hash'])}`,
+    )
+    console.log(`checkout_sessions.checkout_hash = ${JSON.stringify(chain.checkout_hash)}`)
+    if (!binding.found || binding.checkoutHash !== chain.checkout_hash)
+      failures.push('real checkout binding differs from session')
+
+    const replayId = deriveL3ReplayId(chain.l3a)
+    const freshId = deriveL3ReplayId(chain.fresh_l3a)
+    console.log(`vi /v1/l3/create jti : ${chain.jti}`)
+    console.log(`Gate derived jti    : ${replayId.ok ? replayId.value : replayId.error.message}`)
+    console.log(`jti byte-for-byte match : ${replayId.ok && replayId.value === chain.jti}`)
+    console.log(
+      `retried l3/create returned a new authorisation and jti : ${freshId.ok && freshId.value === chain.fresh_jti && chain.fresh_jti !== chain.jti}`,
+    )
+    if (!replayId.ok || replayId.value !== chain.jti)
+      failures.push('Gate jti differs from real vi response')
+    if (!freshId.ok || freshId.value !== chain.fresh_jti || chain.fresh_jti === chain.jti)
+      failures.push('fresh authorisation jti semantics differ from vi')
+    console.log('')
 
     // --- the fetch count is the whole point ---------------------------------------------------
 
@@ -499,6 +548,9 @@ async function main(): Promise<number> {
       chainValid: false,
       pending: [],
       signedConstraints: NO_DISCLOSED_CONSTRAINTS,
+      disclosedL3a: null,
+      disclosedL3b: null,
+      replayRejected: false,
     }
     const ctx: CheckContext = {
       input: gateInput,
@@ -521,6 +573,10 @@ async function main(): Promise<number> {
     )
     console.log('')
     console.log(`state.chainValid                    : ${state.chainValid}`)
+    console.log('state.disclosedL3a source            : verify.disclosed.l3a')
+    console.log(
+      `state.disclosedL3a.delegate_payload  : ${JSON.stringify(state.disclosedL3a?.['delegate_payload'])}`,
+    )
     console.log(`state.pending (the D19 obligation)   : ${JSON.stringify(state.pending)}`)
     console.log(`state.signedConstraints.source      : ${state.signedConstraints.source}`)
     console.log(
@@ -572,22 +628,44 @@ async function main(): Promise<number> {
       failures.push(`check 11 did not report discharging the obligation: ${check11?.detail}`)
     }
 
-    // Check 8 cannot be evaluated while check 6 cannot resolve an amount (see OUTSTANDING below). What
-    // matters is that it **failed closed** rather than passing on the cached cap: an unreadable
-    // obligation must never read as a pass, which is the D19 failure mode.
-    const check8 = outcome.checks.find((c) => c.n === 8)
-    if (check8?.passed === true || check8?.notApplicable === true) {
-      failures.push(
-        `check 8 passed or was skipped despite an undischarged budget obligation: ${check8?.detail}`,
-      )
+    // The live payment is under the signed budget. Check 6 must resolve it and check 8 enforce it.
+    for (const n of [6, 8]) {
+      const check = outcome.checks.find((c) => c.n === n)
+      if (check?.passed !== true) failures.push(`check ${n} did not pass: ${check?.detail}`)
     }
-    if (!outcome.reasons.some((r) => r.code === 'GATE_CHECK_UNSATISFIABLE')) {
-      failures.push(
-        'check 8 did not report an unsatisfiable state, so the decision did not fail closed',
-      )
+    for (const n of [7, 8, 9]) {
+      const check = outcome.checks.find((c) => c.n === n)
+      if (check?.detail?.includes('no amount resolved'))
+        failures.push(`check ${n} still lacks an amount`)
     }
 
     // --- PASS 2 — fail closed, against the same live service -------------------------------------
+    console.log('REPLAY — the exact live L3a submitted again with a different attempt id')
+    const reservesBeforeReplay = budgetStore.entries().filter((e) => e.kind === 'RESERVE').length
+    const replay = unwrap(
+      'evaluate (REPLAY)',
+      await evaluate(
+        { ...gateInput, attemptId: 'att_livereplay000000000000001' as AttemptId },
+        gateDeps,
+      ),
+    )
+    const replayCheck = replay.checks.find((c) => c.n === 7)!
+    const reservesAfterReplay = budgetStore.entries().filter((e) => e.kind === 'RESERVE').length
+    console.log(`decision : ${replay.decision}`)
+    console.log(`check 7  : ${replayCheck.passed ? 'PASS' : 'FAIL'} ${replayCheck.detail}`)
+    console.log(`GATE_REPLAY : ${replay.reasons.some((r) => r.code === 'GATE_REPLAY')}`)
+    console.log(
+      `RESERVE entries before/after replay : ${reservesBeforeReplay}/${reservesAfterReplay}`,
+    )
+    console.log(`replay reservation : ${JSON.stringify(replay.reservation ?? null)}`)
+    if (
+      replay.decision !== 'BLOCK' ||
+      !replay.reasons.some((r) => r.code === 'GATE_REPLAY') ||
+      replay.reservation ||
+      reservesBeforeReplay !== reservesAfterReplay
+    )
+      failures.push('replayed L3a was not blocked before a second reservation')
+    console.log('')
 
     console.log(line)
     console.log('PASS 2 — the same live service, with the L1 genuinely absent')
@@ -675,7 +753,7 @@ async function main(): Promise<number> {
     // --- outstanding defects this harness did NOT fix ----------------------------------------
 
     // Printed unconditionally. A proof that only shows what it fixed invites the reader to assume the rest
-    // of the decision is healthy, and on this run it is not: checks 5, 6, 8 and 9 fail for reasons that
+    // of the decision is healthy, and the outcome may still fail for reasons that
     // have nothing to do with the chain tokens and were invisible until a live service answered.
     const outstanding = outcome.checks
       .filter((check) => !check.passed && check.notApplicable !== true && check.n !== 4)
@@ -691,35 +769,15 @@ async function main(): Promise<number> {
       console.log('')
       console.log('  Pre-existing defects in OTHER checks, found by driving a live service, and')
       console.log('  deliberately NOT fixed here — each needs its own decision record and tests.')
-      console.log('  The two root causes, for whoever picks them up:')
-      console.log(
-        '   * check 5: `merchantKeySetFromJwks` reads `entry["public_jwk"]`, but vi\'s GET /v1/jwks',
-      )
-      console.log(
-        '     emits the JWK members inline (`kty`,`crv`,`x`,`y`,`alg`,`use`) beside `role` and',
-      )
-      console.log('     `status`. Every merchant entry is dropped, so `currentKid` is "" and')
-      console.log('     `acceptedKids` is empty — a perfectly real `kid` is reported as unknown.')
-      console.log(
-        "   * check 6: `l3aAmount` reads top-level `amount_minor`/`currency`/`payee_id`, but vi's",
-      )
-      console.log(
-        '     real L3a carries them in `delegate_payload[1]` as `payment_amount.{amount,currency}`',
-      )
-      console.log(
-        '     and `payee.id` (vct `mandate.payment.1`). The amount is unresolvable, which is why',
-      )
-      console.log(
-        '     checks 7, 8 and 9 report "no amount resolved by check 6" — they are collateral, not',
-      )
-      console.log('     independent failures.')
-      console.log('  The BLOCK above is caused by these, not by check 4.')
+      console.log('  Amount resolution passed; any remaining BLOCK reason is listed above.')
     }
     console.log('')
 
     console.log(rule)
     if (failures.length === 0) {
-      console.log('PROOF: PASS — the production deps.ts binding verified a live chain end to end.')
+      console.log(
+        'PROOF: PASS — live purchase ALLOW; replay BLOCK with GATE_REPLAY and no second RESERVE.',
+      )
       console.log(
         `       check 4: 1 POST /v1/verify, chain_valid=true, ${fetchesForDecision} fetches total.`,
       )

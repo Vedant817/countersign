@@ -21,7 +21,7 @@ import { csError, fixedClock } from '@countersign/core'
 import type { CaptureRow } from '@countersign/db'
 import type { WebhookAudit, WebhookDeps, WebhookPayPal } from '@countersign/webhooks'
 
-import type { PgBossLike, PgBossWorkOptions } from '../src/job-runner'
+import type { PgBossJob, PgBossLike, PgBossWorkOptions } from '../src/job-runner'
 
 /** A fixed instant: 2026-10-04T12:00:00Z. Matches the other package's harness so logs line up. */
 export const NOW_SEC = 1_789_004_800
@@ -285,15 +285,27 @@ export interface PgBossDouble extends PgBossLike {
   readonly order: string[]
   /** The handler pg-boss would invoke for a name, so a test can drive a job without a queue. */
   readonly handlers: Map<string, (data: unknown) => Promise<unknown>>
+  /** Actual callbacks and delivery states; promise resolution is completion, rejection is retry. */
+  readonly callbacks: Map<string, (jobs: PgBossJob[]) => Promise<unknown>>
+  readonly jobs: Map<string, FakeBossJob>
   /** Names whose `work()` should reject, to exercise `registerJobs`' error path. */
   failWorkFor: Set<string>
   failScheduleFor: Set<string>
   failStart: boolean
 }
 
+export interface FakeBossJob extends PgBossJob {
+  readonly name: string
+  state: 'active' | 'completed' | 'retry'
+  output?: unknown
+  error?: unknown
+}
+
 /** A pg-boss double that records what the worker asked of it. */
 export function fakeBoss(): PgBossDouble {
   const handlers = new Map<string, (data: unknown) => Promise<unknown>>()
+  const callbacks = new Map<string, (jobs: PgBossJob[]) => Promise<unknown>>()
+  const jobs = new Map<string, FakeBossJob>()
   return {
     started: 0,
     stopped: 0,
@@ -301,6 +313,8 @@ export function fakeBoss(): PgBossDouble {
     scheduled: [],
     order: [],
     handlers,
+    callbacks,
+    jobs,
     failWorkFor: new Set(),
     failScheduleFor: new Set(),
     failStart: false,
@@ -322,7 +336,21 @@ export function fakeBoss(): PgBossDouble {
       this.order.push(`work:${name}`)
       if (this.failWorkFor.has(name)) throw new Error(`pg-boss: cannot register ${name}`)
       this.worked.push({ name, options })
-      handlers.set(name, async (data: unknown) => handler({ data }))
+      callbacks.set(name, handler)
+      handlers.set(name, async (data: unknown) => {
+        const job: FakeBossJob = { id: `job_${jobs.size + 1}`, name, data, state: 'active' }
+        jobs.set(job.id, job)
+        try {
+          // pg-boss dist/types.d.ts WorkHandler and dist/manager.js #processJobs: callback(jobs).
+          job.output = await handler([{ id: job.id, data }])
+          job.state = 'completed'
+          return job.output
+        } catch (error) {
+          job.error = error
+          job.state = 'retry'
+          throw error
+        }
+      })
       return `worker-${name}`
     },
     async schedule(name, cron) {

@@ -78,6 +78,9 @@
  */
 
 // --- the Gate --------------------------------------------------------------------------------
+export { readSignedCheckout, CHECKOUT_SOURCE, type SignedCheckoutReading } from './signed-checkout'
+export { deriveL3ReplayId } from './replay-id'
+
 export {
   evaluate,
   describeDecision,

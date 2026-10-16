@@ -471,8 +471,11 @@ export interface RefundOutcome {
   /** Our `ref_…` row id, so the case file can link to it. */
   readonly refundId: string
   /** PayPal's own refund id — the string EC-DSP-1's `evidence_info.refund_ids` needs. */
-  readonly paypalRefundId: string
+  readonly paypalRefundId?: string
   readonly amount: Money
+  readonly status?: 'PENDING' | 'COMPLETED'
+  readonly paypalCall?: 'acceptClaim'
+  readonly requestId?: string
 }
 
 /**
@@ -494,7 +497,10 @@ export interface RefundOutcome {
  *    arguing that money we already returned was never returned — the single most expensive bug this product
  *    could have.
  *
- * So: wire this to `orders.refund(...)`. A wrong wiring here is a money bug rather than a crash, which is
+ * Wire this to `orders.defenderRefundsFromOrders(...)`: its `refundViaDispute` uses accept-claim
+ * for the exact claim, with a durable reservation and live refund read-back. Direct `orders.refund`
+ * remains blocked by EC-REF-4. PENDING has no invented PayPal refund id and must not close the case.
+ * A wrong wiring here is a money bug rather than a crash, which is
  * why the contract says "the row too" in the type's own documentation, and why `fileDispute` records the
  * returned `paypalRefundId` in `dispute_actions` where a merchant can see it went missing.
  */
@@ -507,6 +513,9 @@ export interface DefenderRefunds {
     /** `refunds.actor` / `initiated_by = MERCHANT`. */
     readonly actor: string
     readonly disputeId: string
+    readonly paypalDisputeId: string
+    /** Stable identity of the dispute, disputed minor units and ISO currency; never a job ULID. */
+    readonly idempotencyKey: string
     readonly ruleId: string
   }): Promise<Result<RefundOutcome, CsError>>
 }
