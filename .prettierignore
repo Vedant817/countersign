@@ -9,6 +9,12 @@ coverage
 pnpm-lock.yaml
 uv.lock
 
+# A stray compiler emit beside its source, not a file anyone wrote. `.gitignore` keeps it untracked;
+# this keeps `format:check` honest about what it is checking. A stale copy of one used to fail the gate
+# with "style issues found" on a file no editor had ever touched.
+*.d.ts
+*.d.ts.map
+
 # Generated. Regenerate with `pnpm test:ec`, never hand-edit.
 docs/EDGE_CASES.md
 
