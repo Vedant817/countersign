@@ -574,6 +574,70 @@ def test_the_process_refuses_a_bad_kek(monkeypatch, kek, expected) -> None:
         config.load_settings()
 
 
+#: Each of these once carried a placeholder default in `config.py`. The `placeholder` is kept beside
+#: the variable name on purpose: a regression would reintroduce exactly that string, so a test that
+#: only deleted the variable would still pass if the default came back.
+IDENTITY_VARIABLES = [
+    ("VI_ISSUER_KID", "issuer-key-1"),
+    ("VI_MERCHANT_KID", "merchant-key-1"),
+    ("VI_ISSUER_URL", "https://www.mastercard.com"),
+    ("VI_AGENT_ISS", "https://agent.countersign.example"),
+]
+
+
+@pytest.mark.parametrize(("variable", "placeholder"), IDENTITY_VARIABLES)
+def test_the_process_refuses_to_start_without_an_identity_variable(
+    monkeypatch, variable: str, placeholder: str
+) -> None:
+    """Spec §6, and the sharpest version of it: an identity is not a preference.
+
+    Each of the four used to be silently defaulted, and each default was worse than nothing:
+    `VI_ISSUER_URL` claimed to be Mastercard, `VI_AGENT_ISS` named an RFC 2606 `.example` host that
+    can never resolve, and the two kids invented key names that no JWKS entry will ever match. All
+    four reach a *signed* artefact, so a deployment that booted without them signed artefacts
+    nobody could verify and, in the issuer case, evidence that named the wrong party entirely.
+
+    So the guarantee is not "the value is validated" — it is "there is no value to fall back to".
+    """
+    monkeypatch.delenv(variable, raising=False)
+    config.reset_settings()
+    with pytest.raises(config.ConfigError, match=variable) as excinfo:
+        config.load_settings()
+    assert placeholder not in str(excinfo.value), "the placeholder must not survive as a fallback"
+
+
+def test_a_blank_identity_variable_is_treated_as_missing(monkeypatch) -> None:
+    """Whitespace is not a value. `VI_ISSUER_URL=" "` would otherwise sign an L1 with `iss=" "`.
+
+    `_req()` strips, so the check that used to be `.strip() or "placeholder"` now has nowhere to fall
+    back to, and an operator who leaves the line in `.env` empty is told which variable to fill.
+    """
+    monkeypatch.setenv("VI_AGENT_ISS", "   ")
+    config.reset_settings()
+    with pytest.raises(config.ConfigError, match="VI_AGENT_ISS"):
+        config.load_settings()
+
+
+def test_the_configured_identities_are_used_verbatim(monkeypatch) -> None:
+    """What the operator names is what gets signed — no trimming surprises, no substitution.
+
+    Worth pinning because the bug this replaced was the opposite behaviour: the service substituted
+    an identity of its own and reported success.
+    """
+    from conftest import AGENT_ISS, ISSUER_URL
+
+    monkeypatch.setenv("VI_ISSUER_URL", ISSUER_URL)
+    monkeypatch.setenv("VI_AGENT_ISS", AGENT_ISS)
+    monkeypatch.setenv("VI_ISSUER_KID", "issuer-key-9")
+    monkeypatch.setenv("VI_MERCHANT_KID", "merchant-key-9")
+    config.reset_settings()
+    settings = config.load_settings()
+    assert settings.issuer_url == ISSUER_URL
+    assert settings.agent_iss == AGENT_ISS
+    assert settings.issuer_kid_for_jwks() == "issuer-key-9"
+    assert settings.merchant_kid_for_jwks() == "merchant-key-9"
+
+
 def _STATUS_KEYS() -> list[str]:
     from vi_service.errors import _STATUS
 

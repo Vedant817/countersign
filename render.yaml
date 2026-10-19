@@ -115,6 +115,14 @@ services:
         sync: false
       - key: VI_MERCHANT_KID
         sync: false
+      # The two signer identities: `iss` on every L1 / L3 we mint. `sync: false` rather than a default
+      # because a placeholder is worse than absent — an L1 issued as `https://www.mastercard.com` claims
+      # to be Mastercard, and a `.example` host can never resolve, so every token carrying one is dead on
+      # arrival. Both are public values, not secrets; set them to your own resolvable origin (H-03).
+      - key: VI_ISSUER_URL
+        sync: false
+      - key: VI_AGENT_ISS
+        sync: false
       - key: GATE_KID
         sync: false
       - key: GATE_SIGNING_KEY
@@ -158,6 +166,14 @@ services:
       - key: VI_ISSUER_KID
         sync: false
       - key: VI_MERCHANT_KID
+        sync: false
+      # The two signer identities: `iss` on every L1 / L3 we mint. `sync: false` rather than a default
+      # because a placeholder is worse than absent — an L1 issued as `https://www.mastercard.com` claims
+      # to be Mastercard, and a `.example` host can never resolve, so every token carrying one is dead on
+      # arrival. Both are public values, not secrets; set them to your own resolvable origin (H-03).
+      - key: VI_ISSUER_URL
+        sync: false
+      - key: VI_AGENT_ISS
         sync: false
 
   # ---------------------------------------------------------------------------------------------

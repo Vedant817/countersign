@@ -10,6 +10,12 @@ Two things live here on purpose:
   that a test can move time forward without sleeping (AT-M3.10, the 300 s ``prepare_id`` TTL,
   and EC-TIME-3's ``at_time``).
 
+The split between :func:`_req` and :func:`_int` is the whole design of this file: a variable goes
+through :func:`_req` when a wrong value would be *signed* into an artefact (the token, the KEK, the
+two ``iss`` identities, both kids), and through :func:`_int` when a wrong value only costs a
+tolerance. Nothing that names an identity has a default — a default there is a placeholder, and a
+placeholder in a signed artefact is a lie the verifier cannot detect.
+
 Nothing here imports FastAPI or pydantic, so it can be unit-tested in isolation.
 """
 
@@ -103,21 +109,37 @@ class Settings:
     #: caller cannot mint fresh budgets by sending a header. Raise it to 1 only behind exactly one
     #: known proxy that *replaces* rather than appends the header.
     trusted_proxy_hops: int
-    #: ``iss`` of the L1 issuer credential. The ``vct`` stays the library default
-    #: ``https://credentials.mastercard.com/card`` because ``verify_chain`` pins it.
+    #: ``iss`` of the L1 issuer credential, and the identity this deployment signs *as*. Required:
+    #: the ``vct`` stays the library default ``https://credentials.mastercard.com/card`` because
+    #: ``verify_chain`` pins it, but the ``iss`` is ours and must be named by the operator. Defaulting
+    #: it to Mastercard's own site would make an unconfigured service impersonate them.
     issuer_url: str
-    #: ``iss`` written into L3a/L3b when the caller does not override it.
+    #: ``iss`` written into L3a/L3b when the caller does not override it. Required for the same
+    #: reason, and it must be a real origin: a reserved `.example` host can never resolve, so every
+    #: token carrying it is unverifiable by construction.
     agent_iss: str
     app_env: str
 
     def issuer_kid_for_jwks(self) -> str:
+        """The ``kid`` of the issuer signing key, as ``GET /v1/jwks`` publishes it."""
         return self.issuer_kid
 
     def merchant_kid_for_jwks(self) -> str:
+        """The ``kid`` of the merchant checkout key, as ``GET /v1/jwks`` publishes it."""
         return self.merchant_kid
 
 
 def _req(name: str) -> str:
+    """Read a variable that has no safe default, so its absence fails at boot instead of silently.
+
+    Spec §6: "The process MUST refuse to start if any required variable is missing." A default here
+    is only ever a *placeholder*, and a placeholder that reaches a signed artefact is worse than a
+    refusal — `issuer_url` defaulted to Mastercard's site, so an unconfigured deployment signed L1
+    credentials claiming to be Mastercard, and `agent_iss` defaulted to an RFC 2606 `.example` host,
+    which can never resolve, so every L3a/L3b it issued was permanently unverifiable. TypeScript
+    already refused to boot without the two kids (`env.ts`); a required variable that only one half
+    of the system enforces is not enforced.
+    """
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
         raise ConfigError(f"Required environment variable {name} is missing (spec §6)")
@@ -154,8 +176,8 @@ def load_settings() -> Settings:
     return Settings(
         service_token=_req("VI_SERVICE_TOKEN"),
         kek_b64=kek,
-        issuer_kid=os.environ.get("VI_ISSUER_KID", "issuer-key-1").strip() or "issuer-key-1",
-        merchant_kid=os.environ.get("VI_MERCHANT_KID", "merchant-key-1").strip() or "merchant-key-1",
+        issuer_kid=_req("VI_ISSUER_KID"),
+        merchant_kid=_req("VI_MERCHANT_KID"),
         clock_skew_seconds=_int(
             "VI_CLOCK_SKEW_SECONDS", CLOCK_SKEW_SECONDS_DEFAULT, minimum=0, maximum=86_400
         ),
@@ -166,8 +188,11 @@ def load_settings() -> Settings:
             "VI_PUBLIC_RATE_LIMIT_PER_MIN", PUBLIC_RATE_LIMIT_DEFAULT, minimum=1, maximum=10_000
         ),
         trusted_proxy_hops=_int("VI_TRUSTED_PROXY_HOPS", TRUSTED_PROXY_HOPS_DEFAULT, minimum=0, maximum=8),
-        issuer_url=os.environ.get("VI_ISSUER_URL", "https://www.mastercard.com").strip(),
-        agent_iss=os.environ.get("VI_AGENT_ISS", "https://agent.countersign.example").strip(),
+        # The two identities, required with no default (see `_req`). A placeholder `iss` is not a
+        # harmless fallback: it is copied verbatim into signed tokens, so it decides who the evidence
+        # says we are — and a `.example` host makes every token carrying it unverifiable.
+        issuer_url=_req("VI_ISSUER_URL"),
+        agent_iss=_req("VI_AGENT_ISS"),
         app_env=os.environ.get("APP_ENV", "local").strip() or "local",
     )
 

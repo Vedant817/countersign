@@ -31,6 +31,8 @@ const COMPLETE: Record<string, string> = {
   VI_KEK: 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=',
   VI_ISSUER_KID: 'vi-issuer',
   VI_MERCHANT_KID: 'vi-merchant',
+  VI_ISSUER_URL: 'https://issuer.countersign.test',
+  VI_AGENT_ISS: 'https://agent.countersign.test',
   GATE_KID: 'gate-1',
   GATE_SIGNING_KEY: 'g'.repeat(64),
 }
@@ -42,6 +44,15 @@ function messageOf(e: unknown): string {
   if (typeof e === 'object' && e !== null && 'message' in e)
     return String((e as { message: unknown }).message)
   return String(e)
+}
+
+/** The keys `parseEnv` reported as *missing*, so a test can name one variable instead of matching prose. */
+function missingOf(e: unknown): string[] {
+  if (typeof e === 'object' && e !== null && 'details' in e) {
+    const d = (e as { details: { missing?: string[] } }).details
+    return d.missing ?? []
+  }
+  return []
 }
 
 /** The kinds of variables a developer's shell is full of and none of which are ours. */
@@ -187,6 +198,125 @@ describe('the declared key list is derived, not maintained', () => {
     delete (withoutKey as Record<string, string | undefined>)['OPENAI_API_KEY']
     expect(() => parseEnv(withoutKey)).not.toThrow()
     expect(parseEnv(withoutKey).OPENAI_API_KEY).toBeUndefined()
+  })
+})
+
+describe('the signing identities are required here exactly as they are in vi-service', () => {
+  /**
+   * All four reached a signed artefact, and all four used to be defaulted in
+   * `apps/vi/src/vi_service/config.py`: `VI_ISSUER_URL` to `https://www.mastercard.com`, so an
+   * unconfigured deployment's L1 credential claimed to *be* Mastercard; `VI_AGENT_ISS` to an RFC 2606
+   * `.example` host, which can never resolve, so every L3a/L3b it issued was unverifiable; the two
+   * kids to invented names that match no JWKS entry. TypeScript already refused the two kids, and the
+   * asymmetry is the whole bug: one runtime refused to boot while the other signed.
+   */
+  const IDENTITIES = ['VI_ISSUER_KID', 'VI_MERCHANT_KID', 'VI_ISSUER_URL', 'VI_AGENT_ISS']
+
+  it('declares all four', () => {
+    for (const key of IDENTITIES) expect(ENV_KEYS, key).toContain(key)
+  })
+
+  it('refuses to boot when any one of them is missing', () => {
+    // One at a time, and named, so a regression says which variable lost its required status rather
+    // than "the environment is invalid".
+    for (const key of IDENTITIES) {
+      const partial = { ...COMPLETE }
+      delete (partial as Record<string, string | undefined>)[key]
+      let missing: string[] = []
+      try {
+        parseEnv(partial)
+      } catch (e) {
+        missing = missingOf(e)
+      }
+      expect(missing, `${key} must be required, not defaulted`).toContain(key)
+    }
+  })
+
+  it('rejects a reserved .example/.invalid identity, which can never resolve', () => {
+    // The old default slipped past a plain URL check, because it *is* a syntactically valid URL. The
+    // TLD is the tell: a token whose `iss` names a reserved host is dead on arrival.
+    expect(() =>
+      parseEnv({ ...COMPLETE, VI_AGENT_ISS: 'https://agent.countersign.example' }),
+    ).toThrow(/\.example/)
+    expect(() =>
+      parseEnv({ ...COMPLETE, VI_ISSUER_URL: 'https://issuer.countersign.invalid' }),
+    ).toThrow(/\.invalid/)
+  })
+
+  it('a malformed identity is a CS_VALIDATION, never a raw TypeError out of parseEnv', () => {
+    // The reserved-TLD check has to look at the parsed host, so it has to survive a value `.url()`
+    // already rejected. If it does not, `new URL()` throws and every caller's `catch (e: CsError)`
+    // reads a TypeError with no `code` and no user-safe message.
+    for (const bad of ['not a url', '']) {
+      let code = ''
+      let threw = false
+      try {
+        parseEnv({ ...COMPLETE, VI_ISSUER_URL: bad })
+      } catch (e) {
+        threw = true
+        if (typeof e === 'object' && e !== null && 'code' in e)
+          code = String((e as { code: unknown }).code)
+      }
+      expect(threw, `${JSON.stringify(bad)} must be refused`).toBe(true)
+      expect(code, `${JSON.stringify(bad)} must be refused as CS_VALIDATION`).toBe('CS_VALIDATION')
+    }
+  })
+
+  it('accepts a real host, and passes it through verbatim', () => {
+    const env = parseEnv(COMPLETE)
+    expect(env.VI_ISSUER_URL).toBe(COMPLETE['VI_ISSUER_URL'])
+    expect(env.VI_AGENT_ISS).toBe(COMPLETE['VI_AGENT_ISS'])
+  })
+})
+
+describe('a bad URL is a CsError naming the variable, never a raw TypeError', () => {
+  /**
+   * `PAYPAL_API_BASE`'s EC-ENV-1 refinement used to call `new URL(u)` unguarded. A zod `.refine()` runs
+   * even when the `.url()` beside it has already failed, so `parseEnv({ …, PAYPAL_API_BASE: 'nope' })`
+   * raised `TypeError [ERR_INVALID_URL]` straight out of `parseEnv`.
+   *
+   * That breaks the contract this module documents and every caller relies on: `parseEnv` throws a
+   * `CsError`, so `apps/worker`'s boot handler can print its `code` and exit 78. A raw `TypeError` gives
+   * it a stack trace instead, and the operator is left hunting for a variable name that never appears.
+   *
+   * This is asserted for every URL-shaped variable rather than only `PAYPAL_API_BASE`, because the flaw
+   * is a pattern — any refinement that calls `new URL` will reintroduce it.
+   */
+  const URL_VARS = [
+    'PUBLIC_BASE_URL',
+    'PAYPAL_API_BASE',
+    'VI_ISSUER_URL',
+    'VI_AGENT_ISS',
+    'VI_SERVICE_URL',
+  ] as const
+
+  for (const key of URL_VARS) {
+    it(`${key} with an unparseable value is a CS_VALIDATION CsError`, () => {
+      let thrown: unknown
+      try {
+        parseEnv({ ...COMPLETE, [key]: 'not a url' })
+      } catch (cause) {
+        thrown = cause
+      }
+      // The assertion that matters: it is a CsError at all, and not a TypeError from `URL`.
+      expect(thrown, `${key} did not throw`).toBeDefined()
+      expect(thrown).not.toBeInstanceOf(TypeError)
+      expect((thrown as { code?: string }).code).toBe('CS_VALIDATION')
+      expect(String((thrown as Error).message)).toContain(key)
+    })
+  }
+
+  it('PAYPAL_API_BASE still refuses a well-formed URL that is not a sandbox host', () => {
+    // The EC-ENV-1 rule is untouched by making it not crash: a valid https URL on the wrong host is still
+    // a refusal, which is the case the rule exists for.
+    let thrown: unknown
+    try {
+      parseEnv({ ...COMPLETE, PAYPAL_API_BASE: 'https://api-m.paypal.com' })
+    } catch (cause) {
+      thrown = cause
+    }
+    expect((thrown as { code?: string }).code).toBe('CS_VALIDATION')
+    expect(String((thrown as Error).message)).toContain('sandbox.paypal.com')
   })
 })
 

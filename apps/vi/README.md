@@ -68,15 +68,24 @@ uv run pytest                       # AT-M3
 ```
 
 Required environment: `VI_SERVICE_TOKEN`, `VI_KEK` (base64 32 bytes), `VI_ISSUER_KID`,
-`VI_MERCHANT_KID`, `VI_CLOCK_SKEW_SECONDS` (default 300, the library default).
+`VI_MERCHANT_KID`, `VI_ISSUER_URL`, `VI_AGENT_ISS`, `VI_CLOCK_SKEW_SECONDS` (default 300, the library
+default).
 
 The service **refuses to start** if `VI_SERVICE_TOKEN` or `VI_KEK` is missing or if the KEK does not
 decode to exactly 32 bytes (spec §6: "The process MUST refuse to start if any required variable is
 missing"). Failing at boot matters: a service that starts and then 401s everything looks healthy to
 the platform.
 
+`VI_ISSUER_URL` and `VI_AGENT_ISS` are required for the same reason. They are the `iss` on every L1 and
+L3 this service mints, and they used to be defaulted to `https://www.mastercard.com` and
+`https://agent.countersign.example` — so an unconfigured deployment signed L1 credentials claiming to
+_be_ Mastercard, issued under a `.example` host that can never resolve, and the web service's boot
+validator knew nothing about either. There is no safe default for an issuer identity, so there is no
+default. Use your own resolvable origin; the TypeScript side (`@countersign/core`'s env schema) refuses a
+reserved `.example`/`.invalid` host for the same reason, and `.test` is permitted for local fixtures.
+
 Optional, all defaulted: `VI_PREPARE_TTL_SECONDS` (300), `VI_PUBLIC_RATE_LIMIT_PER_MIN` (30),
-`VI_ISSUER_URL`, `VI_AGENT_ISS`, `APP_ENV`.
+`APP_ENV`.
 
 ## The route contracts
 

@@ -76,6 +76,10 @@ services:
       VI_KEK: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
       VI_ISSUER_KID: issuer-1
       VI_MERCHANT_KID: merchant-1
+      # `iss` for every L1 / L3 we mint. `.test` is the reserved-but-conventional host this repo uses
+      # everywhere; `.example` is rejected on boot because it can never resolve.
+      VI_ISSUER_URL: https://issuer.countersign.test
+      VI_AGENT_ISS: https://agent.countersign.test
       GATE_KID: gate-1
       GATE_SIGNING_KEY: '{"kty":"EC","crv":"P-256","x":"","y":"","d":""}'
       PAYPAL_ENV: sandbox
@@ -100,6 +104,10 @@ services:
       VI_KEK: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
       VI_ISSUER_KID: issuer-1
       VI_MERCHANT_KID: merchant-1
+      # `iss` for every L1 / L3 we mint. `.test` is the reserved-but-conventional host this repo uses
+      # everywhere; `.example` is rejected on boot because it can never resolve.
+      VI_ISSUER_URL: https://issuer.countersign.test
+      VI_AGENT_ISS: https://agent.countersign.test
       VI_CLOCK_SKEW_SECONDS: '300'
       APP_ENV: local
     ports:

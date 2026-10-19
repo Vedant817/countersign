@@ -53,6 +53,10 @@ os.environ["VI_SERVICE_TOKEN"] = "live-gate-proof-service-token"
 os.environ["VI_KEK"] = base64.b64encode(bytes(range(32))).decode("ascii")
 os.environ["VI_ISSUER_KID"] = "issuer-key-1"
 os.environ["VI_MERCHANT_KID"] = "merchant-key-1"
+# The two signer identities, required since the defaults were removed. `.test` matches
+# `apps/vi/tests/conftest.py`; a `.example` host is refused on boot because it can never resolve.
+os.environ["VI_ISSUER_URL"] = "https://issuer.countersign.test"
+os.environ["VI_AGENT_ISS"] = "https://agent.countersign.test"
 os.environ["VI_CLOCK_SKEW_SECONDS"] = "300"
 os.environ["VI_PREPARE_TTL_SECONDS"] = "300"
 os.environ["VI_PUBLIC_RATE_LIMIT_PER_MIN"] = "1000"

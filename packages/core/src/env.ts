@@ -52,6 +52,57 @@ const boolish = z
     typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase()),
   )
 
+/** The RFC 2606 TLDs that can never resolve. `.test` is deliberately absent — it is the conventional
+ * fixture host this repository already uses everywhere. */
+const RESERVED_IDENTITY_TLD = /\.(example|invalid)$/i
+
+/**
+ * Does this string's **host** sit on a reserved, unresolvable TLD?
+ *
+ * Written with a `try` rather than inline `new URL(...)` because a zod refinement runs even when the
+ * `.url()` check beside it already failed — so a malformed value would raise `TypeError [ERR_INVALID_URL]`
+ * straight out of `parseEnv` instead of the `CsError` every caller is written to catch. Returning
+ * `false` there keeps the diagnosis with `.url()`, which already rejects it with a proper message.
+ */
+function hasReservedIdentityHost(value: string): boolean {
+  try {
+    return RESERVED_IDENTITY_TLD.test(new URL(value).hostname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The hostname of an absolute URL, or `null` when `URL` will not parse it.
+ *
+ * The same reason {@link hasReservedIdentityHost} catches: a zod `.refine()` runs even when the `.url()`
+ * check beside it has already failed, so any refinement that calls `new URL` unguarded turns a bad
+ * variable into a raw `TypeError` out of `parseEnv` instead of the `CsError` naming the variable. This is
+ * the shared helper so every refinement in this file parses the same way.
+ */
+function parseHost(value: string): string | null {
+  try {
+    return new URL(value).hostname
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A signing identity — an absolute URL a real deployment can resolve.
+ *
+ * A reserved host is rejected rather than left to the operator, because it is not a near miss: the
+ * `iss` of every L1, L3a and L3b would name a host that does not exist, so each of those artefacts
+ * would be dead on arrival while the service reported success.
+ */
+const issuerIdentity = z
+  .string()
+  .url()
+  .refine((u) => !hasReservedIdentityHost(u), {
+    message:
+      'must not be a reserved .example/.invalid host — it can never resolve, so every token carrying it is unverifiable',
+  })
+
 /**
  * The full env schema. `APP_ENV` is not optional: a misconfigured deployment should fail loudly at
  * boot rather than behave like production while thinking it is local.
@@ -86,10 +137,16 @@ export const envSchema = z
     PAYPAL_API_BASE: z
       .string()
       .url()
+      // `hasReservedIdentityHost`-style guard: a `.refine()` runs even when the `.url()` beside it has
+      // already failed, so `new URL(u)` here would throw a raw `TypeError [ERR_INVALID_URL]` straight out
+      // of `parseEnv` — breaking the contract that it throws a `CsError` and never a raw error, and
+      // crashing boot with a stack trace instead of naming the variable. `parseHost` returns `null` for
+      // anything `URL` rejects, and a `null` hostname simply fails this refinement.
       .refine(
-        (u) =>
-          /(^|\.)sandbox\.paypal\.com$/.test(new URL(u).hostname) ||
-          new URL(u).hostname === 'localhost',
+        (u) => {
+          const host = parseHost(u)
+          return host !== null && (/(^|\.)sandbox\.paypal\.com$/.test(host) || host === 'localhost')
+        },
         {
           message: 'EC-ENV-1: PAYPAL_API_BASE must point at a *.sandbox.paypal.com host',
         },
@@ -125,6 +182,23 @@ export const envSchema = z
     VI_KEK: base64Key,
     VI_ISSUER_KID: z.string().min(1),
     VI_MERCHANT_KID: z.string().min(1),
+    /**
+     * The two `iss` identities vi-service signs as, required here for the same reason the Python
+     * service requires them (`apps/vi/src/vi_service/config.py::_req`).
+     *
+     * They are declared rather than defaulted because both were silently defaulted in Python, which
+     * is the same bug in two directions: `VI_ISSUER_URL` defaulted to `https://www.mastercard.com`,
+     * so an unconfigured deployment's L1 credential claimed to *be* Mastercard, and `VI_AGENT_ISS`
+     * defaulted to an RFC 2606 `.example` host, which can never resolve, so every L3a/L3b it issued
+     * was unverifiable by construction. TypeScript refusing to boot while Python substituted a
+     * placeholder is not a safety property — it is two languages disagreeing about one setting.
+     *
+     * `.example` and `.invalid` are rejected outright rather than left to the operator: both are
+     * reserved and never resolve, so a token carrying one is dead on arrival. `.test` is allowed on
+     * purpose — it is the reserved-but-conventional fixture host this repository uses everywhere.
+     */
+    VI_ISSUER_URL: issuerIdentity,
+    VI_AGENT_ISS: issuerIdentity,
     VI_CLOCK_SKEW_SECONDS: z.coerce.number().int().min(0).max(3600).default(300),
 
     GATE_KID: z.string().min(1),

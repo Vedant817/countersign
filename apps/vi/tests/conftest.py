@@ -32,6 +32,11 @@ from vi_service.keys import b64u_encode
 
 SERVICE_TOKEN = "test-service-token-do-not-use-in-prod"
 KEK = base64.b64encode(bytes(range(32))).decode("ascii")
+# The two signing identities. Required since the placeholder defaults were removed, so every test
+# that reaches `load_settings()` has to name them — and they are named as *our* test hosts, because
+# an unconfigured service used to sign as `https://www.mastercard.com`.
+ISSUER_URL = "https://issuer.countersign.test"
+AGENT_ISS = "https://agent.countersign.test"
 
 MERCHANT = {
     "id": "mrc_northwind",
@@ -59,6 +64,8 @@ def _environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("VI_KEK", KEK)
     monkeypatch.setenv("VI_ISSUER_KID", "issuer-key-1")
     monkeypatch.setenv("VI_MERCHANT_KID", "merchant-key-1")
+    monkeypatch.setenv("VI_ISSUER_URL", ISSUER_URL)
+    monkeypatch.setenv("VI_AGENT_ISS", AGENT_ISS)
     monkeypatch.setenv("VI_CLOCK_SKEW_SECONDS", "300")
     monkeypatch.setenv("VI_PREPARE_TTL_SECONDS", "300")
     monkeypatch.setenv("VI_PUBLIC_RATE_LIMIT_PER_MIN", "30")
