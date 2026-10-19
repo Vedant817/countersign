@@ -344,10 +344,19 @@ async function merchantWorld(
   return world
 }
 
-/** `create_checkout`'s input, defaulted. */
+/**
+ * `create_checkout`'s input, defaulted.
+ *
+ * `merchantName` / `merchantWebsite` are part of the default because they are **required** on
+ * `CreateCheckoutInput`: they reach the signed price lock, and `website` becomes its `iss`. They were
+ * literals inside `createCheckout` until this test stopped being able to compile without them, which is
+ * the point — a caller can no longer forget to say who the merchant is.
+ */
 function cartInput(overrides: Partial<CreateCheckoutInput> = {}): CreateCheckoutInput {
   return {
     merchantId: MERCHANT_ID,
+    merchantName: 'Northwind Outfitters',
+    merchantWebsite: 'https://northwind.example',
     lines: [{ sku: SKU, qty: 1 }],
     shipToCountry: 'US',
     nowSec: NOW_SEC,
@@ -553,6 +562,61 @@ describe('create_checkout — the arithmetic', () => {
     expect(made.totalMinor).toBe(cartSubtotal(made.lines) + TAX_MINOR + made.shipping.minor)
     // The schema CHECK in §7.2 states this; the test restates it so a drift breaks a test, not a query.
     expect(cartTotal(made.subtotal, made.tax, made.shipping).minor).toBe(made.totalMinor)
+  })
+
+  it("signs the CALLER's merchant, never a literal baked into the library", async () => {
+    // The defect this pins: `createCheckout` used to send `name: 'Northwind Outfitters'` and
+    // `website: 'https://northwind.example'` regardless of `input.merchantId`, so every merchant in the
+    // system got a price lock naming Northwind, issued by a reserved domain that cannot resolve — and
+    // `apps/vi` sets the JWT's `iss` from that website, so the fabrication was *signed*.
+    const world = await merchantWorld()
+    await checkoutOk(world, {
+      merchantId: 'mrc_someone_else',
+      merchantName: 'Kalyani Textiles',
+      merchantWebsite: 'https://kalyani-textiles.example',
+    })
+
+    const sent = world.jwtRequests[0]
+    if (!sent) throw new Error('no price-lock request was recorded')
+    expect(sent.merchant.id).toBe('mrc_someone_else')
+    expect(sent.merchant.name).toBe('Kalyani Textiles')
+    expect(sent.merchant.website).toBe('https://kalyani-textiles.example')
+    // The regression guard in one line: the literal must not appear anywhere in the request.
+    expect(JSON.stringify(sent.merchant)).not.toContain('Northwind')
+  })
+
+  it('refuses a cart in a currency it has no shipping rate for, rather than using a USD one', async () => {
+    // `shippingFor` used to return `money(minor, 'USD')` and was called *before* the cart's currency was
+    // known, so a JPY cart got USD minor units summed into a JPY total — and that total was signed into
+    // the price lock. EC-FX-1 forbids converting, so the honest answer is to refuse.
+    const world = await merchantWorld({
+      products: [item('NW-JPY', 500n, { price: money(500n, 'JPY'), currency: 'JPY' })],
+    })
+    const made = await createCheckout(
+      world.deps,
+      cartInput({ lines: [{ sku: 'NW-JPY', qty: 1 }], shipToCountry: 'JP' }),
+    )
+
+    expect(made.ok).toBe(false)
+    if (!made.ok) {
+      expect(made.error.code).toBe('CS_NOT_FOUND')
+      expect(made.error.message).toContain('JPY')
+    }
+    // And nothing was signed, so no price lock exists over a total we could not compute.
+    expect(world.jwtRequests).toHaveLength(0)
+  })
+
+  it('prices a USD cart in USD, which is the currency the rate table is denominated in', async () => {
+    const world = await merchantWorld({
+      products: [item('NW-A', 1_000n, { price: money(1_000n, 'USD') })],
+    })
+    const made = await checkoutOk(world, {
+      lines: [{ sku: 'NW-A', qty: 1 }],
+      shipToCountry: 'US',
+    })
+
+    expect(made.currency).toBe('USD')
+    expect(made.shipping).toEqual(money(FLAT_SHIPPING_MINOR['US']!, 'USD'))
   })
 
   it('states §8.9\'s "tax is 0" as a constant, in the row, and in the answer', async () => {

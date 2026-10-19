@@ -103,13 +103,47 @@ export const FLAT_SHIPPING_MINOR: Readonly<Record<string, bigint>> = Object.free
 })
 
 /**
- * Shipping for a destination country, or `CS_NOT_FOUND`.
+ * The currency {@link FLAT_SHIPPING_MINOR} is denominated in.
  *
- * Refusing an unknown country rather than defaulting to zero is the point: "we have no rate for Fiji"
- * and "shipping to Fiji is free" are different facts, and only one of them is what a merchant means.
+ * It has to be named rather than assumed, because the caller adds `shipping.minor` into a cart total whose
+ * currency comes from the products. {@link shippingFor} used to return `money(minor, 'USD')` while being
+ * called *before* the cart's currency was known, so a JPY cart got USD minor units summed into a JPY total
+ * and that wrong total was signed into the price lock. The catalog ships a JPY SKU, so the path was live.
+ *
+ * Naming it also makes the remaining gap explicit instead of silent: this demo store quotes shipping in
+ * USD, so a non-USD cart has no shipping rate and is **refused** (EC-FX-1 — never convert) rather than
+ * priced with a number from another currency.
  */
-export function shippingFor(country: string): Result<Money, CsError> {
+export const SHIPPING_CURRENCY = 'USD' as const
+
+/**
+ * Shipping for a destination country in the cart's currency, or `CS_NOT_FOUND`.
+ *
+ * Refusing an unknown country, or a currency this store does not quote shipping in, rather than defaulting
+ * to zero, is the point: "we have no rate for Fiji" and "shipping to Fiji is free" are different facts,
+ * and only one of them is what a merchant means. The same reasoning covers the currency — a USD rate is
+ * not a JPY rate, and summing the two is arithmetic that looks right.
+ */
+export function shippingFor(country: string, currency: string): Result<Money, CsError> {
   const code = country.trim().toUpperCase()
+  const cartCurrency = currency.trim().toUpperCase()
+  if (cartCurrency !== SHIPPING_CURRENCY) {
+    return err(
+      csError(
+        'CS_NOT_FOUND',
+        `No shipping rate for destination ${country} in ${cartCurrency}`,
+        {
+          shipToCountry: country,
+          currency: cartCurrency,
+          shippingCurrency: SHIPPING_CURRENCY,
+        },
+        {
+          userMessage:
+            'We cannot ship that in this currency yet. Pick another currency or a delivery address.',
+        },
+      ),
+    )
+  }
   const minor = Object.prototype.hasOwnProperty.call(FLAT_SHIPPING_MINOR, code)
     ? FLAT_SHIPPING_MINOR[code]!
     : undefined
@@ -199,6 +233,24 @@ export interface CartLineInput {
 
 export interface CreateCheckoutInput {
   readonly merchantId: string
+  /**
+   * The merchant's display name, as the buyer will see it on the price lock.
+   *
+   * Required, and deliberately not defaulted. `createCheckoutJwt` sends this into `merchant`, and vi sets
+   * the JWT's `iss` from `merchant.website` — so a name invented here would be signed into an artefact that
+   * a buyer reads and an adjudicator trusts. There used to be a literal `'Northwind Outfitters'` and
+   * `'https://northwind.example'` in this file, which meant **every** merchant in the system produced a
+   * price lock naming Northwind Outfitters, issued by an RFC 2606 reserved domain that cannot resolve.
+   */
+  readonly merchantName: string
+  /**
+   * The merchant's website, which becomes the price lock's `iss`.
+   *
+   * Required for the same reason as {@link merchantName}, and for one more: `iss` is the issuer identity
+   * of a signature, so hard-coding it does not merely mislabel a cart, it makes every merchant's signed
+   * lock claim to come from a domain nobody controls.
+   */
+  readonly merchantWebsite: string
   readonly lines: readonly CartLineInput[]
   readonly shipToCountry: string
   /** Overrides {@link CHECKOUT_PRICE_LOCK_SECONDS}. */
@@ -493,12 +545,10 @@ export async function createCheckout(
     )
   }
 
-  const shipping = shippingFor(input.shipToCountry)
-  if (!shipping.ok) return shipping
-  const shippingMoney: Money = shipping.value
-
-  // Resolve every SKU first, so an unknown item is refused before a JWT is asked for. A JWT for a cart
-  // we cannot price is a price lock on nothing.
+  // Shipping is priced **after** the loop, because it is quoted in the cart's currency and the cart's
+  // currency is only known once the first line has been resolved. Pricing it first is what let a USD rate
+  // be summed into a JPY total.
+  //
   const lines: Array<{ sku: string; title: string; qty: number; unitMinor: bigint }> = []
   let currency: Currency | null = null
   for (const line of input.lines) {
@@ -564,17 +614,27 @@ export async function createCheckout(
   }
   const cartCurrency = parseCurrency(currency)
 
+  // Now that the cart's currency is known, price shipping in it. `shippingFor` refuses a currency this
+  // store does not quote in rather than handing back a rate from another one.
+  const shipping = shippingFor(input.shipToCountry, cartCurrency)
+  if (!shipping.ok) return shipping
+  const shippingMoney: Money = shipping.value
+
   const subtotalMinor = cartSubtotal(lines)
+  // A money invariant worth stating: every term below is denominated in `cartCurrency`, because the
+  // product prices are, because `TAX_MINOR` is zero in it, and because shipping is now priced in it.
   const totalMinor = subtotalMinor + TAX_MINOR + shippingMoney.minor
 
   const checkoutId = newId('chk')
   const ttl = input.priceLockSeconds ?? CHECKOUT_PRICE_LOCK_SECONDS
 
   const signed = await deps.checkout.createCheckoutJwt({
+    // The merchant's own identity, taken from the caller's record. Never a literal here: these two fields
+    // reach a signed JWT, and `website` becomes its `iss`.
     merchant: {
       id: input.merchantId,
-      name: 'Northwind Outfitters',
-      website: 'https://northwind.example',
+      name: input.merchantName,
+      website: input.merchantWebsite,
     },
     lines: lines.map((l) => ({ sku: l.sku, title: l.title, qty: l.qty, unit_minor: l.unitMinor })),
     shipping_minor: shippingMoney.minor,
