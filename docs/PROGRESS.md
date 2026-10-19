@@ -35,7 +35,7 @@ buildable now.
 | WP-09 | Catalog, checkout JWT, price lock, stock | D | 02, 04 | done | `27f3e12` | AT-M9 ✅ 34 (D-020) |
 | WP-10 | `packages/gate` + budget ledger | B | 02, 04, 09 | done | `27f3e12` | AT-M10 ✅ 162 |
 | WP-11 | `packages/orders` — order orchestrator | C | 06, 10 | todo | | AT-M11 (H-01 for live) |
-| WP-12 | `packages/webhooks` + reconciler + worker | C | 06, 02 | todo | | AT-M12 |
+| WP-12 | `packages/webhooks` + reconciler + worker | C | 06, 02 | done | `beb5f3d` | AT-M12 ✅ 154 · worker 116 |
 | WP-13 | `packages/agent` — shopping agent + injection defences | D | 09, 14, 04 | todo | | AT-M13 |
 | WP-14 | Merchant MCP server | D | 09 | todo | | AT-M14 |
 | WP-15a | Liability router (pure) | E | 01, 02 | todo | | AT-M15.1 + 40-case eval |
@@ -181,3 +181,12 @@ WP-06s and everything needing live sandbox is not started.
   `format:check` and `secret-scan` all green. The 30 that moved out of the skip column are
   `verify-py.test.ts`'s execution tests: they only run once `apps/vi/.venv` exists, so the same
   command on the same tree skipped them before `uv sync --extra dev` and runs them after.
+- **2026-10-20** — **Verified WP-12 and corrected the worker's documentation.** The suites are 154 tests
+  for `packages/webhooks` and 116 for `apps/worker` (`schedule` 17, `job-runner` 28, `worker` 9,
+  `delivery` 42, `pg-boss-delivery` 11, `boot` 9), all green without credentials or a database, so the
+  package is `done` at `beb5f3d`; the later worker fixes (`0fff1df`, `2012b0d`, `6fb14de`, `0f0a7a0`)
+  are part of the verified state. `adapters.ts` supplies `WebhookStore` and `WebhookAudit` over
+  `@countersign/db`, closing the exit-78 hole that stopped the process owning §8.10's reservation
+  release, and the README now names the three reads still without a repository rather than claiming no
+  production adapter exists. The `test/lazy.test.ts` citation was stale — `WORKER-3` lives in
+  `test/worker.test.ts` — and the test table listed three of six files.
