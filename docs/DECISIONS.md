@@ -1222,3 +1222,100 @@ not the outcome that occurred:
 **Every one found by a live or captured value. None found by a unit test**, because in all six the
 fixture was written to make an assertion easy rather than to match what the dependency emits. D-034
 recorded the rule; these two are what it costs to not have had it.
+
+## D-039 - The signed Gate record no longer carries an amount, currency or payee it did not determine
+
+**Date:** 2026-10-16
+**Decision:** `GateRecordPayload`'s `amount`, `currency` and `payee` become `string | Currency | null`.
+When the Gate cannot read the checkout session it signs `null` rather than `'0.00'` / `'USD'` / `''`, and
+`verifyDecisionRecord` now rejects an empty string (and a non-boolean `chain_valid`, and a non-numeric
+`iat`) instead of accepting them.
+**Reason:** A run over a missing checkout session blocks on `GATE_CHECK_UNSATISFIABLE`, and the record is
+the only artefact that explains why. The payload had no slot for "could not determine", so three values
+were invented - and all three read as fact rather than as absence:
+
+1. `'0.00'` with `'USD'` is a **real amount**. `readRecordAmount` parsed it and the public verifier printed
+   `$0.00 USD`, i.e. a purchase was evaluated and found to be worth nothing.
+2. `''` **passed validation**. Only `undefined` was rejected, so a record naming no merchant verified as
+   sound evidence and the page printed `approves payment to ""`.
+3. Both are claims nothing signed. The signature covers whatever was written, so an invented value is
+   indistinguishable from a real one forever after.
+
+`null` is also the safe direction: I-1 is enforced by `recordMatches` comparing the record against the
+order, and `null !== "30.00"`, so an absent amount can only produce a refusal, never a false `ALLOW`. The
+verifier renders an absent payee as `SKIPPED` with its reason, matching its own stated rule that a check
+which could not run is not a check that passed.
+**Evidence:** `packages/gate/test/missing-subject.test.ts` now asserts the ghost-cart payload is
+`null`/`null`/`null` with all nine §8.10 fields still present; `record.test.ts` asserts `''` is refused,
+`null` verifies, `'true'` as `chain_valid` is refused, and `recordMatches` fails closed with `got:
+"absent"`. The auditor had already recorded the symptom in that file's header and left it unpinned.
+
+## D-040 - `create_checkout` takes the merchant's name and website; the literals are gone
+
+**Date:** 2026-10-16
+**Decision:** `CreateCheckoutInput` gains required `merchantName` and `merchantWebsite`. The literals
+`'Northwind Outfitters'` and `'https://northwind.example'` are removed.
+**Reason:** `createCheckout` sent those two literals for **every** merchant regardless of
+`input.merchantId`, and `apps/vi`'s `checkout_jwt.py` sets the price lock's `iss` from
+`merchant.website`. So every merchant's merchant-signed price lock claimed to be issued by an RFC 2606
+reserved domain that cannot resolve, and named a different company than the one being paid. A hard-coded
+`iss` does not merely mislabel a cart; it makes a signature assert an issuer nobody controls.
+**Evidence:** `packages/gate/test/merchant.test.ts` - a checkout for `mrc_someone_else` sends that
+merchant's name and website, and the recorded request contains no `Northwind` anywhere.
+
+## D-041 - Shipping is quoted in the cart's currency, and refuses rather than mixing
+
+**Date:** 2026-10-16
+**Decision:** `shippingFor(country, currency)` takes the cart's currency and returns `CS_NOT_FOUND` for a
+currency the rate table is not denominated in. `SHIPPING_CURRENCY` names it (`USD`). The call moved to
+**after** the cart's currency is resolved.
+**Reason:** `shippingFor` returned `money(minor, 'USD')` and was called *before* the currency was known,
+then `subtotalMinor + TAX_MINOR + shippingMoney.minor` was summed and labelled with `cartCurrency`. A JPY
+cart therefore got USD minor units added to a JPY total, and that wrong total was signed into the price
+lock. The seeded catalog ships a JPY SKU, so the path was live. EC-FX-1 forbids conversion, so the honest
+answer to "no rate in this currency" is to refuse - the same rule the unknown-country branch already
+followed ("we have no rate for Fiji" is not "shipping to Fiji is free").
+**Evidence:** `merchant.test.ts` - a JPY cart is refused with `CS_NOT_FOUND`, the message names `JPY`, and
+`jwtRequests` is empty, so no price lock exists over a total that could not be computed.
+
+## D-042 - `VI_ISSUER_URL` and `VI_AGENT_ISS` are required, and a reserved host is refused
+
+**Date:** 2026-10-16
+**Decision:** The two signer identities are required by both runtimes via the existing `_req()` helper in
+`apps/vi/src/vi_service/config.py` and a new `issuerIdentity` schema in `packages/core/src/env.ts`. No
+default. A `.example`/`.invalid` host is rejected at boot; `.test` is allowed for local fixtures.
+**Reason:** Spec §6 never listed either variable, and Python defaulted them: `VI_ISSUER_URL` to
+`https://www.mastercard.com`, so an unconfigured deployment's L1 credential claimed to **be** Mastercard;
+`VI_AGENT_ISS` to `https://agent.countersign.example`, an RFC 2606 reserved TLD that can never resolve, so
+every L3a/L3b it issued was unverifiable. TypeScript did not know either variable existed, so the two
+runtimes disagreed about what "configured" means - the same asymmetry as D-034. There is no safe default
+for an issuer identity, so there is no default.
+**Evidence:** `apps/vi/tests/test_auth_and_routes.py` asserts `ConfigError` naming each variable and that
+the old placeholder is absent from the message; `packages/core/test/env.test.ts` asserts both are
+declared, both refuse to boot when missing, and that a reserved host is rejected.
+**Also fixed here:** the same audit found `PAYPAL_API_BASE`'s EC-ENV-1 refinement calling `new URL`
+unguarded. A zod `.refine()` runs even when the `.url()` beside it has already failed, so
+`parseEnv({... PAYPAL_API_BASE: 'nope'})` raised a raw `TypeError [ERR_INVALID_URL]` out of `parseEnv`,
+breaking the documented contract that it throws a `CsError` and crashing boot with a stack trace instead
+of naming the variable. All URL-shaped variables now parse through one guarded `parseHost`, and
+`env.test.ts` pins it for all five.
+
+## D-043 - Landing and Judge Mode links to routes that did not exist are removed, not stubbed
+
+**Date:** 2026-10-16
+**Decision:** Five hard-coded `href`s that resolved to nothing are gone: `/wallet/onboarding`, `/agent`,
+`/merchant` and `/v` on the landing page, and `/v` on `/judge`. The destinations that do not exist are
+rendered as clearly-labelled not-yet-built text instead of links.
+**Reason:** The app ships `/`, `/judge`, `/status` and `/v/[packetId]` only. A judge clicking a persona
+card got a 404 from a product whose entire pitch is verifiability. `/judge` had already set the standard
+this repo holds itself to - it used to link itself as the primary call to action, that 404'd, and the fix
+was to remove the lie rather than paper over it - so the same defect was left standing on four other
+links. No stub pages were created: a judge must never reach a screen that pretends to be a feature.
+**Not done, deliberately:** `/v/[packetId]` needs a real packet id. There is no query for "most recent
+packet" anywhere in `packages/db` (every `evidence_packets` read requires an identifier first), the
+landing and judge pages are `○ (Static)` with zero client JS and would need a live DB plus
+`VI_SERVICE_URL` to become dynamic, and in the demo room a packet does not exist until the Defender has
+filed one against a real sandbox capture - which H-01 blocks. The pages now say where a genuine id comes
+from: the QR code on the filed evidence PDF.
+**Deviation from S-01:** the spec asks for "3 persona buttons"; they are cards with no click. A button
+that navigates nowhere is the defect, so the affordance was dropped rather than the honesty.

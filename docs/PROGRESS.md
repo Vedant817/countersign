@@ -154,3 +154,28 @@ WP-06s and everything needing live sandbox is not started.
   `declaration` + `declarationMap`, so any `tsc` run that does not inherit a `noEmit` over a
   `test/**/*.ts` include drops one beside the source. `git ls-files '*.d.ts'` returns 0 by design —
   packages ship declarations from `dist/`. Now ignored in both `.gitignore` and `.prettierignore`.
+- **2026-10-20** — **Landed the D-039…D-043 hardening pass**, four commits of work that was written but
+  uncommitted (`634bf70`, `5144295`, `2e1b9ad`, `16aed53`). One through-line in all five decisions:
+  nothing signed into an artefact may be a value we did not determine. **D-039**: the Gate record no
+  longer invents `amount`, `currency` and `payee` when the cart cannot be read — the payload fields are
+  `null`-able, `verifyDecisionRecord` rejects empty strings in their place, and the verifier skips the
+  payee binding rather than comparing against an invented one. **D-040/D-041**: `create_checkout` no
+  longer signs the literal "Northwind Outfitters" / `https://northwind.example` regardless of the
+  merchant, and shipping is priced in the cart's currency and refuses a currency this store does not
+  quote (EC-FX-1: never convert) instead of summing USD minor units into a JPY total. **D-042**:
+  `VI_ISSUER_URL` and `VI_AGENT_ISS` are required — the shipped default for the former was
+  `https://www.mastercard.com`, so a process started without that variable signed Mastercard's identity
+  into `iss` — and the `packages/core` env schema refuses any identity host under a reserved TLD;
+  `render.yaml`, `docker-compose.yml`, `sandbox-nightly.yml` and `.env.example` were updated to declare
+  or supply them. **D-043**: the landing and Judge Mode linked `/v`, `/wallet/onboarding`, `/agent` and
+  `/merchant`, none of which is a route, so all four 404'd; the verifier is now named as
+  `/v/<packet-id>` with where a judge can actually obtain an id (the QR code on the filed evidence PDF),
+  and the persona buttons are cards that state what exists and what does not.
+  The verifier and the orchestrator harness are inside `634bf70` rather than a commit of their own:
+  `verify-view.ts` reads `payload.amount === null` and `harness.ts` throws on a null ALLOW, so changing
+  the payload type without them would not typecheck.
+- **2026-10-20** — **Verification for the landing.** Gate 68 passed (record, missing-subject, merchant);
+  `packages/core` env 27 passed; vi-service 215 passed with `ruff check` and `ruff format --check` clean
+  (pytest would not spawn until `uv sync --extra dev` — the dev extra was not installed in
+  `apps/vi/.venv`); full suite 2485 passed | 66 skipped (2551) with lint, typecheck, build,
+  `format:check` and `secret-scan` all green.
