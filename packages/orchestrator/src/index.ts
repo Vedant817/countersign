@@ -92,3 +92,18 @@ export {
   type ReleasedReservation,
   type ReservationReleaseReport,
 } from './types'
+
+// --- the production binder ----------------------------------------------------------------------
+export {
+  orchestratorDepsFromRepos,
+  type DefenderDeps,
+  type DefenderPayPal,
+  type DefenderRefunds,
+  type DefenderStore,
+  type OrchestratorDefender,
+  type OrchestratorDefenderParts,
+  type OrchestratorFromReposInput,
+  type OrchestratorPayPal,
+  type OrchestratorRuntimeDeps,
+  type PacketArtefacts,
+} from './deps'
