@@ -38,19 +38,19 @@ buildable now.
 | WP-12 | `packages/webhooks` + reconciler + worker | C | 06, 02 | done | `beb5f3d` | AT-M12 ✅ 154 · worker 116 |
 | WP-13 | `packages/agent` — shopping agent + injection defences | D | 09, 14, 04 | todo | | AT-M13 |
 | WP-14 | Merchant MCP server | D | 09 | todo | | AT-M14 |
-| WP-15a | Liability router (pure) | E | 01, 02 | todo | | AT-M15.1 + 40-case eval |
-| WP-15b | Evidence planner (reason → evidence enum) | E | 15a | todo | | AT-M15.2 |
-| WP-15c | Drafter + citation checker | E | 15b | todo | | AT-M15.3 |
-| WP-15d | Evidence PDF + QR | E | 15b | todo | | AT-M15.4 |
-| WP-15e | Filer + dispute ingest + Defender agent | E | 06, 12, 15c, 15d | todo | | AT-M15 (J3) |
-| WP-16 | Strategist + dispute lifecycle actions | E | 15e | todo | | AT-M16 |
+| WP-15a | Liability router (pure) | E | 01, 02 | done | `7b95e71` | AT-M15.1 ✅ 40/40 |
+| WP-15b | Evidence planner (reason → evidence enum) | E | 15a | done | `7b95e71` | plan tests per reason ✅ |
+| WP-15c | Drafter + citation checker | E | 15b | done | `1d465bc` | AT-M15.2 ✅ forged number fails |
+| WP-15d | Evidence PDF + QR | E | 15b | done | `1d465bc` | AT-M15.3 ✅ PDF < 2 MB + QR |
+| WP-15e | Filer + dispute ingest + Defender agent | E | 06, 12, 15c, 15d | wip | `bdc0356` | AT-M15.5/.6 ✅ · AT-M15.4 needs H-01 |
+| WP-16 | Strategist + dispute lifecycle actions | E | 15e | wip | `bdc0356` | AT-M16.1/.2 ✅ · AT-M16.3 needs H-01 |
 | WP-17a | Wallet UI (S-02…S-09) | D | 05, 07, 08 | todo | | E2E + axe |
 | WP-17b | Agent chat UI (S-10) | D | 13 | todo | | E2E |
 | WP-17c | Shop UI (S-11…S-13) | D | 09 | todo | | E2E |
 | WP-17d | Merchant UI (S-14…S-16, S-19) | E | 11, 10 | todo | | E2E |
 | WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | todo | | E2E + table fallback |
 | WP-17f | Landing, status, design polish | A | 17a–e | todo | | Lighthouse ≥ 90 a11y |
-| WP-18 | Public verifier `/v/[packetId]` | B | 03, 15d | todo | | AT-M18 |
+| WP-18 | Public verifier `/v/[packetId]` | B | 03, 15d | done | `774e8a4` | AT-M18 ✅ 226 |
 | WP-19 | Privacy, logging, audit, status | A | 02, 12 | todo | | AT-M19 |
 | WP-20 | Evals + Judge Mode | A | 11, 13, 15e | todo | | J1–J4 green ×20 |
 | WP-21 | Edge-case sweep: every §12 row tested | all | all | todo | | `pnpm test:ec` = 109/109 |
@@ -190,3 +190,18 @@ WP-06s and everything needing live sandbox is not started.
   release, and the README now names the three reads still without a repository rather than claiming no
   production adapter exists. The `test/lazy.test.ts` citation was stale — `WORKER-3` lives in
   `test/worker.test.ts` — and the test table listed three of six files.
+- **2026-10-20** — **Verified the Defender and verifier already on `main` and corrected their rows.**
+  The work had been committed but the table still called it `todo`: `7b95e71` (WP-15a router, WP-15b
+  planner), `1d465bc` (WP-15c drafter + citation, WP-15d PDF + QR), `bdc0356` (WP-15e filer/ingest,
+  WP-16 strategist) and `774e8a4` (WP-18 verifier) are all ancestors of `main`. `packages/defender`
+  typechecks and runs **652 tests in 13 files**, with its eval at **44/44** (20 drafter-eval + 24 eval);
+  `packages/verifier` runs **226 tests in 7 files**, including the TS↔Python `verify.py` parity suite and
+  the 30/min/IP limit. The acceptance column had the spec's numbering shifted one row from WP-15c
+  onward: §8.15 makes AT-M15.2 the citation checker, AT-M15.3 the PDF/QR, AT-M15.4 the live sandbox
+  filing, AT-M15.5 wrong-state and AT-M15.6 deadline; WP-15b has no numbered AT, only "plan tests per
+  reason". WP-15a–d and WP-18 are `done`; **WP-15e and WP-16 are `wip`**, because AT-M15.4 and
+  AT-M16.3 are the sandbox suites `filer.sandbox.test.ts` / `strategist.sandbox.test.ts`, which
+  `vitest.config.base.ts` deliberately excludes from the PR gate (`**/*.sandbox.test.ts`, opt-in via
+  `sandbox-nightly.yml` or `pnpm --filter <pkg> test:sandbox`) and which need H-01. Their offline ATs
+  pass. `packages/defender/README.md` still says "294 tests, in four files" and documents only
+  WP-15a/b; it is left for the WP-22 docs sweep rather than edited here.
