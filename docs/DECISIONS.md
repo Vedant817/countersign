@@ -1319,3 +1319,25 @@ filed one against a real sandbox capture - which H-01 blocks. The pages now say 
 from: the QR code on the filed evidence PDF.
 **Deviation from S-01:** the spec asks for "3 persona buttons"; they are cards with no click. A button
 that navigates nowhere is the defect, so the affordance was dropped rather than the honesty.
+
+## D-044 - WP-11 ships the orchestrator composition root and records contract gaps instead of inventing adapters
+
+**Date:** 2026-10-20
+**Decision:** WP-11 adds `packages/orchestrator/src/deps.ts` as the package's composition root, built in the
+same rename-and-forward style as `gateDepsFromRepos` and `orderStoreFromRepos`: it accepts repository
+function references and returns a complete `OrchestratorDeps`. Every port with no production source is
+either documented on the parameter or left at a contract-legal default (`notify: nullNotifier`, no
+`stock`, optional `defender`, injected `vi`), and all of them are listed in `docs/contract-issues.md`.
+**Reason:** `OrchestratorDeps` has eight members spanning six packages, and the four orchestrator
+functions cannot be used in production until something assembles them. Rule 8 forbids editing another
+work package's files or adding a second data-access layer in the wrong package, so the binder references
+central constructors (`compilerFrom`, `gateDepsFromRepos`, `orderStoreFromRepos`,
+`budgetHooksFromStore`, `orchestratorStoreFromRepos`, `drizzleStore`) rather than reimplementing them,
+and refuses to fabricate a `DefenderStore`, a `Notifier`, a merchant catalog or a repository-backed
+`lockMandateForUpdate`.
+**Evidence:** `defenderRefundsFromOrders` exists at `packages/orders/src/dispute-refund.ts:232` and is
+exported from `packages/orders/src/index.ts:158`, so the Defender's refund seam is real and the binder
+does not need to compensate for it. The remaining gaps are evidenced with file:line in
+`docs/contract-issues.md`; `MerchantDeps` is only ever constructed in
+`packages/gate/test/merchant.test.ts`, and `DefenderStore` has only `createInMemoryDefenderWorld`
+(`packages/defender/src/ingest.ts:1580`).
