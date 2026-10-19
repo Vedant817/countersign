@@ -401,14 +401,39 @@ export type AttemptState =
  * payload goes into `custom_id` and into an evidence packet a PayPal agent reads. `checks_hash` is
  * `sha256(canonicalJson(checks))` hex — canonical JSON via `packages/db`'s `canonicalJson`, so a verifier
  * recomputing it needs no special client.
+ *
+ * ### Why `amount`, `currency` and `payee` are nullable
+ *
+ * Because there is a legitimate run in which the Gate cannot determine them: the checkout session is
+ * missing, so checks 5–10 cannot evaluate their subject and the decision is a `BLOCK` on
+ * `GATE_CHECK_UNSATISFIABLE`. The record still has to be written — it is the thing that explains the
+ * refusal — and the payload has no room for "we could not determine this".
+ *
+ * The alternative used to be three invented values: `'0.00'`, `'USD'` and `''`. That is worse than a
+ * missing field in every direction:
+ *
+ * 1. **`'0.00'` with `'USD'` is a real amount.** The public verifier renders it as `$0.00 USD` and the
+ *    packet reads as though a zero-value purchase was evaluated, which is a claim nothing signed and
+ *    nothing checked.
+ * 2. **`''` passes validation.** `verifyDecisionRecord` rejected only `undefined`, so an empty payee was
+ *    indistinguishable from a real one — and the verifier printed "approves payment to \"\"".
+ * 3. **It launders the failure.** A `null` says *the Gate could not read the cart*, which is the truth and
+ *    is already the reason the run blocked. A `0.00` says *the cart was worth nothing*.
+ *
+ * `null` is also the safe direction. §3.1 I-1 is enforced by {@link recordMatches} comparing the record
+ * against the order, and `null !== "30.00"`, so a record with an absent amount can only ever produce a
+ * refusal downstream — never a false `ALLOW`.
  */
 export interface GateRecordPayload {
   readonly gdc: GateDecisionId
   readonly att: AttemptId
   readonly mdt: MandateId
-  readonly amount: string
-  readonly currency: Currency
-  readonly payee: string
+  /** PayPal's decimal string, or `null` when the Gate could not determine the cart's amount. */
+  readonly amount: string | null
+  /** `null` only when there is no checkout session to read a currency from. */
+  readonly currency: Currency | null
+  /** The merchant the decision clears payment to, or `null` when no checkout session was read. */
+  readonly payee: string | null
   readonly checks_hash: string
   readonly chain_valid: boolean
   /** The pinned Verifiable Intent commit — `VI_LIB_COMMIT`. A packet filed months ago must verify. */

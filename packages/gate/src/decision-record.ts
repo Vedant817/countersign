@@ -402,17 +402,44 @@ export async function verifyDecisionRecord(
     }
   }
 
+  // `null` is legitimate for `amount`, `currency` and `payee`: it means the Gate could not read the
+  // checkout session, which is itself a reason the run blocked. An **empty string** is not legitimate for
+  // any field, and it used to be the stand-in for an absent payee — so `verifyDecisionRecord`, which
+  // rejected only `undefined`, accepted a record with no payee and the verifier printed `approves payment
+  // to ""`. Nothing can produce `''` honestly, so it is rejected rather than carried.
+  const blank = REQUIRED_FIELDS.filter((f) => {
+    const v = p[f]
+    return typeof v === 'string' && v === ''
+  })
+  if (blank.length > 0) {
+    return {
+      valid: false,
+      reason: `payload has empty ${blank.join(', ')} — absent is null, not an empty string`,
+      kid,
+      checksHash: null,
+    }
+  }
+
+  // The same reasoning applied to the two typed scalars: `chain_valid` and `iat` are read by the
+  // verifier and by `recordMatches`, and a truthy string in either place is a claim, not a value.
+  if (typeof p['chain_valid'] !== 'boolean') {
+    return { valid: false, reason: 'chain_valid is not a boolean', kid, checksHash: null }
+  }
+  if (typeof p['iat'] !== 'number' || !Number.isFinite(p['iat'])) {
+    return { valid: false, reason: 'iat is not a number', kid, checksHash: null }
+  }
+
   const payload: GateRecordPayload = {
     gdc: p['gdc'] as GateRecordPayload['gdc'],
     att: p['att'] as GateRecordPayload['att'],
     mdt: p['mdt'] as GateRecordPayload['mdt'],
-    amount: p['amount'] as string,
+    amount: p['amount'] as GateRecordPayload['amount'],
     currency: p['currency'] as GateRecordPayload['currency'],
-    payee: p['payee'] as string,
-    checks_hash: p['checks_hash'] as string,
-    chain_valid: p['chain_valid'] as boolean,
-    vi_commit: p['vi_commit'] as string,
-    iat: p['iat'] as number,
+    payee: p['payee'] as GateRecordPayload['payee'],
+    checks_hash: p['checks_hash'] as GateRecordPayload['checks_hash'],
+    chain_valid: p['chain_valid'] as GateRecordPayload['chain_valid'],
+    vi_commit: p['vi_commit'] as GateRecordPayload['vi_commit'],
+    iat: p['iat'] as GateRecordPayload['iat'],
   }
 
   const fresh = typeof payload.iat === 'number' && payload.iat <= nowSec + skew
@@ -433,7 +460,14 @@ export const REQUIRED_FIELDS = [
   'iat',
 ] as const satisfies readonly (keyof GateRecordPayload)[]
 
-/** Does a record name *this* attempt, amount, currency and payee? **§3.1 I-1**, verbatim. */
+/**
+ * Does a record name *this* attempt, amount, currency and payee? **§3.1 I-1**, verbatim.
+ *
+ * An absent (`null`) field is a **mismatch**, never a match, and never a pass-by-default: `null !== "30.00"`
+ * is the whole mechanism, so a record the Gate could not pin is refused by the only caller that compares it
+ * against a real order. `describeValue` renders the absence as the word `absent` so the refusal reads as a
+ * finding rather than as `null !== 30.00` in a log.
+ */
 export function recordMatches(
   payload: GateRecordPayload,
   expected: { attemptId: string; amount: string; currency: string; payee: string },
@@ -446,8 +480,13 @@ export function recordMatches(
   return { ok: true }
 }
 
-function mismatch(field: string, got: string, want: string) {
-  return { ok: false as const, field, got, want }
+/** A missing value reads as `absent`, not as the four characters `null`. */
+function describeValue(value: string | null): string {
+  return value === null ? 'absent' : `"${value}"`
+}
+
+function mismatch(field: string, got: string | null, want: string) {
+  return { ok: false as const, field, got: describeValue(got), want }
 }
 
 /* ------------------------------------------------------------------------------------------ */

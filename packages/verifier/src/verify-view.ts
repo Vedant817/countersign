@@ -1120,27 +1120,34 @@ function gateRecordBindingChecks(
           'no signed merchant id to compare against',
           authority,
         )
-      : payload.payee !== payeeFrom
-        ? check(
+      : payload.payee === null
+        ? bindingSkipped(
             'gate_record_payee',
-            'binding',
-            'The Gate record approves a different payee from the one the price lock names',
-            'FAIL',
-            `The signed record approves payment to "${payload.payee}", and this packet’s merchant-signed ` +
-              `price lock names "${payeeFrom}". The money was approved to go somewhere else.`,
-            'local',
+            'the payee',
+            'the signed record names none, because the Gate could not read the checkout session',
             authority,
           )
-        : check(
-            'gate_record_payee',
-            'binding',
-            'The Gate record approves the merchant the buyer was shopping at',
-            'PASS',
-            `Both say "${payload.payee}", and that is the merchant in the price lock, so the Gate cleared ` +
-              'payment to the shop the cart was priced for.',
-            'local',
-            authority,
-          ),
+        : payload.payee !== payeeFrom
+          ? check(
+              'gate_record_payee',
+              'binding',
+              'The Gate record approves a different payee from the one the price lock names',
+              'FAIL',
+              `The signed record approves payment to "${payload.payee}", and this packet’s merchant-signed ` +
+                `price lock names "${payeeFrom}". The money was approved to go somewhere else.`,
+              'local',
+              authority,
+            )
+          : check(
+              'gate_record_payee',
+              'binding',
+              'The Gate record approves the merchant the buyer was shopping at',
+              'PASS',
+              `Both say "${payload.payee}", and that is the merchant in the price lock, so the Gate cleared ` +
+                'payment to the shop the cart was priced for.',
+              'local',
+              authority,
+            ),
   )
 
   // --- attempt and mandate: nothing signed names either ----------------------------------------------
@@ -1297,10 +1304,19 @@ function iatBindingCheck(payload: GateRecordPayload, anchors: ChainAnchors): Ver
   )
 }
 
-/** The record's `amount` as money, or `null` when it is not a plain decimal in its own currency. */
+/**
+ * The record's `amount` as money, or `null` when there is no amount to read.
+ *
+ * Three ways to get here, and they are deliberately indistinguishable: the field is `null` because the
+ * Gate could not read the checkout session, it is present but not a plain decimal in its own currency, or
+ * its currency is not one we know. The first used to arrive as the literal string `'0.00'` with `'USD'`,
+ * which this function happily parsed and the page printed as a real $0.00 purchase — a claim the Gate
+ * never made and nothing signed. An absent amount must read as an absent amount.
+ */
 function readRecordAmount(
   payload: GateRecordPayload,
 ): { minor: bigint; currency: Currency } | null {
+  if (payload.amount === null) return null
   if (!isCurrency(payload.currency)) return null
   try {
     return fromPayPalValue(payload.amount, payload.currency)

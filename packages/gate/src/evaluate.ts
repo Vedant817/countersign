@@ -36,7 +36,6 @@ import {
   toPayPalValue,
   VI_LIB_COMMIT,
   type CsError,
-  type Currency,
   type GateDecisionId,
   type Money,
   type Result,
@@ -167,8 +166,15 @@ async function runDecision(
 
   const outcome = resolveOutcome(checks, reasons)
   const amount = decisionAmount(ctx)
-  const currency = amount?.currency ?? state.checkout?.currency ?? ('USD' as Currency)
-  const payee = state.checkout?.merchant_id ?? ''
+  // `null`, not a stand-in. There is a legitimate run in which the cart could not be read at all: the
+  // checkout session is missing, checks 5-10 decline on `GATE_CHECK_UNSATISFIABLE`, and the record still
+  // has to be written because it is what explains the refusal. This payload has no "could not determine"
+  // slot, so the old `'0.00'` / `'USD'` / `''` stood in — and the public verifier rendered that as a
+  // real $0.00 USD payment to an empty payee. See `GateRecordPayload` for why `null` is the only honest
+  // value and the only safe one: `recordMatches` compares against the order, so an absent amount can
+  // produce a refusal but never a false ALLOW.
+  const currency = amount?.currency ?? state.checkout?.currency ?? null
+  const payee = state.checkout?.merchant_id ?? null
 
   const id = options.decisionId ?? newId('gdc')
   const sign = options.sign ?? deps.signRecord
@@ -176,7 +182,7 @@ async function runDecision(
     gdc: id,
     att: i.attemptId,
     mdt: i.mandateId,
-    amount: amount ? toPayPalValue(amount) : '0.00',
+    amount: amount ? toPayPalValue(amount) : null,
     currency,
     payee,
     checks_hash: checksHash(checks),

@@ -807,7 +807,20 @@ export async function harness(options: HarnessOptions = {}): Promise<Harness> {
   }
 }
 
-/** Verify a decision record this harness produced, with the real Ed25519 signature check. */
+/**
+ * Verify a decision record this harness produced, with the real Ed25519 signature check.
+ *
+ * ### Why it refuses a record that pins no amount, currency or payee
+ *
+ * `GateRecordPayload` makes those three nullable, and `null` is the honest value for a run that could not
+ * read the checkout session. This helper is only ever called on the **ALLOW** path, where §3.1 I-1 requires
+ * the record to name all three exactly — so returning `null` here would be worse than useless: every caller
+ * compares the result against a real expected value, and `expect(unit.amount.value).toBe(null)` fails in a
+ * way that reads like a pricing bug rather than "the record stopped pinning what it must".
+ *
+ * So it throws, naming the field. A regression that silently dropped a value from the signed record then
+ * fails here too, instead of being papered over by a comparison that happens to pass.
+ */
 export async function readSignedRecord(
   record: string,
   k: HarnessKeys,
@@ -816,7 +829,22 @@ export async function readSignedRecord(
   const verdict = await verifyDecisionRecord(record, { jwks: k.gate.jwks, nowSec })
   if (!verdict.valid) throw new Error(`decision record did not verify: ${verdict.reason}`)
   const p = verdict.payload
-  return { amount: p.amount, currency: p.currency, payee: p.payee, att: p.att, mdt: p.mdt }
+  const pinned = (value: string | null, field: string): string => {
+    if (value === null) {
+      throw new Error(
+        `decision record does not pin ${field}: the ALLOW path must name it for I-1, and a record with ` +
+          `none means the Gate could not read the checkout session.`,
+      )
+    }
+    return value
+  }
+  return {
+    amount: pinned(p.amount, 'amount'),
+    currency: pinned(p.currency, 'currency'),
+    payee: pinned(p.payee, 'payee'),
+    att: p.att,
+    mdt: p.mdt,
+  }
 }
 
 /** A `CS_VALIDATION` error, for a test that needs a specific failure. */

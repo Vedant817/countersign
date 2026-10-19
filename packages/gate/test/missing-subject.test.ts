@@ -17,6 +17,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
+import { REQUIRED_FIELDS } from '../src/decision-record'
 import { evaluate } from '../src/evaluate'
 import { input, makeWorld } from './fixtures'
 
@@ -52,6 +53,41 @@ describe('EC-MER-9: a missing checkout session cannot produce an ALLOW', () => {
     // `undefined` rather than `null`: `evaluate` leaves `reservation` unset when nothing was
     // reserved, and asserting `null` here would be asserting a shape it never had.
     expect(decision.reservation ?? null).toBeNull()
+  })
+
+  it('signs absent values as null, never as a fabricated amount, currency or payee', async () => {
+    // The world's default `signRecord` is a stub that does not emit a compact JWS, so this one runs with
+    // a real key: the payload being asserted on is one an actual Ed25519 signature covers, not a string
+    // a fake signer shaped for the occasion.
+    const world = await makeWorld({ signWithRealKey: true })
+    const result = await evaluate(input({ checkoutId: 'chk_nonexistent_ghost' }), world.deps)
+    if (!result.ok) {
+      throw new Error(
+        `evaluate() failed unexpectedly: ${result.error.code}: ${result.error.message}`,
+      )
+    }
+    const decision = result.value
+
+    // The other half of this file's defect, which the header above names and the tests beside it did not
+    // pin: the run correctly BLOCKS, but the signed record still asserted `amount: "0.00"`, `currency:
+    // "USD"` and `payee: ""`. Those are not placeholders the verifier could recognise — `readRecordAmount`
+    // parsed `"0.00"` as money and the public page printed a real `$0.00 USD` purchase to an empty payee,
+    // and `verifyDecisionRecord` rejected only `undefined`, so the empty payee passed as valid evidence.
+    //
+    // A ghost cart has no amount, no currency and no payee. The only honest record says so.
+    const payload = JSON.parse(
+      Buffer.from(decision.signedRecord.split('.')[1]!, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>
+
+    expect(payload['amount']).toBeNull()
+    expect(payload['currency']).toBeNull()
+    expect(payload['payee']).toBeNull()
+
+    // `null` must not become a *hole*. All nine §8.10 fields are still present, so the payload is still
+    // structurally the decision record a dispute packet expects — it just no longer lies about the cart.
+    for (const field of REQUIRED_FIELDS) {
+      expect(payload[field], `${field} missing from the signed payload`).toBeDefined()
+    }
   })
 
   it('every cart check that declines does so as a blocking fail, never notApplicable', async () => {

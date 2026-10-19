@@ -20,6 +20,7 @@ import { generateKeyPair, exportJWK } from 'jose'
 import { VI_LIB_COMMIT } from '@countersign/core'
 
 import { CHECK_ORDER } from '../src/checks'
+import type { GateRecordPayload } from '../src/types'
 import {
   GATE_RECORD_TYP,
   REQUIRED_FIELDS,
@@ -125,6 +126,127 @@ describe('AT-M10.5 — the decision record verifies against /.well-known/jwks.js
 
     expect(verdict.valid).toBe(false)
     if (!verdict.valid) expect(verdict.reason).toContain('no key in the JWKS')
+  })
+
+  it('refuses a record that says "" where a value belongs — absent is null', async () => {
+    // The regression this pins: the Gate used to stand in `''` for an unreadable payee, and
+    // `verifyDecisionRecord` rejected only `undefined`. So a record naming no merchant verified as
+    // valid evidence and the public page printed `approves payment to ""`. An empty string is not a
+    // possible honest value for any field, so it is now refused rather than carried.
+    const { world, jwks } = await signedDecision()
+    const sign = recordSigner(world.keys.gate.key, world.keys.gate.kid)
+
+    const forged = await sign({
+      gdc: 'gdc_00000000000000000000000001' as GateRecordPayload['gdc'],
+      att: 'att_00000000000000000000000001' as GateRecordPayload['att'],
+      mdt: MANDATE_ID,
+      amount: '30.00',
+      currency: 'USD',
+      payee: '',
+      checks_hash: sha256Hex('[]'),
+      chain_valid: true,
+      vi_commit: VI_LIB_COMMIT,
+      iat: NOW_SEC,
+    })
+    if (!forged.ok) throw new Error(`signing failed: ${forged.error.code}: ${forged.error.message}`)
+
+    const verdict = await verifyDecisionRecord(forged.value, { jwks, nowSec: NOW_SEC })
+
+    expect(verdict.valid).toBe(false)
+    if (!verdict.valid) expect(verdict.reason).toContain('empty')
+  })
+
+  it('accepts a record whose payee is null — an absent value is a real, verifiable state', async () => {
+    // The counterpart to the test above, and the reason the fix is `null` rather than a refusal: a run
+    // that could not read the checkout session still has to produce a signed record explaining why it
+    // blocked. Rejecting the record wholesale would lose that explanation, which is the one artefact a
+    // buyer, an agent and an adjudicator all need.
+    const { world, jwks } = await signedDecision()
+    const sign = recordSigner(world.keys.gate.key, world.keys.gate.kid)
+
+    const signed = await sign({
+      gdc: 'gdc_00000000000000000000000001' as GateRecordPayload['gdc'],
+      att: 'att_00000000000000000000000001' as GateRecordPayload['att'],
+      mdt: MANDATE_ID,
+      amount: null,
+      currency: null,
+      payee: null,
+      checks_hash: sha256Hex('[]'),
+      chain_valid: false,
+      vi_commit: VI_LIB_COMMIT,
+      iat: NOW_SEC,
+    })
+    if (!signed.ok) throw new Error(`signing failed: ${signed.error.code}: ${signed.error.message}`)
+
+    const verdict = await verifyDecisionRecord(signed.value, { jwks, nowSec: NOW_SEC })
+
+    expect(verdict.valid).toBe(true)
+    if (verdict.valid) {
+      expect(verdict.payload.payee).toBeNull()
+      expect(verdict.payload.amount).toBeNull()
+      expect(verdict.payload.currency).toBeNull()
+    }
+  })
+
+  it('refuses a record whose chain_valid is the string "true"', async () => {
+    // `chain_valid` is read by the verifier and by `recordMatches`; a truthy string there is a claim,
+    // not a value. Same for `iat`.
+    const { world, jwks } = await signedDecision()
+    const sign = recordSigner(world.keys.gate.key, world.keys.gate.kid)
+
+    const forged = await sign({
+      gdc: 'gdc_00000000000000000000000001' as GateRecordPayload['gdc'],
+      att: 'att_00000000000000000000000001' as GateRecordPayload['att'],
+      mdt: MANDATE_ID,
+      amount: '30.00',
+      currency: 'USD',
+      payee: MERCHANT_ID,
+      checks_hash: sha256Hex('[]'),
+      chain_valid: 'true' as unknown as boolean,
+      vi_commit: VI_LIB_COMMIT,
+      iat: NOW_SEC,
+    })
+    if (!forged.ok) throw new Error(`signing failed: ${forged.error.code}: ${forged.error.message}`)
+
+    const verdict = await verifyDecisionRecord(forged.value, { jwks, nowSec: NOW_SEC })
+
+    expect(verdict.valid).toBe(false)
+    if (!verdict.valid) expect(verdict.reason).toContain('chain_valid is not a boolean')
+  })
+
+  it('I-1: a record naming no payee never matches a real order, and says "absent"', async () => {
+    // `null` is the safe direction: §3.1 I-1 is enforced by comparing the record against the order, and
+    // an absent payee can only ever produce a refusal. If this ever passed, a blocked run with no
+    // merchant could be laundered into an approved order.
+    const world = await makeWorld()
+    const result = await evaluate(input(), world.deps)
+    if (!result.ok)
+      throw new Error(`evaluate() failed: ${result.error.code}: ${result.error.message}`)
+    const payload = {
+      gdc: result.value.id,
+      att: input().attemptId,
+      mdt: MANDATE_ID,
+      amount: '30.00',
+      currency: 'USD',
+      payee: null,
+      checks_hash: 'x',
+      chain_valid: true,
+      vi_commit: VI_LIB_COMMIT,
+      iat: NOW_SEC,
+    } satisfies GateRecordPayload
+
+    const matched = recordMatches(payload, {
+      attemptId: input().attemptId,
+      amount: '30.00',
+      currency: 'USD',
+      payee: MERCHANT_ID,
+    })
+
+    expect(matched.ok).toBe(false)
+    if (!matched.ok) {
+      expect(matched.field).toBe('payee')
+      expect(matched.got).toBe('absent')
+    }
   })
 
   it('refuses a tampered payload: one flipped character in the signature segment', async () => {
