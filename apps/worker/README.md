@@ -9,12 +9,13 @@ This package contains no payment logic and no webhook logic. It is the part that
 
 ---
 
-## The three files
+## The source files
 
 | File            | Contents                                                                                                                             |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `schedule.ts`   | **Pure data.** Which job runs, how often, and which spec line or edge case asked for it. No imports, no clock, no database.          |
 | `job-runner.ts` | The `pg-boss` port (behind an async factory) and the handler table: `JobName` → the `packages/webhooks` function that does the work. |
+| `adapters.ts`   | `WebhookStore` and `WebhookAudit` over `@countersign/db`. No logic, only naming: rank policy stays in `packages/webhooks`.           |
 | `index.ts`      | `startWorker`, the composition helper, and a guarded `main()`.                                                                       |
 
 ---
@@ -149,12 +150,12 @@ double-stop that throws turns a clean drain into exit 1.
 
 | Gap                                                  | Why it is needed                                                                                                                                                                                                                                                                                    |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **No production `WebhookStore` adapter.**            | `packages/db` exports the repository functions and they are correct; nothing assembles them into the port. `productionDeps` throws and says so, rather than starting a worker that would 500 on its first tick. **This is the one thing between this process and running against a live database.** |
-| **No `WebhookAudit` implementation.**                | `packages/db`'s `appendAudit` is hash-chained; nothing adapts it to the port.                                                                                                                                                                                                                       |
+| **Three `WebhookStore` members have no repository.** | `events.findById`, `aggregates.authorizations.findByPaypalId` and the nightly `budgetAccountIds()` read are served by parameterised `db().$client` SQL, because `apps/worker/package.json` lacks `drizzle-orm`. All three are reads; the repositories to add are listed in `src/adapters.ts`.       |
+| **No `drizzle-orm` dependency.**                     | `package.json` is outside this package's file list, so the three reads above use the existing `postgres.js` handle rather than opening a second pool. This is the one thing between the adapter and pure repository composition.                                                                    |
 | **`captures.reconcileCandidates`**                   | §8.12's sweep needs a capture reached through its order; no repository function does that. Inherited from `packages/webhooks` and recorded in its README too.                                                                                                                                       |
 | `release.reservations` / `budget.reconcile` handlers | `@countersign/ledger`'s primitives exist (`expireStaleReservations`, `reconcileLedger`) and `repos/attempts.ts::findStaleAttempts` finds the candidates, but composing them needs a `BudgetStore` and a mandate list, which is composition this package leaves to its caller rather than inventing. |
 
-The three that are **not** gaps, and are worth saying so it is clear they were considered:
+The two that are **not** gaps, and are worth saying so it is clear they were considered:
 
 - `CaptureOutcomeHooks` (§8.11's ledger movements) is an **optional port**, not a call into
   `@countersign/orders`. Deciding _when_ a capture outcome owes a movement is §8.12's rank decision; deciding
@@ -165,13 +166,16 @@ The three that are **not** gaps, and are worth saying so it is clear they were c
 
 ## Tests
 
-54 tests, no credentials, no database, no network.
+116 tests, no credentials, no database, no network.
 
-| File                 | Tests | What it defends                                                                                                                  |
-| -------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `schedule.test.ts`   | 17    | Every cadence is traceable to a spec line or an EC id; `wh.process` has no cron; expressions are well-formed.                    |
-| `job-runner.test.ts` | 28    | The retry table exhaustively; all seven job names wired; handlers before schedules; `pg-boss` only dynamically imported.         |
-| `worker.test.ts`     | 9     | A malformed cron and a registration failure both fail the boot; `stop()` is idempotent; the whole schedule table is registrable. |
+| File                       | Tests | What it defends                                                                                                                  |
+| -------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule.test.ts`         | 17    | Every cadence is traceable to a spec line or an EC id; `wh.process` has no cron; expressions are well-formed.                    |
+| `job-runner.test.ts`       | 28    | The retry table exhaustively; all seven job names wired; handlers before schedules; `pg-boss` only dynamically imported.         |
+| `worker.test.ts`           | 9     | A malformed cron and a registration failure both fail the boot; `stop()` is idempotent; the whole schedule table is registrable. |
+| `delivery.test.ts`         | 42    | EC-WH-6: malformed and empty payloads fail retryably; every handler takes a pg-boss `Job[]` batch; EC-WH-1 coverage.             |
+| `pg-boss-delivery.test.ts` | 11    | Pins the pg-boss 12 delivery and settlement boundary: batch shape, and parity with the `fakeBoss` double (EC-WH-2/5).            |
+| `src/boot.test.ts`         | 9     | `productionDeps()` returns usable adapters, every handler is registered, and both webhook ports are complete.                    |
 
 `test/harness.ts` provides a fake `WebhookStore` and a recording pg-boss double. The double can invoke the
 handler pg-boss registered, so `WORKER-3` drives `wh.reconcile` end to end - real `packages/webhooks` code,

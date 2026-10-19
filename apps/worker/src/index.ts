@@ -23,7 +23,7 @@
  * open a database pool in a process that only ever needs to acknowledge an HTTP request - and in a serverless
  * or test environment that pool is never closed. So:
  *
- * - `import '@countersign/worker'` is free. A test asserts it (`WORKER-3` in `test/lazy.test.ts`).
+ * - `import '@countersign/worker'` is free. A test asserts it (`WORKER-3` in `test/worker.test.ts`).
  * - `startWorker()` is the only thing that connects, and it is the only thing that needs an argument.
  *
  * ## `main()` is guarded
