@@ -177,5 +177,7 @@ WP-06s and everything needing live sandbox is not started.
 - **2026-10-20** — **Verification for the landing.** Gate 68 passed (record, missing-subject, merchant);
   `packages/core` env 27 passed; vi-service 215 passed with `ruff check` and `ruff format --check` clean
   (pytest would not spawn until `uv sync --extra dev` — the dev extra was not installed in
-  `apps/vi/.venv`); full suite 2485 passed | 66 skipped (2551) with lint, typecheck, build,
-  `format:check` and `secret-scan` all green.
+  `apps/vi/.venv`); full suite 2515 passed | 36 skipped (2551) with lint, typecheck, build,
+  `format:check` and `secret-scan` all green. The 30 that moved out of the skip column are
+  `verify-py.test.ts`'s execution tests: they only run once `apps/vi/.venv` exists, so the same
+  command on the same tree skipped them before `uv sync --extra dev` and runs them after.
