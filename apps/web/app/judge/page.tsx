@@ -107,6 +107,40 @@ const SCENARIOS: readonly Scenario[] = [
   },
 ]
 
+/**
+ * What a judge can click right now, and the one entry that is listed but **not** linked.
+ *
+ * `/v/<packet-id>` is a real page that really serves a real report. What it cannot do is exist without
+ * an id: it is addressed per evidence packet, `packetId` arrives in the URL and is validated against
+ * `pkt_` + ULID before any read (§8.18), so there is no `"/v"` to point at — and a link to `/v` is a
+ * 404 that looks like a verifier.
+ *
+ * Linking a real id at render time was considered and rejected. **There is no query for "the most
+ * recent packet"** — `packages/db` reads `evidence_packets` three ways (`findPacketById`,
+ * `findLatestPacketForDispute`, `findPacketByBundleHash`) and every one of them needs an identifier
+ * first; `packages/verifier` documents the missing repository as a contract issue and hand-writes its
+ * own three selects. Discovering an id here would mean a new query outside the repository layer, plus a
+ * live database and `VI_SERVICE_URL`/`VI_SERVICE_TOKEN`/`PUBLIC_BASE_URL` on a page whose whole argument
+ * is that it renders with no dependencies and no JavaScript. Worse, a packet only exists once the
+ * Defender has filed one against a real sandbox capture, and that is blocked on H-01 — so in the room
+ * this page is read in, the query would return nothing and the honest link would become the lie it was
+ * meant to replace.
+ *
+ * So the route is named, its real shape is shown, and where a judge can obtain a genuine id is stated.
+ */
+const CHECKS_NOW = [
+  {
+    label: '/status',
+    href: '/status',
+    body: 'Every dependency probed for real. 200 when it can serve, 503 when a required one is down.',
+  },
+  {
+    label: '/v/<packet-id>',
+    body: 'The public verifier. Download a packet and check the chain yourself, offline. It needs a real packet id, so there is no link here — the id is printed as a QR code on the evidence PDF the Defender files, and a judge cannot be handed one until a sandbox dispute has actually been filed (H-01).',
+  },
+  { label: '/', href: '/', body: 'The landing page, and what the product claims.' },
+] as const
+
 const STATE_COPY: Record<Scenario['state'], { label: string; tone: string; body: string }> = {
   built: {
     label: 'built',
@@ -258,27 +292,25 @@ export default function JudgePage() {
           What you can check right now
         </h2>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-          {[
-            {
-              href: '/status',
-              label: '/status',
-              body: 'Every dependency probed for real. 200 when it can serve, 503 when a required one is down.',
-            },
-            {
-              href: '/v',
-              label: '/v/…',
-              body: 'The public verifier. Download a packet and check the chain yourself, offline.',
-            },
-            { href: '/', label: '/', body: 'The landing page, and what the product claims.' },
-          ].map((link) => (
-            <li key={link.href}>
-              <Link
-                href={link.href}
-                className="block h-full rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-4 transition hover:border-[--color-signed]"
-              >
-                <span className="font-mono text-sm text-[--color-signed]">{link.label}</span>
-                <p className="mt-1 text-sm text-[--color-ink-soft]">{link.body}</p>
-              </Link>
+          {CHECKS_NOW.map((c) => (
+            <li key={c.label} className="h-full">
+              {/* `href` is the discriminator: an entry with one is a door, an entry without one is a
+                  statement. A dashed rule is the same "this is not a link" signal the card grid uses,
+                  because a judge should be able to tell the difference without hovering. */}
+              {'href' in c ? (
+                <Link
+                  href={c.href}
+                  className="block h-full rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-4 transition hover:border-[--color-signed]"
+                >
+                  <span className="font-mono text-sm text-[--color-signed]">{c.label}</span>
+                  <p className="mt-1 text-sm text-[--color-ink-soft]">{c.body}</p>
+                </Link>
+              ) : (
+                <div className="h-full rounded-[--radius-card] border border-dashed border-[--color-rule] p-4">
+                  <span className="font-mono text-sm text-[--color-blocked]">{c.label}</span>
+                  <p className="mt-1 text-sm text-[--color-ink-soft]">{c.body}</p>
+                </div>
+              )}
             </li>
           ))}
         </ul>
