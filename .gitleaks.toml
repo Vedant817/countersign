@@ -74,6 +74,14 @@ secretGroup = 1
 entropy = 3.5
 keywords = ["VI_KEK"]
 
+# The public test KEK (bytes 0x00-0x1f) used by the API, web app and E2E suites. It must never protect
+# anything real, and production keys come from the environment only (spec §6). Matching the value
+# rather than the file keeps every other rule active in the Playwright config.
+[[rules.allowlists]]
+description = "Public test VI KEK"
+regexTarget = "secret"
+regexes = ['''^AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=$''']
+
 [[rules]]
 id = "countersign-session-secret"
 description = "Session secret assignment"
