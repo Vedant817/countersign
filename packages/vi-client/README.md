@@ -196,10 +196,11 @@ that is why those two positions are worth printing.
 ## Running the contract tests — AT-M4.1
 
 `contract/at-m4.contract.ts` needs a **running vi-service** and is kept out of `pnpm test`, which must pass
-with no network at all. The filename deliberately does not end in `.test.ts`: the root `vitest.workspace.ts`
-run does file discovery with its own default pattern rather than each project's `include`/`exclude`, so a
-`*.test.ts` name anywhere in this package would be pulled into the default run anyway. A name no include
-pattern can match is the version of that guarantee which cannot regress.
+with no network at all. The filename deliberately does not end in `.test.ts`: the root config used to be
+named `vitest.workspace.ts`, which Vitest 5 never reads, so root `pnpm test` fell back to default discovery
+rather than each project's `include`/`exclude`, and a `*.test.ts` name here would have been pulled into the
+default run anyway. The root config is now `vitest.config.ts`, but a name no include pattern can match is
+still the version of that guarantee which cannot regress.
 
 With `VI_SERVICE_URL` unset the suite skips with a message saying why and how to run it — it never fails (a
 missing service is not a client bug) and never passes silently (a skipped contract suite must not read as a

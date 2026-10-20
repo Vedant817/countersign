@@ -8,10 +8,11 @@ import { baseConfig } from '../../vitest.config.base'
  * golden-set suite. **It is the second of three guards, not the first**, and it is worth being precise about
  * why, because the obvious version of this file does not work:
  *
- * The root `vitest.workspace.ts` does its own file discovery with its own defaults — which match any
- * `*.test.ts` — rather than each project's `include`/`exclude`. A live suite named
- * `eval/golden.eval.live.test.ts` was therefore **collected by `pnpm test` at the root even with this exclude
- * in place**. That was measured, not assumed.
+ * A live suite named `eval/golden.eval.live.test.ts` was **collected by `pnpm test` at the root even with
+ * this exclude in place** — measured, not assumed. The cause was the root config's *filename*: Vitest 5
+ * never read `vitest.workspace.ts`, so the root run fell back to Vitest's default discovery (any
+ * `*.test.ts`) and this project's `include`/`exclude` were not consulted. The root config is now
+ * `vitest.config.ts` and honours this exclude, but the filename is still the guard that cannot regress.
  *
  * (The glob below is the double-star/eval/double-star pattern; it is spelled out in prose rather than written
  * inline because the literal sequence closes a block comment.)

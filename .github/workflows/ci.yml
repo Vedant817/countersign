@@ -106,7 +106,7 @@ jobs:
         # vitest's 5 s default and its unbounded fork pool, and the heavy suites (2,000 Ed25519
         # verifications, PDF rendering with font subsetting, a 515 KB TTF in the graph) fail as
         # `Test timed out in 5000ms` on a 2-core runner. The failures read like logic bugs; the cause
-        # is configuration. See vitest.workspace.ts for the full account.
+        # is configuration. See vitest.config.ts for the full account.
         #
         # Sharding stays here rather than in the script because the shard count belongs to CI.
         run: pnpm test:ci --shard=${{ matrix.shard }}/3

@@ -666,6 +666,14 @@ tables but no drizzle journal, which is a real state (a partially-applied deploy
 with no stated reason. Exit codes are still correct, so the gate holds; the diagnosis is what is
 missing.
 
+**Later correction (2026-10-20), left in place rather than rewritten.** Step 2 above is right that
+the edit did nothing, but wrong about why: Vitest 5 does not read `vitest.workspace.ts` at all
+(deprecated in 3.2, removed in 4), so the file was never loaded and no option in it could take
+effect. The root run was falling back to Vitest's built-in discovery — which is also why the root
+`include`/`exclude` defaults, not the project configs, decided what `pnpm test` collected. The file
+has been renamed to `vitest.config.ts`; the worker-parallelism diagnosis and the flags in
+`package.json` still stand unchanged.
+
 ## D-028 — Two schema gaps the Defender found by reading §7.2 against real behaviour
 
 **Date:** 2026-10-05 · **Raised by:** WP-15e · **Spec item:** §7.2 `refunds`, `dispute_actions`

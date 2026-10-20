@@ -16,10 +16,11 @@ import { baseConfig } from '../../vitest.config.base'
  *
  * It deliberately does **not** end in `.test.ts`. The shared `include` is
  * `['test/**\/*.{test,spec}.{ts,tsx}', 'src/**\/*.{test,spec}.{ts,tsx}']`, so nothing under `contract/` can
- * match it; and because the root `vitest.workspace.ts` run does file discovery with its **own** defaults
- * (which match any `*.test.ts`) rather than each project's `include`/`exclude`, a `.test.ts` name anywhere
- * in this package is collected by `pnpm test` even though it is excluded here —
- * `packages/paypal`'s `*.sandbox.test.ts` suites are caught by the same thing today.
+ * match it. That has to be structural: the root config used to be named `vitest.workspace.ts`, which
+ * Vitest 5 never reads, so root `pnpm test` fell back to default discovery (which matches any `*.test.ts`)
+ * and a `.test.ts` name here would have been collected even though the package excludes it. The root
+ * config is now `vitest.config.ts` and the exclusion holds, but a config change can lose that and a
+ * filename cannot.
  *
  * So the separation is structural rather than configuration-dependent, which is the only version that
  * cannot regress: a filename no include pattern can match, plus an explicit `include` here that names it.

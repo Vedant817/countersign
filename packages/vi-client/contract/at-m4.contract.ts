@@ -5,11 +5,12 @@
  *
  * ## This file is `contract/at-m4.contract.ts`, and the name is load-bearing
  *
- * It deliberately does **not** end in `.test.ts`. The root `vitest.workspace.ts` run does file discovery
- * with its own default pattern rather than each project's `include`/`exclude`, so a `*.test.ts` file
- * anywhere in this package gets pulled into `pnpm test` — which must pass with no network at all. A name no
- * include pattern can match, plus an explicit `include` in `vitest.contract.config.ts`, is the version of
- * this guarantee that cannot regress. See that config for the details.
+ * It deliberately does **not** end in `.test.ts`. The root config used to be named `vitest.workspace.ts`,
+ * which Vitest 5 never reads, so root `pnpm test` did file discovery with its own default pattern rather
+ * than each project's `include`/`exclude`, and a `*.test.ts` file anywhere in this package would have been
+ * pulled into a run that must pass with no network at all. The root config is now `vitest.config.ts`, but a
+ * name no include pattern can match, plus an explicit `include` in `vitest.contract.config.ts`, is still
+ * the version of this guarantee that cannot regress. See that config for the details.
  *
  * ## These are the only tests in the package that touch a network
  *
