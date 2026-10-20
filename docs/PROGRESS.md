@@ -46,7 +46,7 @@ buildable now.
 | WP-16 | Strategist + dispute lifecycle actions | E | 15e | wip | `bdc0356` | AT-M16.1/.2 ✅ · AT-M16.3 needs H-01 |
 | WP-17a | Wallet UI (S-02…S-09) | D | 05, 07, 08 | todo | | E2E + axe |
 | WP-17b | Agent chat UI (S-10) | D | 13 | todo | | E2E |
-| WP-17c | Shop UI (S-11…S-13) | D | 09 | todo | | E2E |
+| WP-17c | Shop UI (S-11…S-13) | D | 09 | done | `66d78bc` | E2E ✅ 3 |
 | WP-17d | Merchant UI (S-14…S-16, S-19) | E | 11, 10 | todo | | E2E |
 | WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | todo | | E2E + table fallback |
 | WP-17f | Landing, status, design polish | A | 17a–e | todo | | Lighthouse ≥ 90 a11y |
@@ -205,3 +205,12 @@ WP-06s and everything needing live sandbox is not started.
   `sandbox-nightly.yml` or `pnpm --filter <pkg> test:sandbox`) and which need H-01. Their offline ATs
   pass. `packages/defender/README.md` still says "294 tests, in four files" and documents only
   WP-15a/b; it is left for the WP-22 docs sweep rather than edited here.
+- **2026-10-20** — **WP-17c Shop UI (S-11…S-13).** Three server-rendered storefront screens on
+  `wp/17c-shop-ui`, merged `cb7613b`; feature commit `66d78bc`, 8 files / 635 insertions. S-11 lists the
+  seeded catalog and searches it server-side; S-12 renders a listing and marks the seeded injected text
+  (`demo: contains hidden instructions`); S-13 shows the cart, total and price-lock countdown, and a 303
+  submission path into `createCheckout`. The E2E is 3 tests and the full suite is 7 passed in 29 s
+  (4 device-sign + 3 shop). Gates: lint (`money-discipline: clean (115 files across 15 roots)`),
+  typecheck, `format:check`, `secret-scan`, 2519 tests, build (Next 16.3.8, all eight routes). The shop
+  catalog and checkout adapters are in-memory process state; the countdown island is the only client JS,
+  and it uses `epochSecFrom` so the money-discipline guard has nothing to flag.
