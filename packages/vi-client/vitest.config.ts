@@ -10,11 +10,12 @@ import { baseConfig } from '../../vitest.config.base'
  * `pnpm test` must pass with no network anywhere.
  *
  * The `exclude` below is a second, belt-and-braces guard rather than the mechanism. A per-package
- * `exclude` is honoured when Vitest runs this package alone, but the root `vitest.workspace.ts` run does
- * file discovery with its own defaults (which match any `*.test.ts`) rather than each project's
- * `include`/`exclude` — `packages/paypal`'s `*.sandbox.test.ts` suites are caught by the same thing today.
- * Relying on `exclude` alone would leave the guarantee one config change away from breaking. `mergeConfig`
- * concatenates arrays, so this appends to the base exclusions rather than replacing them.
+ * `exclude` is honoured when Vitest runs this package alone, and the root `pnpm test` now honours it too:
+ * the root config used to be named `vitest.workspace.ts`, which Vitest 5 never reads, so the root run fell
+ * back to default discovery and collected any `*.test.ts` regardless of this file. The root config is now
+ * `vitest.config.ts` and its projects are consulted, but relying on `exclude` alone would still leave the
+ * guarantee one config change away from breaking. `mergeConfig` concatenates arrays, so this appends to the
+ * base exclusions rather than replacing them.
  *
  * Run the contract suite with `pnpm test:contract` (see `vitest.contract.config.ts`).
  */

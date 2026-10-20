@@ -7,15 +7,16 @@
  * ## Why the filename is `*.contract.ts` and not `*.test.ts`
  *
  * **That is the mechanism, and it is not cosmetic.** Three things have to stop a sixty-case run against a paid
- * model from happening in the default suite, and the root `vitest.workspace.ts` defeats one of them:
+ * model from happening in the default suite, and configuration alone was one short of enough:
  *
  * 1. **The filename.** `vitest.config.base.ts` includes only `test/**` and `src/**`, so a file under `eval/`
  *    cannot match it. This is the same trick `packages/vi-client` uses for `contract/at-m4.contract.ts`.
  * 2. **`exclude` in `packages/compiler/vitest.config.ts`** lists the whole `eval` directory. This was tried
- *    first and **does not work at the root**: the workspace run does its own file discovery with its own
- *    defaults, which match any `*.test.ts`, rather than each project's `include`/`exclude`. A file named
- *    `golden.eval.live.test.ts` *was* collected by `pnpm test` at the root even with the exclude in place —
- *    measured, not assumed. So the exclude stays as a second guard, and the filename is the one that holds.
+ *    first and **did not hold at the root**: the root config was then named `vitest.workspace.ts`, which
+ *    Vitest 5 never reads, so `pnpm test` fell back to default discovery and collected a file named
+ *    `golden.eval.live.test.ts` even with the exclude in place — measured, not assumed. The root file is now
+ *    `vitest.config.ts`, so this exclude is honoured; it stays the second guard because a config change can
+ *    lose it, while the filename cannot.
  * 3. **`describe.skipIf`.** Even with the file undiscoverable, the suite refuses to run without a key, so a
  *    future rename that re-exposes it still cannot spend money.
  *

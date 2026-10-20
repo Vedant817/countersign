@@ -196,10 +196,12 @@ The live suite is guarded three times over, and the order matters. The guard tha
 **filename** — `eval/golden.eval.live.contract.ts` cannot be matched by any discovery rule in this repository,
 the same trick `packages/vi-client` uses for `contract/at-m4.contract.ts`. The `exclude` in
 `packages/compiler/vitest.config.ts` and the suite's own `describe.skipIf` without a key are the second and
-third. The exclude alone is **not** enough, and that was measured rather than assumed: with the suite named
-`*.test.ts`, `pnpm test` at the root collected it _despite_ the exclude, because `vitest.workspace.ts` does its
-own discovery with its own defaults. Three guards because the failure mode of losing one is a bill rather than a
-broken build.
+third. The exclude was **not** enough when it was measured: with the suite named `*.test.ts`, `pnpm test` at
+the root collected it _despite_ the exclude. The cause was the root config's filename, not its contents —
+Vitest 5 never read `vitest.workspace.ts`, so the root run fell back to default discovery and no project
+`exclude` was consulted. The root file is now `vitest.config.ts` and honours the exclude, but the filename
+stays the first guard because a config change can lose it and this one cannot. Three guards because the
+failure mode of losing one is a bill rather than a broken build.
 
 Both runners print per-field accuracy and the exact-match rate plus every failing case with its text and what
 came back. A gate that reports one number tells you nothing about _which_ limit moved.

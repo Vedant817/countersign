@@ -27,7 +27,7 @@ buildable now.
 | WP-02 | `packages/db` — schema + migrations + seed | A | 01 | done | `4e0ce4c` | AT-M2 ✅ 64 |
 | WP-03 | `apps/vi` — vi-service (Python FastAPI) | B | 00 | done | `9561807` | AT-M3 ✅ 183 |
 | WP-04 | `packages/vi-client` | B | 01, 03 | done | `aceecf7` | AT-M4 ✅ 185 + 11 contract |
-| WP-05 | Browser keystore + WebAuthn step-up | B | 04 | todo | | AT-M5 · **C3(a)** |
+| WP-05 | Browser keystore + WebAuthn step-up | B | 04 | done | `d7f6678` | AT-M5 ✅ 4 · **C3(a)** |
 | WP-06 | `packages/paypal` — typed REST client | C | 01 | done | `44207bf` | AT-M6 ✅ 271 |
 | WP-06s | Sandbox scripts + week-1 checks C1, C2, C3(b) | C | 06 | blocked | | needs H-01, H-09, H-10 |
 | WP-07 | Vault onboarding + L1 issuance | C | 02, 05, 06 | blocked | | AT-M7 (H-01, WP-05) |
