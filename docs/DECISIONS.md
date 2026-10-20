@@ -1319,3 +1319,49 @@ filed one against a real sandbox capture - which H-01 blocks. The pages now say 
 from: the QR code on the filed evidence PDF.
 **Deviation from S-01:** the spec asks for "3 persona buttons"; they are cards with no click. A button
 that navigates nowhere is the defect, so the affordance was dropped rather than the honesty.
+
+## D-044 - Device keys are non-extractable P-256 keys in IndexedDB, keyed by their RFC 7638 thumbprint
+
+**Date:** 2026-10-20
+**Decision:** `apps/web/lib/browser-keystore.ts` generates an ECDSA P-256 pair with
+`extractable: false` and stores the `CryptoKeyPair` itself in IndexedDB (`countersign`/`keys`), keyed
+by `kid = 'dev_' + jkt` where `jkt` is the RFC 7638 SHA-256 thumbprint of the public JWK. A unique
+`by-user` index holds one device key per user. Concurrent `getOrCreateDeviceKey` calls for the same
+user are serialised through a module-level in-flight map; key generation runs outside any IndexedDB
+transaction (awaiting `crypto.subtle.generateKey` inside one auto-closes it on the next tick) and the
+read-then-write race with another tab is settled by re-reading on `ConstraintError`.
+**Reason:** Spec §8.5 requires `extractable: false`, and structured-cloning the `CryptoKeyPair` is
+what keeps the private key non-extractable at rest - storing raw private-key bytes would defeat the
+exact property AT-M5.1 asserts. Deriving `kid` from the key instead of generating it randomly keeps
+`kid`/`jkt` consistent and turns a re-enrolment collision into a visible error rather than a silent
+second key. `createdAt` is UTC epoch seconds, matching the repo's artefact convention.
+**Evidence:** `apps/web/lib/browser-keystore.test.ts` pins the RFC 7638 thumbprint vector;
+`apps/web/tests/e2e/device-sign.spec.ts` asserts AT-M5.1 (exportKey rejects with `InvalidAccessError`)
+and AT-M5.4 (signature is exactly 64 bytes of base64url).
+
+## D-045 - WebAuthn step-up is the raw browser API, and AT-M5 runs against the real vi-service
+
+**Date:** 2026-10-20
+**Decision:** `apps/web/lib/webauthn.ts` calls `navigator.credentials.create`/`get` directly - platform
+authenticator, ES256, `userVerification: 'required'`, attestation `none` - and stores only the
+credential id per user in the same IndexedDB database (`passkeys`). It returns `null` when no platform
+authenticator is available or the user declines (`NotAllowedError`/`AbortError`); `FEATURE_WEBAUTHN`
+stays a server-side flag (`packages/core/src/env.ts`) and the caller decides whether to offer step-up at
+all. The returned assertion is a local `WebAuthnAssertion` type, not a `@countersign/core` export:
+`packages/core` is append-only and WP-01-owned. Nothing verifies the assertion yet - no server code
+persists the credential public key - so the module says so and leaves verification to the mandate flow
+(WP-07/WP-17a), rather than pretending the step-up is checked. AT-M5's Playwright suite drives
+`apps/web/app/lab/device-sign/` against a **real** uvicorn vi-service started by
+`playwright.config.ts`'s `webServer`, with a CTAP2 internal virtual authenticator installed over CDP.
+The harness route reads only `VI_SERVICE_URL`, `VI_SERVICE_TOKEN` and `VI_AGENT_ISS` from
+`process.env` instead of `env()`, mirroring the narrow exception already taken by
+`app/status/route.ts`, because the full schema requires PayPal and database variables the harness does
+not use.
+**Reason:** Spec §8.5 makes AT-M5 a Playwright Chromium test, and a mocked vi-service would prove
+nothing about the P1363 signature: finalize re-verifies it against the L1 device key, which is the
+whole point of two-phase signing. CDP's virtual authenticator is the only way to exercise
+`userVerification: 'required'` headlessly. A WebAuthn helper library would wrap three calls whose
+error semantics we must handle explicitly anyway - `NotAllowedError` means "declined", not "broken".
+**Evidence:** `apps/web/playwright.config.ts` starts Next on 3000 and uvicorn on 8000 with the
+`apps/vi/tests/conftest.py` credentials; `apps/web/tests/e2e/device-sign.spec.ts` covers AT-M5.1-4.
+`VI_SERVICE_TOKEN` never reaches the browser: prepare and finalize are server route handlers.
