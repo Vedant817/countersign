@@ -262,19 +262,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Fallback code per HTTP status, used when the body is not a `CsErrorBody`.
+ * Fallback code per HTTP status, used **only** when the response carries no `CsErrorBody` but the
+ * status is a transport-level fact a gateway can legitimately assert about us.
  *
- * `apps/vi` wraps *everything*, including FastAPI's own validation errors, so an unrecognised body
- * means a proxy, a load balancer or a different service answered — not that vi misbehaved. `CS_INTERNAL`
- * is the honest code for "something between us and vi answered, and we do not know what".
+ * Deliberately tiny, and the reason is the reviewed defect it fixes. `apps/vi` wraps *everything*,
+ * including FastAPI's own validation errors, so a response with no `CsErrorBody` did not come from vi.
+ * The old map turned that into `CS_NOT_FOUND` for a 404, and a buyer who tried to lock a price was
+ * told *"We could not find that. It may have been removed."* about an in-stock item — because a
+ * **different service was listening on the vi port** and answered 404 for `/v1/checkout-jwt`.
+ *
+ * A status alone cannot distinguish "no such object" from "wrong service", so only the statuses that
+ * describe *the caller* rather than *our domain* are mapped. Everything else becomes `CS_INTERNAL`,
+ * which is the honest code for "something between us and vi answered".
  */
 const STATUS_FALLBACK: Readonly<Record<number, CsErrorCode>> = {
-  400: 'CS_VALIDATION',
   401: 'CS_UNAUTHENTICATED',
   403: 'CS_FORBIDDEN',
-  404: 'CS_NOT_FOUND',
-  409: 'CS_CONFLICT',
-  422: 'CS_VALIDATION',
   429: 'CS_RATE_LIMITED',
 }
 
@@ -316,8 +319,16 @@ export function mapViError(input: MapViErrorInput): CsError {
   const inner = isRecord(body?.error) ? body.error : undefined
 
   const code = typeof inner?.code === 'string' && isCsErrorCode(inner.code) ? inner.code : undefined
+  // Three cases, and the middle one is the fix (see `STATUS_FALLBACK`):
+  //  - vi named a code we know            -> use it verbatim;
+  //  - a transport-level fact we trust    -> use the map (401/403/429 only);
+  //  - anything else, envelope or not     -> `CS_INTERNAL`, because a status is not a domain claim.
+  //    A body with an *unrecognised* code still means vi answered and its registry diverged, which is
+  //    also `CS_INTERNAL`; `vi_code` below keeps the divergence visible rather than inferred.
   const fallback =
-    code ?? STATUS_FALLBACK[input.status] ?? (input.status >= 500 ? 'CS_INTERNAL' : 'CS_VALIDATION')
+    code ??
+    STATUS_FALLBACK[input.status] ??
+    (inner !== undefined && input.status < 500 ? 'CS_VALIDATION' : 'CS_INTERNAL')
   const message =
     typeof inner?.message === 'string' && inner.message !== ''
       ? `${where} -> ${input.status}: ${inner.message}`

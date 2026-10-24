@@ -9,13 +9,15 @@ import { SignJWT } from 'jose'
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import type * as DbModule from '@countersign/db'
+
 import { mintAgentToken as mintAgentTokenResult } from '@/lib/mcp-token'
 
 import { POST } from './route'
 
 // Repository doubles isolate transport authorization from a running database. No PayPal calls.
 vi.mock('@countersign/db', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@countersign/db')>()
+  const actual = await importOriginal<typeof DbModule>()
   const rows = actual.SEED_PRODUCTS.map((product) => ({
     sku: product.sku,
     title: product.title,

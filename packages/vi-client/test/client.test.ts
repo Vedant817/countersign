@@ -291,20 +291,35 @@ describe('error-body mapping', () => {
     expect(r.error.details?.['http_status']).toBe(500)
   })
 
-  it('falls back to a status-derived code when the body is not a CsErrorBody', () => {
-    // apps/vi wraps everything, so this means a proxy or a load balancer answered.
+  it('does not invent a domain code when the body is not a CsErrorBody', () => {
+    // apps/vi wraps everything, so a response with no envelope did **not** come from vi. The status
+    // is therefore a fact about the transport, not about our domain, and only the statuses a gateway
+    // can legitimately assert about the caller are mapped.
+    //
+    // The 404 row is a regression test for a defect an independent review found in the running app:
+    // a different service was listening on the vi port and answered 404 for /v1/checkout-jwt, and the
+    // old map turned that into CS_NOT_FOUND — so a buyer locking a price on an in-stock item was told
+    // "We could not find that. It may have been removed."
     for (const [status, expected] of [
       [401, 'CS_UNAUTHENTICATED'],
       [403, 'CS_FORBIDDEN'],
-      [404, 'CS_NOT_FOUND'],
-      [409, 'CS_CONFLICT'],
-      [422, 'CS_VALIDATION'],
+      [429, 'CS_RATE_LIMITED'],
+      [404, 'CS_INTERNAL'],
+      [409, 'CS_INTERNAL'],
+      [422, 'CS_INTERNAL'],
       [503, 'CS_INTERNAL'],
     ] as const) {
       expect(
         mapViError({ status, body: '<html>502</html>', method: 'GET', path: '/v1/status' }).code,
       ).toBe(expected)
     }
+  })
+
+  it('keeps the HTTP status in details even when it cannot be trusted as a code', () => {
+    // The information is not lost, only the claim: an operator can still see what answered.
+    const e = mapViError({ status: 404, body: 'not json', method: 'GET', path: '/v1/status' })
+    expect(e.details?.['http_status']).toBe(404)
+    expect(e.message).toContain('no CsErrorBody')
   })
 
   it('names an unrecognised service code in details rather than absorbing it', () => {

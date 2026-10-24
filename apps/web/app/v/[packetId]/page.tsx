@@ -58,6 +58,8 @@ import {
   type JwksKeyRow,
 } from '@countersign/db'
 import { ViClient } from '@countersign/vi-client'
+
+import { missingVerifierEnv, verifierUnavailableDetail } from './config'
 import {
   assertRedactionHolds,
   buildVerifierReport,
@@ -195,12 +197,38 @@ interface PageProps {
 
 export default async function VerifierPage({ params }: PageProps) {
   const { packetId } = await params
-  const deps = verifierDeps()
 
-  // `packetId` arrives as a string from the URL. Narrowed here rather than cast at each use: a `PacketId` is
-  // `pkt_` plus a ULID, and `newId` in `packages/core` is the only thing allowed to mint one. A URL that does
-  // not match the shape cannot name a packet, so it takes the 404 path with a real id to look for.
+  // Shape first, before any configuration is read. A URL that cannot name a packet is a 404 whatever
+  // this deployment is configured with; checking it after `verifierDeps()` made `/v/not-a-packet` a
+  // 500 on an unconfigured host, which reads as "the evidence was withdrawn".
   if (!/^pkt_[0-9A-HJKMNP-TV-Z]{26}$/.test(packetId)) notFound()
+
+  // §6's configuration, checked rather than discovered by throwing. Missing configuration is a known
+  // state — a judge running this locally with no database — and it earns a sentence, not Next's
+  // generic error page.
+  const missing = missingVerifierEnv(process.env)
+  if (missing.length > 0) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-10 sm:py-14">
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
+          Countersign public verifier
+        </p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          This verifier is temporarily unavailable
+        </h1>
+        <p className="mt-3 max-w-xl text-pretty text-ink-soft">
+          Nothing is wrong with the evidence packet itself — this deployment simply cannot look it
+          up right now. {verifierUnavailableDetail(missing)}
+        </p>
+        <p className="mt-3 max-w-xl text-pretty text-ink-soft">
+          If you scanned a QR code, the packet was filed by a Countersign deployment that was
+          configured. Ask whoever sent you here to re-check it, or try again later.
+        </p>
+      </div>
+    )
+  }
+
+  const deps = verifierDeps()
 
   const loaded = await loadVerifierPacket(deps, packetId as PacketId)
   if (!loaded.ok) {
