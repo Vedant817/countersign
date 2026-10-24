@@ -211,7 +211,8 @@
       "declaredTest": "I",
       "userFacing": "n/a",
       "specLine": 1349,
-      "status": "todo"
+      "status": "done",
+      "verifiedBy": "packages/orders/src/refund-reservation.ts:39-53 (SELECT FOR UPDATE; same id+amount -> created:false no-op; different amount -> CS_CONFLICT) + packages/defender/test/filer.test.ts 'EC-REF-4 / EC-IDEM-4' asserts one /accept-claim call"
     },
     {
       "id": "EC-IDEM-5",
@@ -1071,7 +1072,8 @@
       "declaredTest": "P",
       "userFacing": "The verifier shows \"signature invalid\"",
       "specLine": 1447,
-      "status": "todo"
+      "status": "done",
+      "verifiedBy": "packages/orchestrator/test/purchase.test.ts 'I-1 a Gate BLOCK on an invalid chain still returns the decision, and PayPal is never reached' - asserts BLOCK/VI_CHAIN_INVALID, orderCalls length 0, reserved 0n"
     },
     {
       "id": "EC-MER-2",
