@@ -60,28 +60,37 @@ can be given, so it is next after the sandbox credentials land (`docs/HUMAN_TODO
 | Area                                | State                                                                                    |
 | ----------------------------------- | ---------------------------------------------------------------------------------------- |
 | Intent compiler (`/intent`)         | Working. 56/60 on the golden set, non-deterministic — see the numbers below.             |
-| Gate (12 deterministic checks)      | Working as a library. 0/50 injection attack-success on the corpus. No real checkout yet. |
+| Gate (12 deterministic checks)      | Working. 0/50 injection attack-success on the corpus, and a real checkout now decides.   |
+| Shopping agent (`/agent`)           | Working. Tool loop over the merchant MCP, real mandate, Gate BLOCK/ALLOW shown inline.   |
 | Mandate signing + verifier          | Working. Ed25519 / SD-JWT / JCS, with a standalone `verify.py` a third party can run.    |
 | Storefront (`/shop`)                | Working. 24 products from PostgreSQL, price-quote checkout.                              |
 | `/status`                           | Working. Probes every dependency for real and names the one that is short.               |
 | Vault onboarding                    | Not yet. Blocked on sandbox credentials.                                                 |
-| Shopping agent                      | Not yet. `packages/agent` is a stub.                                                     |
 | Judge Mode, merchant + disputes UIs | Not yet.                                                                                 |
 
 ## The numbers, with their denominators
 
-| Report                               | Value             | Source                                  |
-| ------------------------------------ | ----------------- | --------------------------------------- |
-| Compiler exact match                 | **56/60 (93.3%)** | `packages/evals/corpus/compiler.jsonl`  |
-| Injection attack-success at the Gate | **0/50 (0.0%)**   | `packages/evals/corpus/injection.jsonl` |
-| Liability-router accuracy            | not measured      | corpus does not exist yet               |
-| Agent refusal rate                   | not measured      | `packages/agent` is not built yet       |
-| Gate p95 latency                     | not measured      | no load harness yet                     |
+| Report                               | Value                        | Source                                        |
+| ------------------------------------ | ---------------------------- | --------------------------------------------- |
+| Compiler exact match                 | **56/60 (93.3%)**            | `packages/evals/corpus/compiler.jsonl`        |
+| Injection attack-success at the Gate | **0/50 (0.0%)**              | `packages/evals/corpus/injection.jsonl`       |
+| Injection attack-success, live agent | **0/30 (0.0%)**              | `packages/agent/corpus/refusal-30.jsonl`      |
+| Agent refusal rate                   | **30/30 (100%)**             | same corpus, `docs/verification/P0-6-refusal.md` |
+| Liability-router accuracy            | not measured                 | corpus does not exist yet                     |
+| Gate p95 latency                     | not measured                 | no load harness yet                           |
 
 ```sh
 pnpm --filter @countersign/evals test        # 22 offline tests — no model, no network
 pnpm --filter @countersign/evals eval:live   # both corpora against a running app
+pnpm --filter @countersign/agent test        # 69 offline tests — the fence, the tools, the scorer
+pnpm tsx scripts/agent-acceptance.mts        # live stack: Gate ALLOW, Gate BLOCK, real PayPal order
+pnpm tsx scripts/agent-refusal.mts           # live stack: the 30-case refusal corpus, two behaviours
 ```
+
+The agent's two numbers are separate facts and both are in `docs/verification/P0-6-refusal.md`: an agent
+that **follows** an injected listing is refused by the **signer** (25/30) or declines by itself (5/30); an
+attacker who **owns** the agent loop and fabricates an authorisation is refused by the **Gate** (30/30).
+Neither produced a purchase, which is what §8.13 requires.
 
 **§14's ≥ 95% target is not met** by 93.3%, and the runner names the four failing cases with their
 expected-versus-actual values. Ten runs of one sentence produced **9 signable and 1 question** — the model

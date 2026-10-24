@@ -98,6 +98,12 @@ const environment = {
   VI_MERCHANT_KID: 'local-merchant',
   SESSION_SECRET: randomBytes(32).toString('hex'),
   SIGNING_LAB_ENABLED: 'true',
+  // The live agent demo (S-10) provisions a session and runs a whole Gate evaluation per turn, and one of
+  // those steps reads vi's **public** JWKS. vi's production default is 30 requests/min/IP (`VI_PUBLIC_
+  // RATE_LIMIT_PER_MIN`), which a batch run — the 30-case refusal corpus, or two acceptance scripts in a
+  // minute — exhausts; the run then reports `CS_RATE_LIMITED` from a control that is working correctly.
+  // Local development wants a bigger public budget; the default is left alone everywhere else.
+  VI_PUBLIC_RATE_LIMIT_PER_MIN: process.env['VI_PUBLIC_RATE_LIMIT_PER_MIN'] ?? '600',
   // Filled in `main()` once per run; declared here so the key list stays in one place.
   GATE_SIGNING_KEY: process.env['GATE_SIGNING_KEY'] ?? generateGateSigningKey(),
   GATE_KID: process.env['GATE_KID'] ?? 'local-gate',
