@@ -813,6 +813,40 @@ export function setWalletCap(
 }
 
 /**
+ * Read a wallet's cap period — Gate check 9's missing input (`docs/contract-issues.md` gap #5).
+ *
+ * `walletCapCheckIn` takes the period as an argument because the sum it runs is windowed
+ * (`DAY` or `MONTH`), so *something* has to read `wallet_caps.period` first. Nothing did, so the
+ * Gate's `walletCapPeriod` handle returned `undefined` in production and every period-scoped cap was
+ * silently disabled — a control that the privacy-style reasoning in this repo treats as worse than
+ * absent, because the page still says it exists.
+ *
+ * No lock: this is the *read* half. `lockWalletCap` on the `BudgetStore` takes the row lock in the
+ * same transaction as the spend sum, which is where the serialisation has to happen (EC-MA-1). Taking
+ * a lock here as well would deadlock against it for no benefit.
+ *
+ * @returns `undefined` when the wallet has no cap row — unconstrained, matching
+ * `walletCapCheckIn`'s own reading. Inventing a default period would silently limit a buyer who never
+ * asked to be limited.
+ */
+export function findWalletCapPeriod(
+  walletId: WalletId,
+  exec?: Exec,
+): Promise<Result<WalletCapPeriod | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select({ period: walletCaps.period })
+        .from(walletCaps)
+        .where(eq(walletCaps.wallet_id, walletId))
+        .limit(1)
+      return rows[0]?.period
+    },
+    { table: 'wallet_caps', walletId },
+  )
+}
+
+/**
  * Gate check 9. `SELECT … FROM wallet_caps WHERE wallet_id = $1 FOR UPDATE`.
  *
  * EC-MA-1: two agents on one wallet spending in the same window. The lock is on the **wallet** row,

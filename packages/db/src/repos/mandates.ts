@@ -87,6 +87,47 @@ export async function requireMandate(
   return { ok: true, value: mandate }
 }
 
+/**
+ * `SELECT … FROM mandates WHERE id = $1 FOR UPDATE` — Gate check 8's locking read.
+ *
+ * ## Why this is a separate function and not an option on `requireMandate`
+ *
+ * A locking read and a plain read are different statements, and the difference is invisible at the
+ * call site: `requireMandate` inside a transaction looks identical while taking no lock, so a
+ * read-modify-write against a mandate would race two agents on one wallet (EC-MA-1) and pass a cap
+ * only one of them can spend. Naming the lock in the function name is what makes the mistake a
+ * compile error rather than a load-dependent one.
+ *
+ * ## Why it takes an `Exec` and not an optional one
+ *
+ * `FOR UPDATE` outside a transaction locks for exactly one statement, which is the same as not
+ * locking. Requiring the handle means the caller has already opened the transaction the Gate runs
+ * checks 8 and 9 in — `gateDepsFromRepos` passes it through `handles.withTx`, so the lock and the
+ * budget reservation commit or roll back together (AT-M10.4). `docs/contract-issues.md` gap #3
+ * recorded this as missing; it is the last handle the Gate needed.
+ *
+ * @returns `undefined` for an unknown id. The Gate decides what a missing mandate means; this
+ * function does not invent a `CS_NOT_FOUND`, because inside a transaction that has already read the
+ * row the distinction between "gone" and "never existed" belongs to the caller.
+ */
+export function lockMandateForUpdate(
+  id: MandateId,
+  exec: Exec,
+): Promise<Result<MandateRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await exec
+        .select()
+        .from(mandates)
+        .where(eq(mandates.id, id))
+        .limit(1)
+        .for('update')
+      return rows[0] as MandateRow | undefined
+    },
+    { table: 'mandates', id, op: 'lock_mandate_for_update' },
+  )
+}
+
 export function findMandatesByUser(
   userId: string,
   exec?: Exec,
