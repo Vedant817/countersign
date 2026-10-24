@@ -209,7 +209,7 @@ describe('error-body mapping', () => {
    * mandate is gone; `l2/finalize` answers `VI_SIGNATURE_MISMATCH` and the browser must show "this device
    * is new" rather than a generic failure. Flattening that to `CS_INTERNAL` sends the user to the wrong page.
    */
-  it('returns VI_SIGNATURE_MISMATCH from l2/finalize as VI_SIGNATURE_MISMATCH, once, with the service copy', async () => {
+  it('EC-KEY-1: returns VI_SIGNATURE_MISMATCH from l2/finalize as VI_SIGNATURE_MISMATCH, once, with the service copy', async () => {
     const { client, fetchImpl } = makeClient({
       status: 400,
       body: csErrorBody(
