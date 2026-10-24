@@ -50,6 +50,8 @@ import { formatIst, formatIstHuman, VI_LIB_COMMIT, type CsError } from '@counter
 import { findLatestWebhookEvent, listUnprocessedEvents } from '@countersign/db'
 import { webhookHealth } from '@countersign/privacy'
 
+import { readLlmConfig } from '@/lib/llm'
+
 import { probeAll, type StatusReport } from './probe'
 
 /** Never cache a health check, in any layer. */
@@ -123,6 +125,17 @@ async function buildReport(): Promise<StatusReport> {
   const nowMs = Date.now()
   const nowSec = Math.floor(nowMs / 1000)
 
+  /*
+   * Resolved through the app's own adapter rather than re-derived here.
+   *
+   * `readLlmConfig` is what `apps/web/lib/llm.ts` calls to build the client the intent compiler uses. A
+   * status page that answers "is the model reachable" with its own credential logic will eventually
+   * disagree with the feature it describes — it already did: this route sent `Authorization: Bearer`
+   * to a Modal `.direct` endpoint, which wants `Modal-Key`/`Modal-Secret`, and reported the provider
+   * `down` (401) while `/api/intent/compile` was compiling against it successfully.
+   */
+  const llm = readLlmConfig(process.env)
+
   const probes = await probeAll({
     databaseConfigured: configured(KEYS.database),
     viConfigured: configured(KEYS.viUrl) && configured(KEYS.viToken),
@@ -131,17 +144,28 @@ async function buildReport(): Promise<StatusReport> {
       configured(KEYS.paypalClientSecret) &&
       configured(KEYS.paypalBase),
     mcpConfigured: configured(KEYS.paypalMcp),
-    openaiConfigured: configured(KEYS.openai),
+    openaiConfigured: llm.ok,
     viBaseUrl: process.env[KEYS.viUrl] ?? '',
     viToken: process.env[KEYS.viToken] ?? '',
     paypalClientId: process.env[KEYS.paypalClientId] ?? '',
     paypalClientSecret: process.env[KEYS.paypalClientSecret] ?? '',
     paypalBaseUrl: process.env[KEYS.paypalBase] ?? '',
     mcpUrl: process.env[KEYS.paypalMcp] ?? '',
-    openaiKey: process.env[KEYS.openai] ?? '',
+    /*
+     * The headers the app really sends, from the app's own resolution.
+     *
+     * Not `process.env[KEYS.openai]` pasted into a Bearer. A Modal `.direct` endpoint authenticates with
+     * `Modal-Key`/`Modal-Secret`, so the old probe sent the wrong credential and reported a working
+     * provider as `down` — the status page contradicting the feature it was describing. `readLlmConfig`
+     * is the same function `apps/web/lib/llm.ts` uses to build the client, so there is one answer to
+     * "how do we authenticate" and this page reports it rather than re-deriving it.
+     */
+    openaiHeaders: llm.ok ? llm.value.headers : {},
     // A deployment on Groq, OpenRouter, Google AI Studio, Together or a local Ollama must be probed
     // where it actually lives, or `/status` reports a working provider as `down`.
-    openaiBaseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
+    openaiBaseUrl: llm.ok
+      ? llm.value.baseUrl
+      : (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1'),
     fetchImpl: fetch,
     timeoutMs: PROBE_TIMEOUT_MS,
   })

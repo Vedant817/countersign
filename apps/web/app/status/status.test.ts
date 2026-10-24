@@ -47,7 +47,7 @@ interface HarnessOptions {
 }
 
 function harness(options: HarnessOptions = {}) {
-  const calls: Array<{ url: string; note: string }> = []
+  const calls: Array<{ url: string; note: string; headers: Record<string, string> }> = []
   const present = new Set<string>(
     ['database', 'vi', 'paypal', 'openai', 'mcp'].filter((k) => options.missing !== k),
   )
@@ -58,10 +58,23 @@ function harness(options: HarnessOptions = {}) {
     const headers = new Headers(init?.headers)
     const auth = headers.get('authorization') ?? ''
 
+    /**
+     * Record one outbound call, with the headers it carried.
+     *
+     * The headers are recorded because a probe's **credential** is what failed in production: the OpenAI
+     * probe built its own `Authorization: Bearer` and reported a working Modal `.direct` endpoint as
+     * `down`, and a harness that captures only the URL can never see that. Flattened to a plain object
+     * because a `Headers` instance compares by identity, so asserting against one would pass for the
+     * wrong reason.
+     */
+    const record = (note: string, urlOverride?: string): void => {
+      calls.push({ url: urlOverride ?? url, note, headers: Object.fromEntries(headers) })
+    }
+
     // --- vi-service: GET /v1/status, which is a liveness route and carries no bearer
     //     (`vi-client`'s own `ROUTE_CONTRACTS` marks it unauthenticated), so the fake does not require one.
     if (url.includes('/v1/status')) {
-      calls.push({ url, note: 'vi status' })
+      record('vi status')
       if (options.dead === 'vi') return json(500, { detail: 'boom' })
       if (options.hang === 'vi') await sleep(3_000)
       return json(200, {
@@ -77,7 +90,7 @@ function harness(options: HarnessOptions = {}) {
     //     real client sends. The fake checks the same header rather than a form field, so a probe that
     //     stopped sending credentials would be caught here.
     if (url.includes('/v1/oauth2/token')) {
-      calls.push({ url, note: 'paypal oauth' })
+      record('paypal oauth')
       if (options.dead === 'paypal') return json(401, { error: 'invalid_client' })
       const basic = Buffer.from(
         `${SECRETS.PAYPAL_CLIENT_ID}:${SECRETS.PAYPAL_CLIENT_SECRET}`,
@@ -94,7 +107,7 @@ function harness(options: HarnessOptions = {}) {
 
     // --- OpenAI: GET /v1/models with a bearer key
     if (url.includes('api.openai.com')) {
-      calls.push({ url, note: 'openai models' })
+      record('openai models')
       if (options.dead === 'openai') return json(401, { error: { message: 'Incorrect API key' } })
       if (options.hang === 'openai') await sleep(3_000)
       if (!auth.includes(SECRETS.OPENAI_API_KEY)) return json(401, { error: { message: 'no key' } })
@@ -103,7 +116,7 @@ function harness(options: HarnessOptions = {}) {
 
     // --- MCP: a bare GET
     if (url.includes('mcp.sandbox.paypal.com')) {
-      calls.push({ url, note: 'mcp' })
+      record('mcp')
       if (options.dead === 'mcp') throw new Error('ECONNREFUSED')
       // 405 is the honest answer to a bare GET on an MCP endpoint, and it proves the host is talking.
       return new Response('method not allowed', { status: 405 })
@@ -124,7 +137,10 @@ function harness(options: HarnessOptions = {}) {
     paypalClientSecret: SECRETS.PAYPAL_CLIENT_SECRET,
     paypalBaseUrl: 'https://api-m.sandbox.paypal.com',
     mcpUrl: 'https://mcp.sandbox.paypal.com/http',
-    openaiKey: SECRETS.OPENAI_API_KEY,
+    // The headers the probe sends, spelled out rather than derived, so a test of `probe.ts` stays a
+    // test of `probe.ts`. The route's own resolution is covered by the assertion that it now calls
+    // `readLlmConfig` at all.
+    openaiHeaders: { authorization: `Bearer ${SECRETS.OPENAI_API_KEY}` },
     openaiBaseUrl: 'https://api.openai.com/v1',
     fetchImpl,
     // Generous on purpose. The **route** uses 2 s, which is right for a health check; a test runs on a loaded
@@ -135,7 +151,9 @@ function harness(options: HarnessOptions = {}) {
     // The one probe that needs a database, injected so the other four can be proven with no Postgres running.
     // `dead: 'database'` makes it fail, which is what "503 when Postgres is down" asserts.
     sqlProbe: async () => {
-      calls.push({ url: 'postgres://…', note: 'SELECT 1' })
+      // No HTTP headers on a SQL probe; recorded as such rather than left out, so a reader can tell
+      // "this call carries no headers" apart from "this call was not recorded".
+      calls.push({ url: 'postgres://.', note: 'SELECT 1', headers: {} })
       if (options.dead === 'database') throw new Error('connect ECONNREFUSED 127.0.0.1:5432')
       return 1
     },
@@ -345,14 +363,42 @@ describe('the probes actually probe', () => {
     expect(httpStatus(probes)).toBe(200)
   })
 
-  it('the OpenAI probe really made the HTTP call, and carried the configured key', async () => {
+  it('the OpenAI probe really made the HTTP call, and carried the configured credential', async () => {
     const h = harness()
     await probeAll(h.deps)
     const call = h.calls.find((c) => c.url.includes('api.openai.com'))
     expect(call, 'the OpenAI probe never reached the network').toBeDefined()
-    // And a key that is set but *wrong* is caught: the fixture refuses a bearer it does not recognise.
-    const wrong = { ...h.deps, openaiKey: 'sk-not-the-configured-key' }
+    // And a credential that is set but *wrong* is caught: the fixture refuses a bearer it does not
+    // recognise.
+    const wrong = {
+      ...h.deps,
+      openaiHeaders: { authorization: 'Bearer sk-not-the-configured-key' },
+    }
     expect(byId(await probeAll(wrong)).get('openai')?.status).toBe('down')
+  })
+
+  it('sends exactly the headers it was given, and invents none', async () => {
+    /*
+     * The regression this pins: the probe used to build `Authorization: Bearer ${OPENAI_API_KEY}` itself,
+     * which is the wrong credential for a Modal `.direct` endpoint — it wants `Modal-Key`/`Modal-Secret`.
+     * `/status` therefore reported a working provider as `down` while `/api/intent/compile` was
+     * compiling against it. The probe now sends what the caller resolved, so a provider that
+     * authenticates some other way is described correctly by construction rather than by a branch.
+     */
+    const h = harness()
+    const modal = {
+      ...h.deps,
+      openaiHeaders: { 'Modal-Key': 'ak-test', 'Modal-Secret': 'as-test' },
+    }
+    await probeAll(modal)
+    const call = h.calls.find((c) => c.url.includes('api.openai.com'))
+    // Lower-cased, because `Headers` normalises names and HTTP header names are case-insensitive. Spelled
+    // out rather than compared to the input: a probe that looked a header up case-sensitively would miss
+    // `Modal-Key` on the wire, and this is the assertion that catches it.
+    expect(call?.headers).toEqual({ 'modal-key': 'ak-test', 'modal-secret': 'as-test' })
+    // No stray `authorization` alongside it: two credentials on one request is how a provider ends up
+    // reading the wrong one.
+    expect(call?.headers).not.toHaveProperty('authorization')
   })
 
   it('a dead MCP is reported down without failing the check', async () => {

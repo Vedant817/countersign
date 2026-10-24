@@ -125,7 +125,20 @@ export interface ProbeDeps {
   readonly paypalClientSecret: string
   readonly paypalBaseUrl: string
   readonly mcpUrl: string
-  readonly openaiKey: string
+  /**
+   * The headers the app's own model client sends, resolved by the caller.
+   *
+   * **Not a key.** A provider is not always authenticated with `Authorization: Bearer`: a Modal
+   * `.direct` endpoint wants `Modal-Key`/`Modal-Secret`, and sending it a Bearer gets a refusal that
+   * reads like a bad URL. The probe used to build its own `Bearer` from `OPENAI_API_KEY`, so on a Modal
+   * endpoint `/status` reported a **working** provider as `down` — the app compiled intents fine while
+   * the status page said the key was refused.
+   *
+   * Whoever composes the probes calls `readLlmConfig` (the same function the intent compiler does) and
+   * passes `config.headers` in. A second implementation of "how do we authenticate" beside the first is
+   * the defect; this parameter exists so there is only one.
+   */
+  readonly openaiHeaders: Readonly<Record<string, string>>
   /**
    * Where the OpenAI-compatible API lives — OpenAI, Groq, OpenRouter, Google AI Studio, Together, a
    * local Ollama. The probe must follow this rather than hard-code `api.openai.com`, or a deployment
@@ -420,15 +433,25 @@ async function probeOpenAi(deps: ProbeDeps): Promise<DependencyProbe> {
     }
   }
   const outcome = await timed(deps, async () => {
+    /*
+     * The headers come from the caller, which resolved them with `readLlmConfig` — the same function the
+     * intent compiler uses. This probe previously built its own `Bearer` from `OPENAI_API_KEY`, which is
+     * the wrong credential for a Modal `.direct` endpoint, so `/status` reported the provider as `down`
+     * (HTTP 401) while `/api/intent/compile` was compiling intents against it successfully.
+     *
+     * `/models` is the right endpoint to ask: it is cheap, it calls no model, and it is served by every
+     * OpenAI-compatible provider checked here — including the Modal endpoint, verified directly rather
+     * than assumed.
+     */
     const response = await deps.fetchImpl(`${deps.openaiBaseUrl.replace(/\/+$/, '')}/models`, {
       method: 'GET',
-      headers: { authorization: `Bearer ${deps.openaiKey}` },
+      headers: deps.openaiHeaders,
     })
     if (response.status === 401 || response.status === 403) {
-      throw new Error(`the key was refused (HTTP ${response.status})`)
+      throw new Error(`the credential was refused (HTTP ${response.status})`)
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    return { detail: 'the key was accepted; no model was called.' }
+    return { detail: 'the credential was accepted; no model was called.' }
   })
   return {
     ...base,
@@ -436,7 +459,7 @@ async function probeOpenAi(deps: ProbeDeps): Promise<DependencyProbe> {
     latencyMs: outcome.latencyMs,
     detail: outcome.ok
       ? outcome.detail
-      : `The key is configured but not usable: ${outcome.detail}. Nothing else is affected — no LLM output is authoritative.`,
+      : `The provider is configured but not usable: ${outcome.detail}. Nothing else is affected — no LLM output is authoritative.`,
   }
 }
 
