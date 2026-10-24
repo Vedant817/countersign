@@ -11,6 +11,13 @@ const viPython = resolve(
 )
 const viServiceToken = 'test-service-token-do-not-use-in-prod'
 
+/**
+ * The same port overrides `scripts/dev-local.mjs` honours, so an E2E run can follow the lab onto a
+ * free port instead of fighting whatever else is on 3000/8000. Defaults are unchanged.
+ */
+const webPort = Number(process.env['COUNTERSIGN_WEB_PORT'] ?? 3000)
+const viPort = Number(process.env['COUNTERSIGN_VI_PORT'] ?? 8000)
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
@@ -19,7 +26,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: `http://localhost:${webPort}`,
     trace: 'retain-on-failure',
     navigationTimeout: 60_000,
   },
@@ -31,9 +38,9 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `"${viPython}" -m uvicorn vi_service.main:app --app-dir src --host 127.0.0.1 --port 8000`,
+      command: `"${viPython}" -m uvicorn vi_service.main:app --app-dir src --host 127.0.0.1 --port ${viPort}`,
       cwd: viRoot,
-      url: 'http://127.0.0.1:8000/v1/status',
+      url: `http://127.0.0.1:${viPort}/v1/status`,
       timeout: 120_000,
       reuseExistingServer: !process.env['CI'],
       env: {
@@ -47,13 +54,13 @@ export default defineConfig({
       },
     },
     {
-      command: 'pnpm exec next dev -p 3000',
+      command: `pnpm exec next dev -p ${webPort}`,
       cwd: webRoot,
-      url: 'http://localhost:3000',
+      url: `http://localhost:${webPort}`,
       timeout: 120_000,
       reuseExistingServer: !process.env['CI'],
       env: {
-        VI_SERVICE_URL: 'http://127.0.0.1:8000',
+        VI_SERVICE_URL: `http://127.0.0.1:${viPort}`,
         SIGNING_LAB_ENABLED: 'true',
         VI_SERVICE_TOKEN: viServiceToken,
         VI_AGENT_ISS: 'https://agent.countersign.test',

@@ -7,12 +7,36 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const localDatabase = new URL('postgres://127.0.0.1:5432/countersign')
 localDatabase.username = 'countersign'
 localDatabase.password = 'countersign'
+
+/**
+ * Ports, overridable so a clash on this machine is a configuration change and not a decision about
+ * whose process to kill.
+ *
+ * The defaults stay 3000/8000 so nothing else has to move. `COUNTERSIGN_VI_PORT` exists because 8000
+ * is the busiest port on a developer's machine and, during the review that found this, it was held by
+ * an unrelated project answering 404 — which the app then reported to a buyer as "we could not find
+ * that, it may have been removed". Refusing to start (rather than terminating the other process) is
+ * the right default; being unable to move is not.
+ */
+function portFromEnv(name, fallback) {
+  const raw = process.env[name]
+  if (raw === undefined || raw.trim() === '') return fallback
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error(`${name} must be a port between 1 and 65535, got "${raw}".`)
+  }
+  return value
+}
+
+const webPort = portFromEnv('COUNTERSIGN_WEB_PORT', 3000)
+const viPort = portFromEnv('COUNTERSIGN_VI_PORT', 8000)
+
 // Public local Compose configuration, bound to loopback. Never read or print real credentials.
 const environment = {
   ...process.env,
   APP_ENV: 'local',
   DATABASE_URL: localDatabase.href,
-  VI_SERVICE_URL: 'http://127.0.0.1:8000',
+  VI_SERVICE_URL: `http://127.0.0.1:${viPort}`,
   VI_SERVICE_TOKEN: randomBytes(32).toString('hex'),
   VI_KEK: randomBytes(32).toString('base64'),
   VI_ISSUER_URL: 'https://issuer.countersign.test',
@@ -63,13 +87,14 @@ function stop() {
   }
 }
 
-async function requireFreePort(port) {
+async function requireFreePort(port, variable) {
   await new Promise((resolve, reject) => {
     const probe = createServer()
     probe.once('error', () =>
       reject(
         new Error(
-          `Port ${port} is in use. Stop the existing local server before running dev:local.`,
+          `Port ${port} is in use. Stop the existing local server, or set ${variable} to a free port ` +
+            `(the launcher never terminates a process it did not start).`,
         ),
       ),
     )
@@ -80,7 +105,10 @@ async function requireFreePort(port) {
 async function main() {
   if (process.argv.slice(2).some((arg) => arg !== '--seed'))
     throw new Error('Usage: pnpm dev:local [--seed]')
-  await Promise.all([requireFreePort(3000), requireFreePort(8000)])
+  await Promise.all([
+    requireFreePort(webPort, 'COUNTERSIGN_WEB_PORT'),
+    requireFreePort(viPort, 'COUNTERSIGN_VI_PORT'),
+  ])
   console.info('Starting the local authorization lab. PayPal payments are disabled.')
   await completion(launch('docker', ['compose', 'up', '-d', '--wait', 'db']))
   await completion(launch('pnpm', ['db:migrate']))
@@ -97,7 +125,7 @@ async function main() {
     '--host',
     '127.0.0.1',
     '--port',
-    '8000',
+    String(viPort),
   ])
   children.push(vi)
   const viExit = completion(vi)
@@ -107,10 +135,22 @@ async function main() {
     if (vi.exitCode !== null)
       throw new Error('VI failed to start. Check its configuration and Python dependencies.')
     try {
-      ready = (
-        await fetch('http://127.0.0.1:8000/v1/status', { signal: AbortSignal.timeout(1000) })
-      ).ok
-    } catch {
+      const probe = await fetch(`http://127.0.0.1:${viPort}/v1/status`, {
+        signal: AbortSignal.timeout(1000),
+      })
+      // A 404 here means something else is on the port and the free-port check raced with it. Checking
+      // the status, not just that *something* answered, is what turns that into a clear failure instead
+      // of "the vi service is ready" followed by every later call failing.
+      ready = probe.ok
+      if (!probe.ok && probe.status === 404) {
+        throw new Error(
+          `Port ${viPort} answered 404 for /v1/status — something else is listening there. ` +
+            `Set COUNTERSIGN_VI_PORT to a free port.`,
+        )
+      }
+    } catch (cause) {
+      if (cause instanceof Error && cause.message.includes('something else is listening'))
+        throw cause
       /* Still starting. */
     }
     if (ready) break
@@ -126,11 +166,11 @@ async function main() {
     '--hostname',
     '127.0.0.1',
     '-p',
-    '3000',
+    String(webPort),
   ])
   children.push(web)
   console.info(
-    'Open http://localhost:3000. Ctrl+C stops web and VI; PostgreSQL data remains in Docker.',
+    `Open http://localhost:${webPort}. Ctrl+C stops web and VI; PostgreSQL data remains in Docker.`,
   )
   console.info(
     'Signing keys are local and ephemeral. Restarting VI invalidates its earlier sample signatures.',

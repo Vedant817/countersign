@@ -19,6 +19,17 @@ container, applies migrations, generates temporary local service credentials wit
 and starts VI and Next. It refuses occupied ports instead of terminating another server.
 Ctrl+C stops its web/VI processes; database data remains in the Docker volume.
 
+Port 3000 and port 8000 are the busiest ports on a developer's machine, so both are overridable —
+useful when something else is already listening, since the launcher will never end a process it did
+not start:
+
+```sh
+COUNTERSIGN_VI_PORT=8010 COUNTERSIGN_WEB_PORT=3100 pnpm dev:local
+```
+
+The Playwright suite honours the same two variables, so `pnpm --filter @countersign/web exec
+playwright test` follows the lab rather than fighting it.
+
 - **Storefront:** choose a product and destination, inspect the currency, and create a signed quote.
   Quotes persist in PostgreSQL across web restarts. They do not place orders or reserve stock.
 - **Signing lab:** create a non-extractable browser key and sign a sample mandate using a passkey.
