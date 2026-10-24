@@ -93,17 +93,17 @@ audience — merchants who currently cannot see _why_ a payment was allowed).
   `kernel browsers create` sessions drivable by Playwright, CDP or a JS REPL, with `--private-host` for
   reaching private hosts on a tunnel the session joins (its own docs use `*.ts.net`, i.e. Tailscale).
   Two things we actually need:
-
   1. **`kernel browsers replays start|stop|download`** — a real screen recording of a real browser. This
      is the demo video, and it is the thing this repository cannot otherwise produce: the T3 preview pane
      does not composite here (`visible: false`), so a screencast yields one frozen frame and eight seconds
      of black.
-  2. **A browser that is not this machine.** Reaching a *deployed* URL is the only way to check prod, and
+  2. **A browser that is not this machine.** Reaching a _deployed_ URL is the only way to check prod, and
      a cloud browser is also more honest than a local one — nothing about the environment can be
      accidentally load-bearing.
 
   Requires `kernel login` (interactive OAuth). The stored refresh token had expired at the time of
   writing, so nothing here has been run yet.
+
 - **Elastic**: our catalog search is 24 seeded products. Elastic would be architecture for its own sake.
 - **Postman**: worth a collection as a _documentation_ artefact for the "Tools" submission field, but it
   is not a prize track.
