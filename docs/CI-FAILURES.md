@@ -100,3 +100,27 @@ by the spec itself (EC-PRICE-3, EC-FAM-3) and 2 are blocked with the blocker nam
 15 of the 19 gained real tests; the `wip` rows carry a note saying which half is missing. Executing the
 two database cases against a real Postgres immediately found four `Date`-in-raw-`sql` runtime failures
 and a string/BigInt mismatch in money readers — see `docs/verification/p0-12-ci-green.md`.
+
+## Fixed — `all gates green` could never pass
+
+```
+RESULT="Array"
+FAIL: at least one gate did not pass.
+```
+
+`RESULT="${{ needs.*.result }}"` renders as the literal string `Array` when a dependency is a matrix job
+(`test-node` runs three shards), so `echo "Array" | grep -qv success` always matched and the aggregate
+gate failed unconditionally — since the day it was written. Run `40132768178` shows it plainly: every
+substantive job green, only this one red. It is the same class of defect as the VI pin (`sed` matching
+no line) and the defender source scan (a path that did not exist): **a gate that reports failure
+without testing anything.** It is now read from `toJSON(needs)`, and a skipped dependency counts as a
+failure.
+
+## Fixed — gitleaks needs a token and `pull-requests: read` on PR events
+
+The first pull-request-triggered run failed with _"GITHUB_TOKEN is now required to scan pull requests"_;
+with the token supplied it failed with `403 Resource not accessible by integration` on
+`GET /repos/{owner}/{repo}/pulls/{n}/commits`, whose `x-accepted-github-permissions` header asks for
+`pull_requests=read`. Every push-triggered run had passed, so the gap only appeared once this repository
+had a pull request. The workflow now supplies `secrets.GITHUB_TOKEN` and grants `pull-requests: read`;
+the scan itself is unchanged.

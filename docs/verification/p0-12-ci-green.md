@@ -68,6 +68,21 @@ as "covered" for the parts that are not built.
   than the spec's 06:00. Not fixed here (it needs the Judge Mode runner, WP-20); noted in the EC-ENV-3
   blocked reason.
 
+## Two more CI defects, found by this PR's own runs
+
+1. **`all gates green` could never pass.** `RESULT="${{ needs.*.result }}"` renders as the literal
+   string `Array` when a dependency is a matrix job (test-node has three shards), so
+   `grep -qv success` always matched. Run `40132768178` proves it independently: every substantive job
+   green, only `all gates green` red, with `RESULT="Array"` in its log. Same class as the VI pin and
+   the source scan — a gate that reports failure without testing anything. Now reads `toJSON(needs)`
+   and selects any result that is not `success`.
+2. **`gitleaks-action@v2` needs a token on pull requests.** The first PR-triggered run failed with
+   _"GITHUB_TOKEN is now required to scan pull requests"_; with the token supplied, it then failed with
+   `403 Resource not accessible by integration` on `GET /pulls/1/commits`, whose
+   `x-accepted-github-permissions` header asks for `pull_requests=read`. Both were invisible on `main`
+   because every push run passed. The workflow now supplies the automatic token and grants
+   `pull-requests: read`. The scan is unchanged; nothing was skipped.
+
 ## Local gate
 
 ```
@@ -82,4 +97,19 @@ pnpm --filter @countersign/db exec vitest run   ✓  75 passed (DATABASE_URL set
 
 ## CI
 
-Run URL and conclusion: **filled in after the push** — see the final report message.
+**Green:** [`40133232250`](https://github.com/Vedant817/countersign/actions/runs/40133232250) on
+`fix/p0-12-ci-green` — all nine checks passed on `ubuntu-latest`:
+
+```
+✓ typecheck · lint · format · money · edge cases   (pnpm test:ec exit 0 in CI)
+✓ migrations + seed against postgres 17            (incl. the db package suite)
+✓ tests (node, 1/3) ✓ (node, 2/3) ✓ (node, 3/3)    (incl. the uv-provisioned parity tests)
+✓ tests (vi-service)
+✓ secret scan
+✓ build (web + packages + worker)
+✓ all gates green
+```
+
+PR: https://github.com/Vedant817/countersign/pull/1 (open; not merged — merging is the lead's call).
+Earlier red runs, for the record: `40131911492` (gitleaks token), `40132334635` (gitleaks permission),
+`40132768178` (aggregate gate), all of them green in every other job.
