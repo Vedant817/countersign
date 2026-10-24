@@ -137,6 +137,10 @@ describe('buildUserPrompt', () => {
     input: compileInput({ text: 'Under 130 dollars at Northwind' }),
     currency: 'USD' as const,
     locale: 'en-US' as const,
+    // Fixed, not today's date: these are prompt-snapshot assertions, and a moving date would make
+    // them differ between runs — which is exactly why `todayIso` is a parameter rather than a
+    // `new Date()` inside `buildUserPrompt`.
+    todayIso: '2026-10-24',
   }
 
   it("boxes the buyer's words and labels them", () => {
@@ -181,6 +185,17 @@ describe('buildUserPrompt', () => {
     const args = { ...base, literalCeiling: 13000n }
     const first = buildUserPrompt(args)
     for (let i = 0; i < 20; i += 1) expect(buildUserPrompt(args)).toBe(first)
+  })
+
+  it('tells the model what today is, because the schema asks it for a date', () => {
+    // `recurrence.start_date` is required by the library, so a model proposing a subscription has to
+    // produce a date. With none in the prompt it invents one: the live eval produced `2024-01-01` for
+    // "subscribe to a coffee delivery for $40 a month" — 18 months in the past — and the compiler
+    // refused it. The refusal was right and the prompt was at fault for asking a question it did not
+    // answer. This asserts the answer is now present.
+    const prompt = buildUserPrompt({ ...base, literalCeiling: 5000n })
+    expect(prompt).toContain('Today is 2026-10-24')
+    expect(prompt).toContain('A start date in the past is invalid')
   })
 })
 

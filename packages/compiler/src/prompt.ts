@@ -146,16 +146,34 @@ export function buildUserPrompt(args: {
   readonly currency: Currency
   readonly literalCeiling: bigint | null
   readonly locale: CompileInput['locale']
+  /**
+   * Today, as `YYYY-MM-DD`.
+   *
+   * Required rather than defaulted: a default would be the build machine's date, which in a compiled
+   * artefact is a value frozen at build time. The caller has a clock; this file should not.
+   */
+  readonly todayIso: string
 }): string {
-  const { input, currency, literalCeiling, locale } = args
+  const { input, currency, literalCeiling, locale, todayIso } = args
   const ceiling =
     literalCeiling === null
       ? 'The buyer wrote no amount, so there is no ceiling and you must not invent one.'
       : `The largest amount in the text is ${formatMoney({ minor: literalCeiling, currency })}. No cap you ` +
         'return may exceed it.'
   return [
-    `Mandate currency: ${currency}`,
+    `Mandatory currency: ${currency}`,
     `Buyer locale: ${locale}`,
+    /*
+     * The date is here because the model cannot know it and the schema demands one anyway.
+     *
+     * `recurrence.start_date` is required by the library, so a model asked to propose a subscription
+     * has to produce a date. With no date in the prompt it invents one — observed in the live eval,
+     * which proposed `2024-01-01` for "subscribe for $40 a month" and was refused as being in the
+     * past. The refusal was correct and the situation was our fault: we asked for a value we did not
+     * supply. A prompt that omits today's date is a prompt that guarantees a wrong answer to any
+     * question about time.
+     */
+    `Today is ${todayIso}. A start date in the past is invalid: use ${todayIso} or later.`,
     `Default stores for this buyer: ${input.defaults.merchantIds.length > 0 ? input.defaults.merchantIds.join(', ') : '(none)'}`,
     `Hard ceiling: ${ceiling}`,
     '',

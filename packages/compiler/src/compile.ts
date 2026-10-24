@@ -476,6 +476,9 @@ export async function compile(
     currency: mandateCurrency,
     literalCeiling: literalCap,
     locale: input.value.locale,
+    // The clock is injected, so "today" is a value this function was given rather than one it reads.
+    // That is what keeps a prompt snapshot in a test an assertion instead of a race with midnight UTC.
+    todayIso: new Date(clock.nowSec() * 1000).toISOString().slice(0, 10),
   })
 
   // --- EC-LLM-2: one repair retry, then a typed error -------------------------------
