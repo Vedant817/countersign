@@ -7,16 +7,16 @@ token**, so an unused deployment costs nothing and a warm one answers immediatel
 
 ## What is live
 
-| | |
-| --- | --- |
-| Endpoint | `deepseek-v4-1-flash` · **shared** (token-billed) |
-| Endpoint ID | `ep-FTNqR30YRqMaUtWc7TtaTb` |
-| Model | `deepseek-ai/DeepSeek-V4.1-Flash` |
-| URL | `https://vedantmahajan271--ep-deepseek-v4-1-flash-server.us-west.modal.direct` |
-| Base for OpenAI clients | `…/v1` |
-| `requires_proxy_auth` | **`true`** — see below |
-| Context | 1,048,576 tokens |
-| Status | live, verified 24 Oct 2026 |
+|                         |                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| Endpoint                | `deepseek-v4-1-flash` · **shared** (token-billed)                              |
+| Endpoint ID             | `ep-FTNqR30YRqMaUtWc7TtaTb`                                                    |
+| Model                   | `deepseek-ai/DeepSeek-V4.1-Flash`                                              |
+| URL                     | `https://vedantmahajan271--ep-deepseek-v4-1-flash-server.us-west.modal.direct` |
+| Base for OpenAI clients | `…/v1`                                                                         |
+| `requires_proxy_auth`   | **`true`** — see below                                                         |
+| Context                 | 1,048,576 tokens                                                               |
+| Status                  | live, verified 24 Oct 2026                                                     |
 
 A second endpoint exists if this one is ever rate-limited:
 `glm-5-3-flash` (`zai-org/GLM-5.3-Flash`), `ep-9EdarJSkfRXi0TsIEtwlO0`.
@@ -31,11 +31,11 @@ A second endpoint exists if this one is ever rate-limited:
 
 All three of the app's jobs are covered by a declared capability rather than by prompting and hoping:
 
-| Job | Package | Needs |
-| --- | --- | --- |
+| Job                                           | Package             | Needs                                                                               |
+| --------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------- |
 | Compile plain-English intent into constraints | `packages/compiler` | `structured_outputs` — the schema is enforced by the server, not by asking politely |
-| Drive the shopping agent | `packages/agent` | `tools` — real `tool_calls`, so the agent is not a prompt parser |
-| Draft dispute notes with citations | `packages/defender` | text; the citation checker is deterministic, so a bad draft is rejected, not filed |
+| Drive the shopping agent                      | `packages/agent`    | `tools` — real `tool_calls`, so the agent is not a prompt parser                    |
+| Draft dispute notes with citations            | `packages/defender` | text; the citation checker is deterministic, so a bad draft is rejected, not filed  |
 
 `reasoning` is available with effort levels `none | low | high | xhigh | max`, which is worth setting
 explicitly per call site rather than inheriting a default: the compiler wants determinism, the
