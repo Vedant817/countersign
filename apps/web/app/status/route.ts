@@ -139,6 +139,9 @@ async function buildReport(): Promise<StatusReport> {
     paypalBaseUrl: process.env[KEYS.paypalBase] ?? '',
     mcpUrl: process.env[KEYS.paypalMcp] ?? '',
     openaiKey: process.env[KEYS.openai] ?? '',
+    // A deployment on Groq, OpenRouter, Google AI Studio, Together or a local Ollama must be probed
+    // where it actually lives, or `/status` reports a working provider as `down`.
+    openaiBaseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
     fetchImpl: fetch,
     timeoutMs: PROBE_TIMEOUT_MS,
   })

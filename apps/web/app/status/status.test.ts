@@ -125,6 +125,7 @@ function harness(options: HarnessOptions = {}) {
     paypalBaseUrl: 'https://api-m.sandbox.paypal.com',
     mcpUrl: 'https://mcp.sandbox.paypal.com/http',
     openaiKey: SECRETS.OPENAI_API_KEY,
+    openaiBaseUrl: 'https://api.openai.com/v1',
     fetchImpl,
     // Generous on purpose. The **route** uses 2 s, which is right for a health check; a test runs on a loaded
     // machine where the first `await` in a fresh module graph costs a few hundred milliseconds of JIT, and a

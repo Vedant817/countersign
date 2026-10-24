@@ -126,6 +126,12 @@ export interface ProbeDeps {
   readonly paypalBaseUrl: string
   readonly mcpUrl: string
   readonly openaiKey: string
+  /**
+   * Where the OpenAI-compatible API lives — OpenAI, Groq, OpenRouter, Google AI Studio, Together, a
+   * local Ollama. The probe must follow this rather than hard-code `api.openai.com`, or a deployment
+   * on a free provider would be reported `down` while working perfectly.
+   */
+  readonly openaiBaseUrl: string
   readonly fetchImpl: typeof fetch
   /**
    * Per-probe budget in milliseconds.
@@ -414,7 +420,7 @@ async function probeOpenAi(deps: ProbeDeps): Promise<DependencyProbe> {
     }
   }
   const outcome = await timed(deps, async () => {
-    const response = await deps.fetchImpl('https://api.openai.com/v1/models', {
+    const response = await deps.fetchImpl(`${deps.openaiBaseUrl.replace(/\/+$/, '')}/models`, {
       method: 'GET',
       headers: { authorization: `Bearer ${deps.openaiKey}` },
     })

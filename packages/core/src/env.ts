@@ -174,6 +174,29 @@ export const envSchema = z
      * "not configured" rather than treating it as a boot failure.
      */
     OPENAI_API_KEY: z.string().min(1).optional(),
+    /**
+     * Where the OpenAI-compatible API lives. Defaults to OpenAI itself.
+     *
+     * **Why this exists.** A demo that requires a paid key to show a compiler is a demo most people
+     * cannot run, and this project's LLM is the one dependency it is designed to work without
+     * (§8.0 rule 4). Every provider below speaks the same `/v1/chat/completions` protocol, so a base
+     * URL is all that is needed to move between them:
+     *
+     *   - `https://api.openai.com/v1`                        — OpenAI (paid)
+     *   - `https://api.groq.com/openai/v1`                   — Groq (generous free tier, fast)
+     *   - `https://openrouter.ai/api/v1`                     — OpenRouter (free models marked `:free`)
+     *   - `https://generativelanguage.googleapis.com/v1beta/openai` — Google AI Studio (free tier)
+     *   - `https://api.together.xyz/v1`                      — Together
+     *   - `http://127.0.0.1:11434/v1`                        — Ollama, fully local, no key at all
+     *   - `https://api.modal.com/v1`                         — Modal, if the endpoint is OpenAI-shaped
+     *
+     * A **local** Ollama needs no `OPENAI_API_KEY`; set it to any non-empty string so
+     * `openaiConfigured` reads true, or leave both unset and the deterministic paths still work.
+     *
+     * Validated as a URL rather than a string so a typo (`api.groq.com` with no scheme) fails at boot
+     * instead of as an opaque `fetch` error the first time a judge compiles an intent.
+     */
+    OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
     LLM_MAIN_MODEL: z.string().min(1).default('gpt-6.1-sol'),
     LLM_CHEAP_MODEL: z.string().min(1).default('gpt-6-luna'),
 
