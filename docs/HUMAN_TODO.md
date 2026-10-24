@@ -1,218 +1,197 @@
-# HUMAN TODO — only Vedant can do these
+# HUMAN TODO — things only Vedant can do
 
-_Last updated: 2026-10-04_
+_Last updated: 25 October 2026_
 
-Agents keep working on everything that is not blocked by one of these. Newest request goes at the top
-of the list. When you complete an item, move it to `docs/DONE_BY_HUMAN.md` with the date.
+Agents keep working on everything that is not blocked by one of these. **Newest request goes at the top.**
+When you complete an item, move it to `docs/DONE_BY_HUMAN.md` with the date.
+
+The deadline is **Fri 13 Nov 2026, 1:30 AM IST**. Internal target: submitted by Wed 11 Nov.
+
+**Why this list is short and blunt:** a judge-panel review on 25 Oct scored the project **21/50** and found
+it is "a well-engineered payments-security library with no product on top of it"
+(`docs/review/VERDICT.md`). Every item below is on the critical path out of that. Items 1–5 unblock
+roughly two thirds of the remaining P0 work; nothing else can proceed until they land.
 
 ---
 
-## H-01 — PayPal developer + sandbox accounts, REST app, Vault enabled
+## ☐ 1. Make the GitHub repo public, with the licence visible in About
 
-**Blocks:** WP-06s (week-1 checks C1/C2), WP-07, WP-11, WP-15e, WP-20, and the whole live demo.
-**Needed by:** the moment you can, ideally today.
+**Blocks:** the submission itself. A private repo is an outright rules failure — Devpost requires "public
+and open source, with a license file visible at the top of the repo (in the About section)".
 
-Do exactly what spec §10.1 says:
-
-1. Log in at <https://developer.paypal.com> → Dashboard → **Sandbox → Accounts**.
-   - Two accounts are auto-created: a **Business** (merchant) and a **Personal** (buyer).
-   - Create **two more Personal** accounts whose emails contain `allowappeal` and `noappeal`
-     (needed for the appeal tests, spec §10.1 step 1 / [V3, S29]).
-   - Set **country = US** for all four.
-2. **Create the REST app**: Dashboard → **Apps & Credentials → Sandbox → Create App**,
-   name `countersign-sandbox`, linked to the Business account. Copy **Client ID** and **Secret**.
-3. **Enable Vault** ("Save payment methods") in the app's features. The setting name varies by
-   dashboard revision — screenshot it into `docs/sandbox-setup.md`.
-4. **Fund the buyer** Personal account (add a balance / confirm a linked card). The sandbox card is
-   what makes the `process-chargeback` path work (§10.1 step 5, [S29]).
-
-**Then give an agent:**
-
-```
-PAYPAL_CLIENT_ID=...
-PAYPAL_CLIENT_SECRET=...
-PAYPAL_BUYER_EMAIL=<buyer personal account>
-PAYPAL_BUYER_PASSWORD=...
-PAYPAL_MERCHANT_EMAIL=<business account>
-PAYPAL_ALLOWAPPEAL_EMAIL=<personal account with allowappeal>
-PAYPAL_NOAPPEAL_EMAIL=<personal account with noappeal>
+```powershell
+gh repo edit Vedant817/countersign --visibility public --accept-visibility-change-consequences
 ```
 
-Put them in a git-ignored `.env.local` (never in a tracked file). An agent will create
-`docs/sandbox-setup.md` and wire `.env.example` — you only paste the secrets.
+Then, in the GitHub web UI → **About** (gear icon, top right of the repo page):
+
+- **Website:** the deployed URL from item 5 — leave blank until that exists rather than pointing somewhere wrong
+- **Topics:** `paypal`, `agents`, `payments`, `verifiable-intent`, `mcp`
+
+The licence file already exists and is Apache-2.0. GitHub should show the badge automatically once the
+repo is public; if it does not, the file is `LICENSE` at the root and that is all it needs.
+
+**Acceptance:** an anonymous `git clone https://github.com/Vedant817/countersign.git` works in a shell
+with no credentials, and the repo page shows "Apache-2.0 license" in the sidebar.
+
+**This is a one-way door.** It is safe — the secret scan passes over the full history and there is no
+proprietary content — but it cannot be undone quietly.
 
 ---
 
-## H-02 — OpenAI API key
+## ☐ 2. PayPal sandbox: four accounts, a REST app with Vault, and the Disputes product
 
-**Blocks:** WP-08 (intent compiler), WP-13 (shopping agent), WP-15c (notes drafter), WP-16 (strategist).
+**Blocks:** P0-2, P0-3, P0-4, P0-5, P0-8, P0-10 — every "real PayPal" acceptance test. This is the single
+highest-value hour on the list.
+
+At <https://developer.paypal.com> → **Dashboard → Sandbox → Accounts**:
+
+| Account  | Email must contain | Country | Why                                                         |
+| -------- | ------------------ | ------- | ----------------------------------------------------------- |
+| Business | —                  | US      | The merchant; its **payer id** becomes `PAYPAL_MERCHANT_ID` |
+| Personal | —                  | US      | The default buyer                                           |
+| Personal | `allowappeal`      | US      | Used for the appeal-path dispute tests ([V3, S29])          |
+| Personal | `noappeal`         | US      | The non-appeal path                                         |
+
+Two Personal accounts are created for you; **create two more** and rename them so the emails contain the
+words above. Set **country = US on all four** — that matches the USD store and keeps India-region account
+capabilities out of the critical path.
+
+Then **Apps & Credentials → Sandbox → Create App**, name it `countersign-sandbox`, link it to the
+Business account, and:
+
+- **Enable Vault / "Save payment methods".** The setting name varies between dashboard versions — the
+  earlier probe returned `CUSTOMER_ID_NOT_FOUND`, which means the API processed the lookup, so Vault
+  appears to be on for the default app. **Screenshot the setting** into `docs/sandbox-setup.md` either
+  way, so the next reader is not guessing.
+- **Enable the Disputes product.** If the dashboard offers scopes, request `disputes/create` and
+  `disputes/update-buyer`. If it does not, note that here — the fallback is the dashboard's dispute
+  simulator, and `POST /v1/customer/disputes` is then unavailable rather than broken.
+- **Fund the default buyer** and confirm it has a linked card. The `process-chargeback` path requires a
+  card-funded transaction.
+
+Into `.env.local` (never committed — `.env*` is ignored except `.env.example`):
 
 ```
-OPENAI_API_KEY=sk-...
+PAYPAL_CLIENT_ID=<from the app>
+PAYPAL_CLIENT_SECRET=<from the app>
+PAYPAL_MERCHANT_ID=<the Business account's payer id>
+PAYPAL_BUYER_EMAIL=<default Personal account>
+PAYPAL_BUYER_PASSWORD=<its password>
+PAYPAL_ALLOWAPPEAL_EMAIL=<…allowappeal…@…>
+PAYPAL_NOAPPEAL_EMAIL=<…noappeal…@…>
 ```
 
-Also confirm the two models in spec §4 exist for your account: `gpt-6.1-sol` (main) and
-`gpt-6-luna` (cheap). If your key cannot reach one of them, say so and an agent will record the
-substitution in `docs/DECISIONS.md`.
+`PAYPAL_ENV=sandbox` and `PAYPAL_API_BASE=https://api-m.sandbox.paypal.com` are already set and correct.
+
+**Also worth asking PayPal support while you are in there:** what `PayPal-Request-Id` length is _actually_
+enforced? Their docs say 38 characters; our validator currently permits **55**
+(`packages/paypal/src/idempotency.ts`), which is a live defect — an id that passes validation and is
+rejected at capture is exactly the case where a retry can double-charge. Their answer decides whether the
+fix is "hash to 38" or "the validator is fine".
+
+**Acceptance:** `POST /v1/oauth2/token` returns 200 (already true), and a Vault `setup-token` →
+`payment-token` round trip returns a real `vault_id` that is stored against the user row.
 
 ---
 
-## H-03 — Render account + credits
+## ☐ 3. Confirm the webhook registration in the dashboard (the agent does the rest)
 
-**Blocks:** deployment (spec D20), webhook registration (§10.1 step 4), public demo URL.
+**Blocks:** P0-5.
 
-1. Create a Render account, apply the hackathon credits (spec §16 Day 1).
-2. Create three **Starter** web services (`web`, `vi`, `worker`) and one **paid** Postgres
-   (`basic-256mb`) — free Postgres expires after 30 days and would kill the demo mid-judging (D11).
-3. Confirm a **Singapore** region exists for all three service types (spec U8).
+You do **not** need to create the webhook. Once item 5 gives us a public URL, the agent calls
+`POST /v1/notifications/webhooks` itself and stores `PAYPAL_WEBHOOK_ID` in the environment.
 
-`render.yaml` is committed by WP-00; the deploy itself just needs the account.
+What is needed from you: after the agent says it has registered one, open
+**Dashboard → your app → Webhooks** and confirm the URL is the deployed one and the event list matches
+spec §8.12. That is the whole ask — a second pair of eyes on one settings page.
 
----
-
-## H-04 — GitHub repo + remote
-
-**Blocks:** pushing, CI runs, the Devpost submission link.
-
-Create a **public** repo `countersign` with an **Apache-2.0** licence, then give an agent the remote:
-
-```
-git remote add origin git@github.com:<you>/countersign.git
-```
-
-Until this exists, everything is committed locally only (see AGENTS.md rule 7).
+**Acceptance:** the dashboard shows the webhook URL as our deployed `/api/webhooks/paypal`, and a
+`PAYMENT.CAPTURE.COMPLETED` event appears in its delivery log with a 2xx response.
 
 ---
 
-## H-05 — Bryntum trial licence for the judging period (spec U7)
+## ☐ 4. An LLM key a judge can actually reach
 
-**Blocks:** WP-17e's real timeline; the "Best Use of Bryntum" prize category.
+**Blocks:** P0-7, and the "AI is meaningful and reproducible by judges" criterion.
 
-Ask on the Bryntum Discord/forum whether a trial licence is valid for a hackathon + judging period
-(2–15 Dec) and how to authenticate the npm registry (`BRYNTUM_NPM_TOKEN`).
-**Fallback already planned:** the disputes screen has a plain-table timeline when
-`FEATURE_BRYNTUM=false` (spec §9 S-17), so nothing is blocked.
+Today the model runs through a **private, proxy-authenticated Modal endpoint**
+(`MODAL_PROXY_TOKEN_ID` / `MODAL_PROXY_TOKEN_SECRET`). That works, and it is why the intent compiler runs
+at all — but a judge cannot reproduce it, and the panel scored the AI down for exactly that.
 
----
+**Preferred:** an `OPENAI_API_KEY`. `apps/web/lib/llm.ts` already supports any OpenAI-compatible provider
+via `OPENAI_BASE_URL`, and a plain key with no proxy headers is the path that works out of the box.
 
-## H-06 — Devpost prize opt-ins and submission (spec U9, §20)
+**Acceptable alternative:** any provider with structured outputs — Groq, OpenRouter, Together, Google AI
+Studio, or a locally-hosted model. Put the base URL in `OPENAI_BASE_URL` and the key in `OPENAI_API_KEY`.
 
-**Blocks:** the actual submission, not the build.
+The Modal path stays as a fallback; it just stops being the default a judge has to be given a token for.
 
-Confirm whether **"Best Use of PayPal + AI"** can be selected alongside Grand Prize /
-Best Use of Agentic Commerce / Best Use of Bryntum. Submission target: **Wed 11 Nov, 11:59 PM IST**
-(hard deadline Fri 13 Nov, 1:30 AM IST).
-
----
-
-## H-07 — Any login, 2FA or captcha
-
-PayPal dashboard navigation, Render dashboard, GitHub org settings, Devpost submission, and the
-PayPal buyer popup during the onboarding E2E test may all hit 2FA or a captcha. When an agent hits
-one, it will add the exact request to the top of this file and continue with everything else.
+**Acceptance:** with only `OPENAI_API_KEY` and `OPENAI_BASE_URL` set, `/intent` compiles a sentence and
+`/status` reports the provider `up`.
 
 ---
 
-## H-08 — Ask upstream Verifiable Intent for a clock override on `verify_chain`
+## ☐ 5. A host with credits, and billing approval for a managed Postgres
 
-**Blocks:** full closure of **EC-TIME-3** (verify "as of capture time"). Everything else proceeds.
+**Blocks:** P0-11, and therefore P0-5, P0-7, P0-10 and the video — anything that needs a public URL.
 
-The Dispute Defender is supposed to re-verify a chain **as it stood at capture time**, not only now,
-because a mandate that expired after the purchase must still be evidence that the purchase was
-authorised. At the pinned commit `verify_chain` hardcodes `now = int(time.time())` with no parameter
-to override it, so this cannot be done honestly today.
+`render.yaml` is already written for **web + vi + worker + Postgres**. Two things are needed:
 
-Our service therefore returns the real verdict **at `now`** plus
-`at_time_not_honoured: true` and the reason, rather than fabricating an as-of answer — see
-`docs/DECISIONS.md` D-009. We would rather ship a flagged gap than an unverifiable claim in a packet
-we file with PayPal.
+- A Render account with credits (**preferred** — the blueprint is written for it and the blueprint is
+  itself a prize track), **or** explicit approval to use Vercel or Fly instead.
+- **Billing approval for the paid Postgres.** The free tier expires and takes the demo with it; the
+  judging window runs to **15 Dec 2026**, so the database has to survive at least that long.
 
-**What to ask for** (Discord / an issue on
-<https://github.com/agent-intent/verifiable-intent>):
+**On the URL:** it must not collide with `countersign.vercel.app`, which is **an unrelated legal-drafting
+product** (verified: HTTP 200, _"Countersign: the tool drafts. A human with a license signs."_). Use
+something like `countersign-pay.onrender.com`, and put **"Countersign for PayPal agent payments"** in the
+page title so a judge searching the name lands on us rather than on them.
 
-> `verify_chain` needs an optional `at_time: int | None = None` parameter that replaces
-> `now = int(time.time())` when computing `exp` / `iat` validity, passed through to
-> `_is_expired` and `_is_future_dated`. Without it a signed chain cannot be verified as of a past
-> moment, which blocks dispute evidence for mandates that expired after the purchase.
+While you are here: the **Bryntum** trial licence is only needed if the disputes timeline ships
+(P1). Skip it unless that work starts — it must not lapse during 2–15 Dec if it is used at all.
 
-**Interim behaviour if upstream says no or does not respond:** keep the flag, show it in the S-18
-Defender workspace as "verified now; as-of-capture verification unavailable with the pinned library",
-and say so in the README's honest-limits section. No code change needed — only copy.
+**Acceptance:** `curl https://<our-url>/status` returns all-green from outside, and a cold start is under
+60 s or the service is kept warm.
 
 ---
 
-## H-09 — PayPal dispute-simulator scopes + buyer consent (blocks WP-06s C1, WP-15e)
+## ☐ 6. One manual PayPal buyer login, if 2FA or a captcha blocks Playwright
 
-**Blocks:** `POST /v1/customer/disputes` (the buyer-dispute simulator) and `change-reason`, i.e.
-week-1 check C1 and the Defender's sandbox demo path. Everything else in `packages/paypal` is verified
-against PayPal's published OpenAPI; only these two need a human at the PayPal dashboard.
+**Blocks:** the Vault onboarding E2E (P0-3) and the Judge Mode purchase runs (P0-10).
 
-From the PayPal account manager, on the `countersign-sandbox` REST app (H-01 step 2):
+Sandbox buyer logins are usually automatable, but PayPal sometimes interposes a captcha or an OTP. If the
+Playwright run stalls on the login popup, this is a **10-minute pairing session** — you log in once by
+hand, we keep the browser profile, and the automation resumes from an authenticated session.
 
-1. Enable the **Disputes** product and grant two scopes. Both are required and neither is
-   self-served:
-   - `https://uri.paypal.com/services/disputes/create` (`DISPUTE_CREATE`)
-   - `https://uri.paypal.com/services/disputes/update-buyer` (`UPDATE_BUYER`)
-2. Complete one interactive **"Log in with PayPal"** consent flow with the sandbox buyer
-   (`PAYPAL_BUYER_EMAIL`). The simulator asserts the buyer with an _unsigned_ `PayPal-Auth-Assertion`,
-   but the consent step still has to happen once by hand — a script cannot skip it.
-3. Note the **merchant id** of the Business account (Dashboard → account details) and the
-   **seller-side transaction id** from the business account's activity. Both are now required inputs
-   to `sandbox.processChargeback` (`merchant_id`, `transaction.id_enc`); the client cannot infer either.
-4. Note the **buyer-side transaction id** for the same capture. `POST /v1/customer/disputes` takes
-   `disputed_transactions[].buyer_transaction_id`, which is the id from the _buyer's_ view of the
-   transaction, not the merchant's capture id. A capture id alone cannot simulate a dispute.
+**This is conditional.** Do not do it pre-emptively; wait until a run actually blocks.
 
-**Then give an agent** (in a git-ignored `.env.local`, never a tracked file):
-
-```
-PAYPAL_MERCHANT_ID=<9-…>
-PAYPAL_TEST_BUYER_TRANSACTION_ID=<id from the buyer's activity>
-PAYPAL_DISPUTE_CREATE_SCOPE_CONFIRMED=true
-PAYPAL_DISPUTE_UPDATE_BUYER_SCOPE_CONFIRMED=true
-PAYPAL_BUYER_CONSENT_DONE=true
-```
+**Acceptance:** none needed — it is a fallback, and the honest state is "not required yet".
 
 ---
 
-## H-10 — Ask PayPal: which `PayPal-Request-Id` length is actually enforced?
+## ☐ 7. A YouTube channel for a Public upload, and a decision on narration
 
-**Blocks:** nothing today. Becomes a double-capture bug the moment PayPal enforces it.
-**Needed by:** before the live demo (spec §19).
+**Blocks:** P0-13, and the Devpost video field.
 
-PayPal contradicts itself and only a probe or an answer settles it:
+- A YouTube account where the demo can be uploaded as **Public** (unlisted does not satisfy the rules).
+- **Your voice**, recorded from the script — or explicit approval for a TTS voice. Your call, and it is
+  the difference between a video that sounds like a person and one that does not.
 
-- the OpenAPI (`components.parameters.paypal_request_id`) declares **`maxLength: 10000`**;
-- <https://developer.paypal.com/api/rest/reference/idempotency> says _"PayPal recommends that you use
-  the UUID standard … because it meets the **38 single-byte character limit**."_
+The script is in the brief (P0-13): problem → passkey-signed intent → agent buys via MCP with a real
+capture → injection BLOCKED → revoke voids an authorization → dispute filed and evidenced → public
+verifier QR → honest refund → Judge Mode. Target **2:45**, hard cap **2:55**.
 
-Our worst case is **55 characters** (`cs:{authId}:cap:{shipmentId}`), and **four of our five** formats
-already exceed 38 — not just the capture one. `captureRequestId` is the one to look at first because
-its long slots are PayPal's own 17-character authorization and capture ids, so it cannot be shortened
-the way our ULID slots could. Spec §8.6 fixes the four formats, so changing one is a spec-level
-decision (record it in `docs/DECISIONS.md`).
-
-**Question to paste** (<https://developer.paypal.com/support> or
-<https://forums.developer.paypal.com/>):
-
-> For the `PayPal-Request-Id` header, is the enforced maximum length **38 characters** (as the
-> idempotency reference page states) or **10 000** (as `maxLength` in the API reference schema)? Do
-> non-UUID values longer than 38 characters get rejected? Is the limit per API or global?
-
-**Interim behaviour if PayPal does not answer:** `REQUEST_ID_MAX_CHARS = 255` remains _our own_ budget
-and is labelled as such. The C-probe settles it empirically in one experiment — send 38, 39 and 10 001
-characters to `POST /v2/payments/authorizations/{id}/capture` and record which are accepted.
-`packages/paypal/IDEMPOTENCY.md` → "Header length" has the recipe.
+**Acceptance:** the video is < 3:00, uploaded Public, and its link is in the README.
 
 ---
 
-## Not blocked, tracking anyway
+## How these were verified
 
-- **`domains[]` for `getClientToken`** needs the deployed Render origins, so it depends on H-03.
-- **`RISK.DISPUTE.CREATED`** is a real documented PayPal event worth knowing about: it is the earliest
-  signal that a dispute exists, which would give the Defender lead time instead of waiting for the
-  2-minute dispute reconciler. Not currently subscribed (spec §8.12).
+`docs/review/REVERIFY.md` re-checks every judge finding with a command or a file citation:
+`node scripts/reverify-findings.mjs`. The two that shape this list most:
 
-- Vault "Save without purchase" JS SDK v6 needs a real browser popup (Playwright, Chromium) — an
-  agent drives it, but the sandbox buyer login may need your 2FA (see H-07).
-- The demo video (spec §19) is recorded by a human; WP-22 produces the shot list and captions.
+- **F1** — the repo really is private. `gh repo view` → `visibility=PRIVATE`, `homepageUrl=""`.
+- **F2** — the PayPal client declares **33 endpoints** (`/v2/checkout/orders`, captures, refunds,
+  disputes, webhooks) and **zero of them has ever been called**. `packages/paypal/test/fixtures/README.md`
+  says "zero real captures" in its first line. Item 2 is what changes that sentence.
