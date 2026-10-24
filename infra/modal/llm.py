@@ -76,12 +76,12 @@ app = modal.App(APP_NAME)
 hf_cache = modal.Volume.from_name("countersign-hf-cache", create_if_missing=True)
 
 vllm_image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .pip_install(
-        f"vllm=={VLLM_VERSION}",
-        "transformers",
-        "huggingface_hub[hf_transfer]",
-    )
+    # The official vLLM image, not a pip install. `pip install vllm==0.6.6` resolves to torch 2.5.1
+    # plus ~2.5 GB of CUDA wheels and takes a five-minute solve every time the image is rebuilt;
+    # PayPal-speed iteration needs the image that already contains them. `.entrypoint([])` clears the
+    # image's own CMD so the `serve()` function below starts the server itself.
+    modal.Image.from_registry(f"vllm/vllm-openai:v{VLLM_VERSION}", add_python="3.12")
+    .entrypoint([])
     .env(
         {
             # Parallel weight downloads. Has no effect on serving, only on the first start.
