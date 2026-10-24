@@ -1,8 +1,9 @@
 # CI failures on `main`, diagnosed 25 October 2026
 
 `main` was red for its entire life and the reports did not say why. Three separate causes, in the order
-they were found. Two are fixed; **three remain open** and are named precisely below so the next person
-does not have to rediscover them.
+they were found, plus the edge-case gate. **All are fixed**; the fixes are named below so the next
+person does not have to rediscover them. (`fix/p0-12-ci-green`; see
+`docs/verification/p0-12-ci-green.md`.)
 
 ## Fixed — the VI pin gate could never pass
 
@@ -43,7 +44,7 @@ gates now actually execute.
 **This is why the other two went unnoticed.** A repository whose every job dies in setup reports the same
 red X for a passing suite and a broken one.
 
-## Open — `verifier/test/qa4-checkout-parity.test.ts`, 4 failures
+## Fixed — `verifier/test/qa4-checkout-parity.test.ts`, 4 failures
 
 ```
 AssertionError: expected -1 to be +0        ← verify.py exited -1, not 0
@@ -57,7 +58,12 @@ is, and guessing would replace one wrong answer with another.
 
 Note this is the `EC-PRICE-1 / AT-M18.1` evidence, so it is a §12 acceptance test, not a nice-to-have.
 
-## Open — `defender/test/filer.test.ts`, 5 failures, all in _"the posture gate: the source-scan half"_
+**Cause, found:** neither. The interpreter was `uv`, and `test-node` never installed it.
+`execFileSync` threw `ENOENT`, `e.status` was `null`, and `e.status ?? -1` reported that as `-1` with
+empty stdout. Fixed by installing uv (0.12.22) and syncing `apps/vi` in `test-node`; the test helper
+now throws with the spawn error instead of returning a verdict-shaped `-1`.
+
+## Fixed — `defender/test/filer.test.ts`, 5 failures, all in _"the posture gate: the source-scan half"_
 
 ```
 provideEvidence is called in exactly one place in src/, and it is behind a permit
@@ -75,10 +81,22 @@ success without exercising what it claims to.
 **A source-scan gate that passes on one platform and fails on another is not a gate.** Worth fixing by
 making the file discovery explicit rather than by adjusting the assertion.
 
-## Open — `edge-case ledger is complete`
+**Cause, confirmed from the run log:** `new URL('../src/', import.meta.url).pathname.replace(/^\//, '')`.
+On Windows the pathname is `/C:/…` and the strip leaves a valid absolute path; on Linux it is
+`/home/runner/…` and the strip leaves the relative path `home/runner/…`, so every scan died with
+`ENOENT: scandir 'home/runner/work/countersign/countersign/packages/defender/src/'`. Fixed with
+`fileURLToPath` and an explicit recursive `readdirSync` walk; no expected value changed.
+
+## Fixed — `edge-case ledger is complete`
 
 ```
 FAIL  19 case(s) have no referencing test and are not marked blocked
 ```
 
 By design: this is WP-21's acceptance criterion and it is not met. See `docs/EDGE_CASES.md`.
+
+**Fixed:** `pnpm test:ec` exits 0 — 105/109 cases have a referencing test, 2 are dropped as out of scope
+by the spec itself (EC-PRICE-3, EC-FAM-3) and 2 are blocked with the blocker named (EC-ENV-3, EC-LLM-4).
+15 of the 19 gained real tests; the `wip` rows carry a note saying which half is missing. Executing the
+two database cases against a real Postgres immediately found four `Date`-in-raw-`sql` runtime failures
+and a string/BigInt mismatch in money readers — see `docs/verification/p0-12-ci-green.md`.

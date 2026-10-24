@@ -1580,3 +1580,24 @@ that â€” it reorders work toward a runnable product and adds requirements the bl
 
 **Evidence:** `FIX_PROMPT.md` Â§0 rule 8; `docs/review/VERDICT.md`; `docs/review/REVERIFY.md` (F8 measured
 non-determinism at 9/10 signable, 1/10 question, over ten runs of one sentence).
+
+---
+
+## D-055 - The job that owns a database runs the database tests; the node job installs its own interpreter
+
+**Date:** 2026-10-25
+**Decision:** `test-node` installs uv (`astral-sh/setup-uv@v5`, pinned to the same 0.12.22 as
+`test-python`) and syncs `apps/vi` before `pnpm test:ci`, because
+`packages/verifier/test/qa4-checkout-parity.test.ts` — EC-PRICE-1 / AT-M18.1, a §12 acceptance test —
+executes the generated `verify.py` through `uv run --project apps/vi`. `db-migrations` runs
+`pnpm --filter @countersign/db exec vitest run` after migrating and seeding, because the package's
+live suites skip without `DATABASE_URL` and that is the only job with a database.
+**Reason:** Both checks existed and neither could ever run. The parity test read `-1` with empty
+stdout because `execFileSync` threw `ENOENT` and `e.status ?? -1` turned "no interpreter" into a
+verdict (`docs/CI-FAILURES.md`); the live suites' own headers say the CI job with a database "should
+run them" and no job did. Fixing the prerequisite rather than relaxing the assertion is the point:
+the moment the db suite executed for real it found four `Date`-in-raw-`sql` runtime failures and a
+string/BigInt mismatch in money readers that unit tests, which inject stores that already return
+BigInts, could not see.
+**Evidence:** `.github/workflows/ci.yml` (both jobs); `packages/db/src/repos/{disputes,budget,orders}.ts`;
+`packages/db/test/repos.edge-cases.live.test.ts`; `docs/verification/p0-12-ci-green.md`.
