@@ -74,3 +74,5 @@ Thumbs.db
 !apps/web/public/**/*.svg
 coverage-final.json
 tsconfig.tsbuildinfo
+# Scratch arguments for scripts/paypal-mcp.mjs (the @file form avoids PowerShell quote stripping).
+.mcp-args/
