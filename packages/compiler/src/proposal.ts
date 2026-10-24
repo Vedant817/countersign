@@ -38,7 +38,7 @@ import {
 } from '@countersign/core'
 import { z } from 'zod'
 
-import { mentionsRecurrence } from './literal'
+import { frequencyInText, mentionsRecurrence } from './literal'
 import {
   isoDateSchema,
   frequencySchema,
@@ -490,6 +490,33 @@ export function localiseProposal(p: LlmProposal, ctx: LocaliseContext): Result<L
       ),
     )
   }
+
+  /*
+   * `mentionsRecurrence` is a boolean over *any* recurrence word, so on its own it lets a proposal of
+   * `WEEK` through for a request that says "$40 a month" — the text does mention a recurrence word.
+   * The cadence has to be checked against the words separately, and refused rather than adjusted when
+   * it does not appear: clamping a cap reduces authority, but accepting a frequency the buyer did not
+   * write increases it. Found by the live eval, which surfaced it only after an unrelated refusal was
+   * fixed — a green response carrying four times the authorised spend is a worse failure than the red
+   * one it replaced.
+   */
+  for (const [field, proposed] of [
+    ['recurrence', p.recurrence?.frequency],
+    ['agent_recurrence', p.agentRecurrence?.frequency],
+  ] as const) {
+    if (proposed === undefined) continue
+    if (!frequencyInText(ctx.text, proposed)) {
+      return err(
+        proposalDefect(
+          `The answer proposes a "${proposed}" cadence, but the request does not ask for that ` +
+            'schedule. A recurrence can only carry a frequency you actually wrote, because a different ' +
+            'one changes how much may be spent over a period.',
+          { field: `${field}.frequency`, proposed, ec: 'AT-M8.5' },
+        ),
+      )
+    }
+  }
+
   if (p.recurrence !== undefined) {
     constraints.push({
       type: 'mandate.payment.recurrence',

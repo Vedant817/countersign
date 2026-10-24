@@ -253,3 +253,49 @@ const RECURRENCE_WORDS_RE =
 export function mentionsRecurrence(text: string): boolean {
   return RECURRENCE_WORDS_RE.test(text)
 }
+
+/**
+ * Does the text support **this particular** frequency?
+ *
+ * `mentionsRecurrence` answers "may there be a recurrence at all", and that is the only question it
+ * can answer — it is a boolean over any recurrence word. Which means a proposal of `WEEK` for
+ * *"$40 a month"* passes it, because the text does mention a recurrence word. The mandate then
+ * authorises four times the spend the buyer wrote, and every green check afterwards is about a
+ * different number.
+ *
+ * Found in the live eval: the compiler refused `"subscribe to a coffee delivery for $40 a month"`
+ * for an unrelated reason (a start date in the past), and fixing that refusal exposed the frequency
+ * — a *worse* failure than the one it replaced, because a refusal is safe and a wrong frequency is
+ * not.
+ *
+ * **Conservative by construction.** An unknown frequency, or one with no word support, returns
+ * `false`; the caller refuses rather than signing a cadence the buyer did not write. That is the
+ * opposite direction from a clamp, and deliberately: clamping a *cap* reduces authority, whereas
+ * accepting a *frequency* the buyer did not write increases it.
+ *
+ * `TWMN`, `TOMN`, `FOMN` and `TYEA` are the "every N" cadences. They are matched by their explicit
+ * forms only (`every two months`), never by the bare noun, because "every two months" is a different
+ * authority from "monthly" and the whole point of this function is not to conflate them.
+ */
+const FREQUENCY_WORDS: Readonly<Record<string, readonly RegExp[]>> = {
+  INDA: [/\beach\s+time\b/iu, /\bper\s+purchase\b/iu, /\bevery\s+purchase\b/iu],
+  DAIL: [/\bdaily\b/iu, /\bevery\s+day\b/iu, /\ba\s+day\b/iu, /\bper\s+day\b/iu],
+  WEEK: [/\bweekly\b/iu, /\bevery\s+week\b/iu, /\ba\s+week\b/iu, /\bper\s+week\b/iu],
+  TWOK: [/\bfortnight/iu, /\bbi-?weekly\b/iu, /\bevery\s+(two|2)\s+weeks?\b/iu],
+  TWMN: [/\bevery\s+(two|2)\s+months?\b/iu, /\bbi-?monthly\b/iu],
+  MNTH: [/\bmonthly\b/iu, /\bevery\s+month\b/iu, /\ba\s+month\b/iu, /\bper\s+month\b/iu],
+  TOMN: [/\bevery\s+(three|3)\s+months?\b/iu, /\bquarterly\b/iu],
+  QUTR: [/\bquarterly\b/iu, /\bevery\s+quarter\b/iu, /\ba\s+quarter\b/iu, /\bper\s+quarter\b/iu],
+  FOMN: [/\bevery\s+(four|4)\s+months?\b/iu],
+  SEMI: [/\bsemi-?annual/iu, /\bhalf-?yearly\b/iu, /\bevery\s+six\s+months\b/iu],
+  YEAR: [/\byearly\b/iu, /\bannually\b/iu, /\bannual\b/iu, /\bevery\s+year\b/iu, /\ba\s+year\b/iu],
+  TYEA: [/\bevery\s+(two|2)\s+years?\b/iu, /\bbi-?annual\b/iu],
+}
+
+export function frequencyInText(text: string, frequency: string): boolean {
+  const patterns = FREQUENCY_WORDS[frequency]
+  // Unknown cadence ⇒ not supported. A `true` here would be this function claiming a buyer wrote
+  // something it cannot read.
+  if (patterns === undefined) return false
+  return patterns.some((re) => re.test(text))
+}
