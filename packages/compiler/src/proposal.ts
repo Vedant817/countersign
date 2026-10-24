@@ -353,9 +353,39 @@ export function localiseProposal(p: LlmProposal, ctx: LocaliseContext): Result<L
   const bMin = budgetMinRaw.value
   const proposedBudgetMax = budgetMaxRaw.value ?? proposedMax
 
-  // AT-M8.5: pull every cap down to the buyer's own words before anything is built from it.
-  const max = proposedMax === null ? null : clampToLiteral(proposedMax, ctx.literalCap)
-  const bMax = proposedBudgetMax === null ? null : clampToLiteral(proposedBudgetMax, ctx.literalCap)
+  /*
+   * AT-M8.5: pull every cap down to the buyer's own words before anything is built from it.
+   *
+   * ## When there is nothing to clamp to
+   *
+   * If the text contains no number at all there is no ceiling, and the options are not symmetric:
+   *
+   *  - **Emit the model's figure** → a limit in the read-back the buyer never wrote. That is the hole
+   *    AT-M8.5 exists to close, and it is the one the old `validateConstraints` refusal was avoiding.
+   *  - **Refuse** → sends somebody who wrote *"under fifty dollars"* to the manual form because the
+   *    compiler reads digits only. `proposal.ts` argues against exactly this above, `literal.ts`
+   *    promises "the user gets a question, not a silent rounding", and a live eval produced a 400
+   *    while the same sentence with a digit produced a 200.
+   *  - **Drop the cap and ask.** The third option, the documented one, and the one this implements:
+   *    `compile`'s existing ambiguity path already asks for an amount whenever a mandate has none, so
+   *    dropping the unsupported figure reuses a path that was always there.
+   *
+   * The refusal was not wrong about the danger; it was wrong about the remedy.
+   */
+  const noCeiling = ctx.literalCap === null
+  const max = noCeiling || proposedMax === null ? null : clampToLiteral(proposedMax, ctx.literalCap)
+  const bMax =
+    noCeiling || proposedBudgetMax === null
+      ? null
+      : clampToLiteral(proposedBudgetMax, ctx.literalCap)
+
+  if (noCeiling && (proposedMax !== null || proposedBudgetMax !== null)) {
+    assumptions.push(
+      'Your request did not contain a number, so the amount suggested for it was not used. ' +
+        'A limit only ever comes from words you wrote, and you will be asked for this one.',
+    )
+  }
+
   if (proposedMax !== null && max !== null && proposedMax > max) {
     assumptions.push(
       'The limit on a single payment was lowered to the largest amount you wrote. Something in the request ' +
