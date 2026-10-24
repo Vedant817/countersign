@@ -94,14 +94,14 @@ describe('persistent merchant catalog', () => {
   it('round-trips decimal string JSON and reloads after losing all process state', async () => {
     let catalog = (await import('./catalog')).shopCatalog
     expect(await catalog.createCheckoutSession(input)).toEqual(ok({ id }))
-    expect(persisted?.cart).toEqual({
-      lines: [{ ...input.cart.lines[0], unit_minor: '9007199254740993' }],
-    })
     // A fresh process has no global store or module instance. The repository survives independently.
     Reflect.deleteProperty(globalThis, '__countersignShopState')
     vi.resetModules()
     catalog = (await import('./catalog')).shopCatalog
     expect(await catalog.requireCheckoutSession(id)).toEqual(ok({ ...input, status: 'OPEN' }))
+    expect(persisted?.cart).toEqual({
+      lines: [{ ...input.cart.lines[0], unit_minor: '9007199254740993' }],
+    })
   })
   it('does not overwrite duplicate checkouts or hide repository failures', async () => {
     const { shopCatalog } = await import('./catalog')
