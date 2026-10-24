@@ -6,7 +6,6 @@ import {
   AGENT_ID,
   DEVICE_ID,
   ITEM,
-  MERCHANT,
   MISSING_CONFIG,
   USER_ID,
   WALLET,
@@ -18,6 +17,7 @@ import {
   readServiceConfig,
   signingLabAllowed,
 } from '../vi'
+import { merchantIdentity } from '@/lib/merchant'
 
 const requestSchema = z.strictObject({
   deviceKid: z.string().min(1).max(256),
@@ -65,13 +65,19 @@ export async function POST(request: Request): Promise<Response> {
     return failureResponse(issued.error.code, issued.error.message)
   }
 
+  // The mandate names the merchant this deployment actually sells as. A sample mandate that allowed a
+  // hardcoded merchant would be a mandate for a store that does not exist — and, worse, one whose
+  // name disagreed with the checkout JWT the shop signs.
+  const merchant = merchantIdentity()
+  if (!merchant.ok) return failureResponse(merchant.error.code, merchant.error.message)
+
   const prepared = await client.prepareL2({
     l1: issued.value.l1,
     device_kid: parsed.data.deviceKid,
     agent_public_jwk: agentKey.data,
     agent_kid: minted.value.kid,
     checkout_constraints: [
-      { type: 'mandate.checkout.allowed_merchants', allowed: [MERCHANT] },
+      { type: 'mandate.checkout.allowed_merchants', allowed: [merchant.value] },
       {
         type: 'mandate.checkout.line_items',
         items: [{ id: ITEM.id, acceptable_items: [ITEM], quantity: 1 }],
@@ -82,7 +88,7 @@ export async function POST(request: Request): Promise<Response> {
       { type: 'mandate.payment.amount_range', currency: 'USD', min: 0, max: 20_000 },
       { type: 'mandate.payment.budget', currency: 'USD', max: 20_000 },
     ],
-    merchants: [MERCHANT],
+    merchants: [merchant.value],
     acceptable_items: [ITEM],
     payment_instrument: {
       type: 'paypal_vault',

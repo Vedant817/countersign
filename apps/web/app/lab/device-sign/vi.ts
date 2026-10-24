@@ -6,12 +6,10 @@ export const AGENT_ID = 'agt_lab_device_sign'
 export const DEVICE_ID = 'dev_lab_device_sign'
 export const AGENT_AUDIENCE = 'https://agent.countersign.test'
 
-export const MERCHANT = {
-  id: 'mrc_northwind',
-  name: 'Northwind Outfitters',
-  website: 'https://northwind.countersign.test',
-} as const
-
+// The merchant identity moved to `apps/web/lib/merchant.ts`. It used to live here, next to the sample
+// wallet, and the production checkout route imported it from this file — a demo harness as the source
+// of truth for the merchant named inside a merchant-signed JWT. The lab now reads the same
+// configuration the shop does, so a mandate minted here allows the store that actually exists.
 export const ITEM = { id: 'SKU-TRAIL-42', title: 'Trail Runner' } as const
 
 export const WALLET = {

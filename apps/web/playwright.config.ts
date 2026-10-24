@@ -75,6 +75,9 @@ export default defineConfig({
       env: {
         APP_ENV: 'local',
         DATABASE_URL: localDatabase.href,
+        MERCHANT_ID: 'mrc_northwind',
+        MERCHANT_NAME: 'Northwind Outfitters',
+        MERCHANT_WEBSITE: 'https://northwind.countersign.test',
         VI_SERVICE_URL: `http://127.0.0.1:${viPort}`,
         SIGNING_LAB_ENABLED: 'true',
         VI_SERVICE_TOKEN: viServiceToken,

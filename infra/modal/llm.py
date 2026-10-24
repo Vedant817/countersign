@@ -76,21 +76,22 @@ app = modal.App(APP_NAME)
 hf_cache = modal.Volume.from_name("countersign-hf-cache", create_if_missing=True)
 
 vllm_image = (
-    # The official vLLM image, not a pip install. `pip install vllm==0.6.6` resolves to torch 2.5.1
-    # plus ~2.5 GB of CUDA wheels and takes a five-minute solve every time the image is rebuilt;
-    # this image already contains them.
+    # `debian_slim` + pip, **not** `from_registry("vllm/vllm-openai")`.
     #
-    # **Deliberately no `add_python=`.**
+    # Both alternatives fail, and the reasons are a matched pair worth recording:
     #
-    # Passing `add_python="3.12"` makes Modal install a *second* interpreter into `/usr/local`, which
-    # then shadows the image's own on `PATH`. The image's Python is the one with vLLM in its
-    # site-packages, so the server died with `ModuleNotFoundError: No module named 'vllm'` — a
-    # failure that reads like a missing dependency and is really a `PATH` collision. Leaving it unset
-    # makes Modal use the interpreter the image ships.
+    #  * `from_registry(..., add_python="3.12")` makes Modal install a second interpreter into
+    #    `/usr/local` which shadows the image's own on `PATH`. Only the image's Python has vLLM in its
+    #    site-packages, so the server died with `ModuleNotFoundError: No module named 'vllm'`.
+    #  * `from_registry(...)` **without** `add_python` fails earlier: Modal's bootstrap runs
+    #    `python -m pip install ...` and the vLLM image ships only `python3`
+    #    (`/bin/sh: 1: python: not found`).
     #
-    # `.entrypoint([])` clears the image's own CMD so `serve()` starts the server itself.
-    modal.Image.from_registry(f"vllm/vllm-openai:v{VLLM_VERSION}")
-    .entrypoint([])
+    # So the image is built from Debian and the dependency is installed explicitly. The resolve is slow
+    # (~2.5 GB of CUDA wheels, several minutes) but it happens once and is cached per layer, and it is
+    # the only variant that actually starts.
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install(f"vllm=={VLLM_VERSION}")
     .env(
         {
             # Parallel weight downloads. Has no effect on serving, only on the first start.

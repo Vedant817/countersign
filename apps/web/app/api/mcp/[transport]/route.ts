@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { csError, systemClock, type CsError, type Result } from '@countersign/core'
 import { createCheckout, getProduct, searchProducts } from '@countersign/gate'
 
-import { MERCHANT } from '../../../lab/device-sign/vi'
+import { merchantIdentity } from '@/lib/merchant'
 import { shopCatalog } from '../../../shop/catalog'
 import { shopCheckout } from '../../../shop/checkout-store'
 import { MCP_READ_SCOPE, MCP_CHECKOUT_SCOPE, verifyAgentToken } from '@/lib/mcp-token'
@@ -179,13 +179,17 @@ function registerMerchantTools(
     async ({ lines, ship_to_country }, ctx) => {
       const denied = scopeError(ctx.http?.authInfo, MCP_CHECKOUT_SCOPE)
       if (denied !== undefined) return toolError(denied)
+      // The merchant identity is configuration, not a constant — see `lib/merchant.ts`. A tool that
+      // signed a hardcoded merchant name would be the D-040 bug reachable over MCP.
+      const merchant = merchantIdentity()
+      if (!merchant.ok) return toolError(merchant.error)
       return fromResult(
         await createCheckout(
           { catalog: shopCatalog, checkout: shopCheckout },
           {
-            merchantId: MERCHANT.id,
-            merchantName: MERCHANT.name,
-            merchantWebsite: MERCHANT.website,
+            merchantId: merchant.value.id,
+            merchantName: merchant.value.name,
+            merchantWebsite: merchant.value.website,
             lines,
             shipToCountry: ship_to_country,
             nowSec: systemClock.nowSec(),

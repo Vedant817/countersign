@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server'
 
+import { merchantIdentity } from '@/lib/merchant'
 import { createCheckout } from '@countersign/gate'
 import { csError } from '@countersign/core'
 import { DELIVERY_COUNTRIES } from '@/lib/delivery'
-
-import { MERCHANT } from '../../lab/device-sign/vi'
 import { shopCatalog } from '../catalog'
 import { shopCheckout } from '../checkout-store'
 
@@ -81,12 +80,24 @@ export async function POST(request: Request): Promise<Response> {
       303,
     )
   }
+  const merchant = merchantIdentity()
+  if (!merchant.ok) {
+    // Configuration, not the buyer's fault: a 503 with a sentence beats signing a fabricated merchant
+    // name into a checkout JWT (D-040, D-053).
+    return Response.json(
+      { error: { code: merchant.error.code, message: merchant.error.message } },
+      {
+        status: 503,
+      },
+    )
+  }
+
   const result = await createCheckout(
     { catalog: shopCatalog, checkout: shopCheckout },
     {
-      merchantId: MERCHANT.id,
-      merchantName: MERCHANT.name,
-      merchantWebsite: MERCHANT.website,
+      merchantId: merchant.value.id,
+      merchantName: merchant.value.name,
+      merchantWebsite: merchant.value.website,
       lines: [{ sku, qty }],
       shipToCountry,
       nowSec: Math.floor(Date.now() / 1000),

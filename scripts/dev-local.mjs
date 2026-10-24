@@ -41,6 +41,11 @@ const environment = {
   // the 404 EC-DSP-9 asks for. A launcher that starts a page it knows cannot serve is worse than one
   // that refuses.
   PUBLIC_BASE_URL: `http://localhost:${webPort}`,
+  // The merchant the local lab sells as, signed into every checkout JWT. Required with no default
+  // (`apps/web/lib/merchant.ts`): a defaulted merchant name is a fabricated value inside a signature.
+  MERCHANT_ID: 'mrc_northwind',
+  MERCHANT_NAME: 'Northwind Outfitters',
+  MERCHANT_WEBSITE: 'https://northwind.countersign.test',
   VI_SERVICE_URL: `http://127.0.0.1:${viPort}`,
   VI_SERVICE_TOKEN: randomBytes(32).toString('hex'),
   VI_KEK: randomBytes(32).toString('base64'),
