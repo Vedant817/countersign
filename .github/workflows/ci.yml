@@ -19,8 +19,22 @@ permissions:
   contents: read
 
 env:
-  # Node 24 LTS (spec §4). pnpm 12.8.1 is pinned via packageManager; corepack reads it from there,
-  # so this is the only place the pnpm version is declared for CI.
+  # Node 24 LTS (spec §4). The pnpm version is declared ONCE, in package.json's `packageManager` field;
+  # `pnpm/action-setup` with no `version` argument reads it from there.
+  #
+  # ## Why not `corepack enable`
+  #
+  # This used to be `corepack enable`, which is the obvious tool and does not work in that position.
+  # The ordering that matters belongs to `setup-node`: with `cache: pnpm` it runs `pnpm store path` to
+  # locate the cache directory, and it does so **during its own setup step**. So pnpm must exist
+  # *before* `actions/setup-node` — and `corepack enable` was placed *after* it, in all four jobs.
+  #
+  # Every job therefore died at `Run actions/setup-node@v5` with
+  # `Unable to locate executable file: pnpm`, before a single test ran. The reports read like process
+  # failures; the cause was that the tool which reports on the build had never been installed.
+  #
+  # Moving `corepack enable` earlier is not the fix either: `setup-node` switches the Node
+  # installation, and the shims corepack wrote into the previous one's bin directory go with it.
   NODE_VERSION: '24'
 
 jobs:
@@ -59,11 +73,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - name: typecheck
         run: pnpm typecheck
@@ -92,11 +106,11 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - name: unit and integration tests
         # `test:ci`, not `vitest` — deliberate, and it was a real bug once already.
@@ -197,11 +211,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - name: build
         run: pnpm build
@@ -259,11 +273,11 @@ jobs:
       DATABASE_URL: postgres://countersign:countersign@localhost:5432/countersign
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - run: corepack enable
       - run: pnpm install --frozen-lockfile
       - name: migrate
         run: pnpm db:migrate
