@@ -12,10 +12,19 @@
  * const mandate = result.value
  * ```
  *
+ * **The deterministic parser runs first (P0-7).** `parser.ts` reads money in every form the product
+ * promises, the currency, cadence, merchants and items from a catalog-built lexicon, and dates from the
+ * injected clock. A model is consulted **only** when the sentence states a cap and names no product the
+ * lexicon can match, and its answer is merged field by field with the parser winning every field that
+ * carries authority — a model value can neither raise nor narrow the cap the buyer wrote. `deps.llm` is
+ * optional: the common cases compile with no provider configured at all, which is what makes them
+ * byte-identical across runs (`packages/evals/src/determinism.ts`).
+ *
  * The model's output is never authoritative. It is parsed by zod, re-checked against the catalog, and
  * re-validated against the constraints' own invariants before it is returned (spec §8.0 rule 4). When the
- * model is unreachable the answer is `LLM_UNAVAILABLE` and nothing else — never a partly-filled mandate,
- * because a partly-filled mandate renders a confident read-back that is missing the limit (EC-LLM-1).
+ * model is unreachable **and it was needed**, the answer is `LLM_UNAVAILABLE` and nothing else — never a
+ * partly-filled mandate, because a partly-filled mandate renders a confident read-back that is missing the
+ * limit (EC-LLM-1).
  *
  * ## 2. `readBack` — the string the user signs
  *
