@@ -11,6 +11,24 @@
 [extend]
 useDefault = true
 
+# Historical WP-14 test vectors. New tests generate keys at runtime. Match both the exact
+# historical test path and the exact public dummy value; every other value stays scanned.
+[[allowlists]]
+description = "Historical merchant MCP route dummy signing key"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^apps/web/app/api/mcp/\[transport\]/route\.test\.ts$''']
+regexTarget = "secret"
+regexes = ['''^mcp-route-test-secret-0123456789abcdef$''']
+
+[[allowlists]]
+description = "Historical merchant MCP wrong-key test vector"
+targetRules = ["countersign-session-secret"]
+condition = "AND"
+paths = ['''^apps/web/lib/mcp-token\.test\.ts$''']
+regexTarget = "secret"
+regexes = ['''^a-different-secret-that-is-long-enough-123456$''']
+
 [[allowlists]]
 description = "Non-credential strings that match a generic secret pattern"
 regexTarget = "match"

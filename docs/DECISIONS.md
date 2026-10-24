@@ -1373,3 +1373,49 @@ error semantics we must handle explicitly anyway - `NotAllowedError` means "decl
 **Evidence:** `apps/web/playwright.config.ts` starts Next on 3000 and uvicorn on 8000 with the
 `apps/vi/tests/conftest.py` credentials; `apps/web/tests/e2e/device-sign.spec.ts` covers AT-M5.1-4.
 `VI_SERVICE_TOKEN` never reaches the browser: prepare and finalize are server route handlers.
+
+## D-046 - The MCP server mounts mcp-handler in one Next route and drives the Gate world through a checkout-aware adapter
+
+**Date:** 2026-10-20
+**Decision:** `apps/web/app/api/mcp/[transport]/route.ts` mounts `createMcpHandler` (mcp-handler
+2.2.0) and exports the same handler as `GET` and `POST`. The library serves every request it receives
+and does not route on the pathname, so `[transport]` is only a mount point and the spec client's
+`/api/mcp/http` URL lands on the same handler. Auth is `withMcpAuth(handler, verify,
+{ required: true })`: a jose HS256 check against `SESSION_SECRET` (min 32 characters, as
+`packages/core/src/env.ts` requires) that demands a short-lived (15 minute) `agt_` subject with an
+`exp`, then returns `clientId`/`extra.agentId` from `sub`. Tool callbacks read `ctx.http?.authInfo`,
+never `ctx.authInfo`, and register `z.object({...})` schemas mirroring `listMcpTools()`.
+`search_products` and `get_product` read `shopCatalog`; `create_checkout` runs the M9 function over
+`{ catalog: shopCatalog, checkout: shopCheckout }`. `submit_checkout` is not a stub: it drives the
+real `evaluate` over `createInMemoryGateWorld`, seeded with the `SEED_PRODUCTS` rows mapped exactly
+as `seed/run.ts` maps them (check 10 reads the same stock) and, when `readServiceConfig()` returns a
+config, with `merchantKeys` from VI `GET /v1/jwks` via `merchantKeySetFromJwks`. The world's
+`checkout` dependency is overridden to resolve the real shop session by id
+(`shopCatalog.requireCheckoutSession`), because the world invents its own `ck_` ids. `attemptId` is
+`att_` plus SHA-256 of `${checkoutId}:${mandateId}`, so retries are idempotent and `get_order_status`
+can eventually read the same id. Until WP-11/H-01 supply `createOrder`, an ALLOW returns
+`CS_INTERNAL` rather than a fabricated order id, so `submit_checkout` is honestly BLOCKED and
+AT-M14.3 is proven on the BLOCKED path.
+**Reason:** mcp-handler already implements the transport, so a hand-rolled protocol layer would add
+surface without proving anything, and it makes the spec's fallback to a
+`@modelcontextprotocol/sdk` `McpServer` unnecessary. `withMcpAuth` is the library's own RFC 9728
+guard, so the 401 response and `WWW-Authenticate` metadata come from one place. Reusing the real
+Gate world (rather than a permissive fake) means the MCP server cannot allow what the Gate blocks:
+every `submit_checkout` runs all twelve checks. Copying the `run.ts` column mapping instead of
+adding a second mapper keeps check 10's stock read agreeing with the shop. `CS_INTERNAL` on ALLOW is
+the honest state until the orchestrator is connected - engineering rule 5 forbids faking PayPal, and I-1
+forbids inventing an order id.
+**Evidence:** `apps/web/app/api/mcp/[transport]/route.test.ts` lists the five tools, rejects a
+missing, forged or expired bearer (401/403), and drives `submit_checkout` through the real
+`evaluate` to a BLOCKED result with `reasons`. If a smoke test shows mcp-handler's web handler
+cannot serve Next's request object, the fallback is a `@modelcontextprotocol/sdk` `McpServer` in
+the same route, recorded as a new decision.
+
+**2026-10-24 verification update (IST):** MCP Inspector 2.12.0 CLI lists all five tools against
+the production Next server. The HTTP BLOCKED round-trip and missing/forged bearer checks pass;
+the route suite also rejects an expired bearer. The route's Gate world still contains seeded
+agent, mandate and budget state, and is not a durable production adapter. WP-14 remains in review;
+no live PayPal purchase or successful submission is claimed. Token issuance now returns
+`Result<string, CsError>` in accordance with §8.0; the checkout adapter serializes bigint units
+as decimal strings instead of casting them into JSON. Only HTTP handlers are exported from the
+Next route.

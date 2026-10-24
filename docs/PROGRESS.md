@@ -37,7 +37,7 @@ buildable now.
 | WP-11 | `packages/orders` — order orchestrator | C | 06, 10 | todo | | AT-M11 (H-01 for live) |
 | WP-12 | `packages/webhooks` + reconciler + worker | C | 06, 02 | done | `beb5f3d` | AT-M12 ✅ 154 · worker 116 |
 | WP-13 | `packages/agent` — shopping agent + injection defences | D | 09, 14, 04 | todo | | AT-M13 |
-| WP-14 | Merchant MCP server | D | 09 | todo | | AT-M14 |
+| WP-14 | Merchant MCP server | D | 09 | review | | AT-M14 local: Inspector 5 tools, 401, Gate BLOCKED round-trip; persistent purchase integration remains open |
 | WP-15a | Liability router (pure) | E | 01, 02 | done | `7b95e71` | AT-M15.1 ✅ 40/40 |
 | WP-15b | Evidence planner (reason → evidence enum) | E | 15a | done | `7b95e71` | plan tests per reason ✅ |
 | WP-15c | Drafter + citation checker | E | 15b | done | `1d465bc` | AT-M15.2 ✅ forged number fails |
