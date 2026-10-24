@@ -32,12 +32,12 @@ buildable now.
 | WP-06s | Sandbox scripts + week-1 checks C1, C2, C3(b) | C | 06 | blocked | | needs H-01, H-09, H-10 |
 | WP-07 | Vault onboarding + L1 issuance | C | 02, 05, 06 | blocked | | AT-M7 (H-01, WP-05) |
 | WP-08 | Intent compiler + deterministic read-back | D | 01, 02 | done | `80a9ff5` | AT-M8 ✅ 285 |
-| WP-09 | Catalog, checkout JWT, price lock, stock | D | 02, 04 | done | `27f3e12` | AT-M9 ✅ 34 (D-020) |
+| WP-09 | Catalog, checkout JWT, price lock, stock | D | 02, 04 | done | `27f3e12` | AT-M9 ✅ 34 (D-020); DB-backed since `4951202` (D-049), digital shipping waived in `14c6bec` (D-050) |
 | WP-10 | `packages/gate` + budget ledger | B | 02, 04, 09 | done | `27f3e12` | AT-M10 ✅ 162 |
 | WP-11 | `packages/orders` — order orchestrator | C | 06, 10 | wip | | AT-M11 (H-01 for live) · binder `e0fb068` |
 | WP-12 | `packages/webhooks` + reconciler + worker | C | 06, 02 | done | `beb5f3d` | AT-M12 ✅ 154 · worker 116 |
 | WP-13 | `packages/agent` — shopping agent + injection defences | D | 09, 14, 04 | todo | | AT-M13 |
-| WP-14 | Merchant MCP server | D | 09 | review | `cbdce9e` | Merged `ea2124d`; AT-M14 local: Inspector 5 tools, 401, Gate BLOCKED round-trip; persistent purchase integration remains open |
+| WP-14 | Merchant MCP server | D | 09 | review | `cbdce9e` | Merged `ea2124d`; boundary hardened `0fc383a`+`e446fbb` (D-048): 5 tools, per-tool signed scopes, 401 on missing/forged/expired/wrong-audience/read-only-for-checkout bearers, payment submission refused until a persisted runtime exists. AT-M14 purchase round-trip deliberately incomplete |
 | WP-15a | Liability router (pure) | E | 01, 02 | done | `7b95e71` | AT-M15.1 ✅ 40/40 |
 | WP-15b | Evidence planner (reason → evidence enum) | E | 15a | done | `7b95e71` | plan tests per reason ✅ |
 | WP-15c | Drafter + citation checker | E | 15b | done | `1d465bc` | AT-M15.2 ✅ forged number fails |
@@ -49,11 +49,11 @@ buildable now.
 | WP-17c | Shop UI (S-11…S-13) | D | 09 | done | `66d78bc` | E2E ✅ 3 |
 | WP-17d | Merchant UI (S-14…S-16, S-19) | E | 11, 10 | todo | | E2E |
 | WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | todo | | E2E + table fallback |
-| WP-17f | Landing, status, design polish | A | 17a–e | todo | | Lighthouse ≥ 90 a11y |
+| WP-17f | Landing, status, design polish | A | 17a–e | wip | `d0fe7ea` | Landing/nav/judge/status/`/regions` copy reworked, 360 px layout fixed, 14 E2E green; Lighthouse ≥ 90 a11y not yet measured |
 | WP-18 | Public verifier `/v/[packetId]` | B | 03, 15d | done | `774e8a4` | AT-M18 ✅ 226 |
 | WP-19 | Privacy, logging, audit, status | A | 02, 12 | todo | | AT-M19 |
 | WP-20 | Evals + Judge Mode | A | 11, 13, 15e | todo | | J1–J4 green ×20 |
-| WP-21 | Edge-case sweep: every §12 row tested | all | all | todo | | `pnpm test:ec` = 109/109 |
+| WP-21 | Edge-case sweep: every §12 row tested | all | all | todo | | `pnpm test:ec` = 109/109; currently **87/109 referenced, 22 unclaimed**, and 2 rows whose test exists but is still `todo` in the ledger (`EC-IDEM-4`, `EC-MER-1`) |
 | WP-22 | Docs, README, Devpost assets, video shot list | A | 20 | todo | | §19–§20 checklists |
 
 WP-15e is **not** blocked: its code and tests can be built against the PayPal client's verified
@@ -238,3 +238,35 @@ WP-06s and everything needing live sandbox is not started.
   checks. The normal app `/status` is **503** because Postgres, VI and PayPal are not configured;
   successful payment integration, persistent app adapters and unfinished screens remain open.
   See `docs/FINAL_REPORT.md` for the exact boundary of the evidence.
+
+- **2026-10-24 (IST)** — **Merged `wp/17f-user-journey-hardening` into `main` (`4809239`).** The branch
+  had accumulated three work packages that never reached `main` — WP-09 digital shipping (`14c6bec`),
+  WP-09 merchant persistence (`4951202`, `e9557bf`) and WP-14 MCP hardening (`0fc383a`, `e446fbb`,
+  `64bbe86`) — plus a user-journey repair pass (`c297511`), its integration fixes (`4446fac`) and the
+  local launcher and event research (`d0fe7ea`). Four decisions record what actually changed:
+  **D-048** the reachable MCP endpoint no longer composes the in-memory Gate world, so
+  `submit_checkout`/`get_order_status` refuse until a persisted tenant-bound runtime exists rather than
+  demonstrating a purchase against a test double; **D-049** the storefront requires `DATABASE_URL` and
+  seed browsing became an explicit non-production opt-in that never confers purchase authority;
+  **D-050** digital-only carts are never charged physical shipping, and a cart in a currency the store
+  has no physical rate for is refused rather than converted; **D-051** the device-signing lab requires
+  an explicit flag, a non-production environment, a loopback host and a same-origin request.
+  Gates at `d0fe7ea`, all green: typecheck, lint (money-discipline 120 files / 15 roots),
+  `format:check`, `secret-scan` (193 commits, no leaks), **91 files / 2,610 TypeScript tests**, build
+  (Next 16.3.8, 16 routes), **207 Python tests** with `ruff check` and `ruff format --check`, and
+  **14 Chromium E2E** tests against the running app, the real local VI service and a real seeded
+  PostgreSQL. The real-database run was not repository doubles: a quote created over HTTP was decoded
+  in a **fresh process** with the exact bigint cart, and a failed stock transaction rolled back in
+  PostgreSQL. The round-2 review's two findings are fixed and now regression-tested: `/status` no
+  longer overflows at 360 px and has shared navigation, and the pre-hydration countdown no longer
+  implies a mandate check that does not happen.
+- **2026-10-24 (IST)** — **The edge-case ledger was overstating itself again.** `pnpm test:ec` rejected
+  four references to **`EC-OPS-1`**, an id that exists nowhere in spec §12; the tests in
+  `packages/core/test/env.test.ts` were real env-schema hygiene tests wearing a catalogue id they had
+  not earned. Renamed to `env hygiene:` (the id is gone, the tests remain), and the generated
+  `docs/EDGE_CASES.md` was regenerated from the 2026-10-07 copy: **557 references, 87 of 109 cases
+  referenced**. What remains red is the honest remainder of WP-21 — **22 cases with no referencing
+  test**, of which the majority need a work package that is still `todo` (agent/injection EC-AGT/EC-FAM/
+  EC-MA/EC-LLM-4…5, live sandbox EC-ENV-2/3/EC-PP-3/4) rather than a test someone forgot to write. Two
+  further rows (`EC-IDEM-4`, `EC-MER-1`) have tests but are still `status: todo` in the ledger and need
+  confirming rather than labelling.

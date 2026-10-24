@@ -1441,3 +1441,74 @@ does not need to compensate for it. The remaining gaps are evidenced with file:l
 `docs/contract-issues.md`; `MerchantDeps` is only ever constructed in
 `packages/gate/test/merchant.test.ts`, and `DefenderStore` has only `createInMemoryDefenderWorld`
 (`packages/defender/src/ingest.ts:1580`).
+
+## D-048 - The reachable MCP endpoint refuses payment submission until a persisted runtime exists
+
+**Date:** 2026-10-24
+**Decision:** `/api/mcp/[transport]` no longer composes `createInMemoryGateWorld`. `submit_checkout` and
+`get_order_status` return a `CS_INTERNAL` tool error explaining that no authoritative persisted runtime
+is configured; `search_products`, `get_product` and `create_checkout` keep working. Every tool checks a
+signed, recognized scope (`merchant:read` vs `merchant:checkout`) before doing work, bearers are capped
+at 8 KiB, 900 s of lifetime and a 5 s future-issuance skew, and wire inputs are bounded per field.
+**Reason:** AT-M14 asks for a purchase round-trip, and the route had one — against a test world whose
+principals, mandate, budgets and decision records were seeded in process and whose decisions were
+unsigned. A reachable endpoint must not treat a test double as authority (AGENTS.md §8.0 rule 4; the
+project's own "never fake PayPal behaviour"). Refusing is the only honest option until WP-11's runtime
+is composed with real repositories, so the AT is recorded as deliberately incomplete rather than
+demonstrated against a fixture.
+**Evidence:** `docs/verification/mcp-hardening.md` — 25 failed / 28 passed against the original
+implementation with the regression tests added, then 61 focused tests green; a read-only bearer was
+able to reach checkout signing and Gate evaluation before the change. `apps/web/lib/mcp-token.ts`
+bounds the bearer; the route's own doc comment states the refusal is intentional. No forged `ALLOW` or
+payment was ever demonstrated: order creation already refused.
+
+## D-049 - The storefront needs `DATABASE_URL`; seed browsing is an explicit non-production opt-in
+
+**Date:** 2026-10-24
+**Decision:** `shopCatalogMode()` returns `database`, `demo-browse-only` or `unavailable`. With
+`DATABASE_URL` set, catalog reads and checkout sessions go through `@countersign/db`. Without it,
+browsing is refused unless `NODE_ENV !== 'production'` **and** `COUNTERSIGN_DEMO_CATALOG=1`, and that
+mode never confers purchase authority (`findProductBySku` refuses it). Production ignores the opt-in
+entirely. A configured-but-unreachable database returns repository errors and never falls back to
+seeds. Stored carts are canonical decimal strings, validated (line, quantity, title, amount, currency,
+date, identity, subtotal/total relationship) before a session is reconstructed.
+**Reason:** the store previously kept stock and sessions in process-global maps, so a "durable" price
+lock died with the process and seeded data could silently become the price signed into a checkout JWT.
+Decimal strings exist because a JSON number has already lost precision before it is parsed — the
+precision cannot be recovered from the parsed value, so the format has to be rejected rather than
+coerced.
+**Evidence:** `docs/verification/merchant-persistence.md` — five regression tests fail against the
+original catalog, including seed authority and silently-accepted missing-DB writes; a targeted
+reproduction (create session, clear `globalThis.__countersignShopState`, reset the module graph) showed
+the session was gone. `apps/web/app/shop/catalog.ts:17` is the mode function; 20 focused tests cover
+adapter routing and validation.
+
+## D-050 - Digital-only carts are never charged physical shipping; a cart in an unquoted currency is refused, not converted
+
+**Date:** 2026-10-24
+**Decision:** `createCheckout` sets shipping to `0` in the cart's own currency unless at least one line
+is non-digital. Physical lines keep the per-country flat rate, and a cart needing delivery in a
+currency this store has no rate for is still refused (`CS_NOT_FOUND`, EC-FX-1) rather than priced from
+another currency's number.
+**Reason:** two pricing defects with the same shape — a price the merchant never quoted. A digital
+download was charged a physical delivery fee, and the alternative "fix" (converting JPY into the USD
+shipping rate) would have signed a total the store never offered. Refusal keeps the invariant that
+every amount in a signed checkout is one the merchant determined.
+**Evidence:** `packages/gate/src/merchant/index.ts` (`requiresShipping`, `SHIPPING_CURRENCY`),
+`packages/gate/test/merchant.test.ts` (+99 lines), and the E2E test "digital-only checkout has no
+physical address or shipping charge" asserting `USD $0.00`. The shop route also omits the ship-to
+control for digital SKUs (`apps/web/app/shop/checkout/route.ts:77`).
+
+## D-051 - The device-signing lab requires a flag, a non-production environment, a loopback host and same-origin
+
+**Date:** 2026-10-24
+**Decision:** `signingLabAllowed(request)` returns false unless `SIGNING_LAB_ENABLED === 'true'`,
+`NODE_ENV !== 'production'`, the request URL host is `localhost`, `127.0.0.1` or `[::1]`, and the
+`Origin` header is absent or equal to the request origin. Every lab route calls it before issuing.
+**Reason:** the lab mints an L1 for a fixed sample wallet and signs with the service's issuer key. Left
+open, it is a free signing oracle for anyone who can reach a deployment, and the sample identities
+would appear as a real buyer's authority in any evidence packet filed from such a signature.
+**Evidence:** `apps/web/app/lab/device-sign/vi.ts` (`signingLabAllowed`), `vi.test.ts` (three tests:
+unconfigured refused even on loopback; production refused even when enabled; enabled local allowed
+while a foreign origin and a public host are refused), and the README's statement of the requirement.
+`scripts/dev-local.mjs` supplies the flag only for its own loopback servers.
