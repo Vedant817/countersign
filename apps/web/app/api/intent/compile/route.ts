@@ -21,6 +21,7 @@ import { csError, toBody, type UserId } from '@countersign/core'
 import { readBack } from '@countersign/compiler'
 
 import { compileIntent } from '@/lib/intent-compiler'
+import { intentResponseBody } from '@/lib/intent-response'
 import { merchantIdentity } from '@/lib/merchant'
 
 const MAX_INTENT_CHARS = 2_000
@@ -99,17 +100,23 @@ export async function POST(request: Request): Promise<Response> {
     tz: 'Asia/Kolkata',
   })
 
-  return NextResponse.json(
-    {
-      currency: mandate.currency,
-      ttl_seconds: mandate.ttlSeconds,
-      constraints: mandate.constraints,
-      // The sentence the buyer approves. Deterministic, so a UI can diff two runs and see nothing.
-      read_back: readBackText,
-      assumptions: mandate.assumptions,
-      // Non-empty means "not ready to sign yet". §8.8: question, never guess.
-      ambiguities: mandate.ambiguities,
-    },
-    { status: 200 },
-  )
+  /*
+   * `intentResponseBody` rather than an inline object, because the inline object returned amounts as
+   * `bigint` and `NextResponse.json` throws on one — so every mandate the buyer could actually sign
+   * came back as a `500` with an empty body. See `@/lib/intent-response` for the whole story.
+   *
+   * The conversion can itself fail, and only for an amount past `Number.MAX_SAFE_INTEGER`. That is a
+   * `CsError` like any other, so it is mapped through the same table rather than escaping as a 500.
+   */
+  let body: ReturnType<typeof intentResponseBody>
+  try {
+    body = intentResponseBody(mandate, readBackText)
+  } catch (error) {
+    const cs = csError('CS_INTERNAL', 'The mandate could not be serialised.', {
+      cause: error instanceof Error ? error.message : String(error),
+    })
+    return NextResponse.json(toBody(cs), { status: STATUS_BY_CODE[cs.code] ?? 500 })
+  }
+
+  return NextResponse.json(body, { status: 200 })
 }

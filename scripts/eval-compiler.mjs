@@ -95,16 +95,40 @@ function capOf(constraints) {
 async function runOne(testCase) {
   const response = await fetch(ENDPOINT, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      /*
+       * `connection: close`, because keep-alive is what produced the truncations.
+       *
+       * The harness reported `SyntaxError: Unexpected end of JSON input` on exactly the four slowest
+       * cases — the ones that build a full mandate — while every one of them returned a complete body
+       * when requested by hand. Node's `fetch` reuses pooled connections, and a keep-alive socket that
+       * the dev server closes mid-response truncates the body silently: the caller sees a parse error
+       * and no reason to suspect the transport.
+       *
+       * This is a harness fix, not a product one. It is worth being explicit that the product may have
+       * the same exposure — a browser opening a fresh connection per navigation would not, but any
+       * long-lived client that reuses one might — and that is recorded in docs/COMPILER-EVAL.md rather
+       * than assumed away.
+       */
+      connection: 'close',
+    },
     body: JSON.stringify({ intent: testCase.intent }),
     signal: AbortSignal.timeout(120_000),
   })
-  const body = await response.json()
+  const text = await response.text()
 
   if (!response.ok) {
-    return { outcome: 'refuse', code: body?.error?.code ?? `HTTP ${response.status}`, maxCap: null }
+    let code = `HTTP ${response.status}`
+    try {
+      code = JSON.parse(text)?.error?.code ?? code
+    } catch {
+      // A non-JSON error body is still an answer; the status is the code we have.
+    }
+    return { outcome: 'refuse', code, maxCap: null }
   }
 
+  const body = JSON.parse(text)
   const hasBlocking = Array.isArray(body.ambiguities) && body.ambiguities.length > 0
   return {
     outcome: hasBlocking ? 'question' : 'signable',
