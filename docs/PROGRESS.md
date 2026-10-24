@@ -34,10 +34,10 @@ buildable now.
 | WP-08 | Intent compiler + deterministic read-back | D | 01, 02 | done | `80a9ff5` | AT-M8 ✅ 285 |
 | WP-09 | Catalog, checkout JWT, price lock, stock | D | 02, 04 | done | `27f3e12` | AT-M9 ✅ 34 (D-020) |
 | WP-10 | `packages/gate` + budget ledger | B | 02, 04, 09 | done | `27f3e12` | AT-M10 ✅ 162 |
-| WP-11 | `packages/orders` — order orchestrator | C | 06, 10 | todo | | AT-M11 (H-01 for live) |
+| WP-11 | `packages/orders` — order orchestrator | C | 06, 10 | wip | | AT-M11 (H-01 for live) · binder `e0fb068` |
 | WP-12 | `packages/webhooks` + reconciler + worker | C | 06, 02 | done | `beb5f3d` | AT-M12 ✅ 154 · worker 116 |
 | WP-13 | `packages/agent` — shopping agent + injection defences | D | 09, 14, 04 | todo | | AT-M13 |
-| WP-14 | Merchant MCP server | D | 09 | todo | | AT-M14 |
+| WP-14 | Merchant MCP server | D | 09 | review | | AT-M14 local: Inspector 5 tools, 401, Gate BLOCKED round-trip; persistent purchase integration remains open |
 | WP-15a | Liability router (pure) | E | 01, 02 | done | `7b95e71` | AT-M15.1 ✅ 40/40 |
 | WP-15b | Evidence planner (reason → evidence enum) | E | 15a | done | `7b95e71` | plan tests per reason ✅ |
 | WP-15c | Drafter + citation checker | E | 15b | done | `1d465bc` | AT-M15.2 ✅ forged number fails |
@@ -181,6 +181,19 @@ WP-06s and everything needing live sandbox is not started.
   `format:check` and `secret-scan` all green. The 30 that moved out of the skip column are
   `verify-py.test.ts`'s execution tests: they only run once `apps/vi/.venv` exists, so the same
   command on the same tree skipped them before `uv sync --extra dev` and runs them after.
+- **2026-10-20** — **The orchestrator now has a production composition root.**
+  `orchestratorDepsFromRepos` (`packages/orchestrator/src/deps.ts`, `e0fb068`) takes repository function
+  references rather than a second data-access layer, and composes `defineOrderDeps` (with
+  `orderStoreFromRepos`, `budgetHooksFromStore` and `nullNotifier`), `gateDepsFromRepos`,
+  `orchestratorStoreFromRepos` and `compilerFrom` into the return shape `createOrchestrator` already
+  consumes — the piece the 2026-10-16 entry named as missing. Two shapes were dictated by the ports:
+  `paypal` must be required and wider than `OrderPayPal` because the defender seam needs
+  `getDispute`/`acceptClaim`, and the seam carries `IngestAndDefendDeps.deps`, so it is built only when
+  the caller supplies a `DefenderStore` and public base URL. That keeps the nine gaps in
+  `docs/contract-issues.md` visible at the call site instead of papered over: no production
+  `DefenderStore` or `Notifier`, no `stock`, and period caps disabled until `walletCapPeriod` has a
+  reader. Full suite 2515 passed | 36 skipped, with lint, typecheck, build, `format:check` and
+  `secret-scan` green.
 - **2026-10-20** — **Verified WP-12 and corrected the worker's documentation.** The suites are 154 tests
   for `packages/webhooks` and 116 for `apps/worker` (`schedule` 17, `job-runner` 28, `worker` 9,
   `delivery` 42, `pg-boss-delivery` 11, `boot` 9), all green without credentials or a database, so the

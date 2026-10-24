@@ -26,6 +26,12 @@ export default mergeConfig(
     resolve: {
       alias: {
         '@': new URL('.', import.meta.url).pathname.replace(/\\/g, '/'),
+        // Next aliases `server-only` to an empty module on the server. Vitest does not run Next's
+        // bundler, so the same stub keeps a route-handler test from throwing on the marker import.
+        'server-only': new URL('./test/server-only-stub.ts', import.meta.url).pathname.replace(
+          /\\/g,
+          '/',
+        ),
       },
     },
   }),

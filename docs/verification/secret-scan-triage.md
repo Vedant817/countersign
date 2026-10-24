@@ -1,5 +1,27 @@
 # Secret-Scan Triage
 
+## WP-14 follow-up — 2026-10-24 (IST)
+
+The current Git-aware working-tree scan found two synthetic WP-14 test values. The history scan
+reported the same values eight times across four T3 checkpoint commits; these were not new live
+credentials. Tests now generate signing keys at runtime. Two new exceptions require both the
+historical path and the exact dummy value, scoped through `targetRules` to `generic-api-key` or
+`countersign-session-secret`. No new whole-file exclusion was added. An adversarial temporary
+probe verified that the historical value is allowed only at its test path, while another value,
+the historical value at another path, and a new SESSION_SECRET in either test path are detected.
+
+The first probe showed that a global path exception skipped the entire file despite its value
+condition. Assigning the exceptions to their specific rules kept file scanning active; the revised
+probe passed. This follows the distinction between global and rule-targeted exceptions documented
+in the [Gitleaks configuration reference](https://github.com/gitleaks/gitleaks/blob/v8.30.1/README.md#configuration).
+
+`.next/` was already ignored and is excluded by `scripts/secret-scan.mjs`'s Git file snapshot.
+The earlier direct `gitleaks dir .` scan included ignored build output and was not equivalent to
+`pnpm secret-scan`. The final command scans the current snapshot and Git history with redaction.
+The pre-existing sixteen whole-file exclusions documented below remain a limitation.
+
+---
+
 **Date:** 2026-10-07
 
 ## Result
