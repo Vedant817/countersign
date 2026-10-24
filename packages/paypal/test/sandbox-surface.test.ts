@@ -25,7 +25,6 @@ import { PayPalClient } from '../src/client'
 import { fakeFetch, testClock, tokenResponse } from './fixtures/transport-double'
 
 const SRC = join(import.meta.dirname, '..', 'src')
-const BASE_URL = 'https://api-m.sandbox.paypal.com'
 /** The live host, spelled out here so the refusal test cannot pass against a typo'd sandbox URL. */
 const LIVE_URL = 'https://api-m.paypal.com'
 
@@ -70,7 +69,7 @@ function sourceFiles(): { name: string; code: string }[] {
 }
 
 describe('EC-ENV-2: the sandbox-only API surface is sandbox-only in the code, not just by convention', () => {
-  it('calls every simulator endpoint from sandbox.ts, and calls none of them from anywhere else', () => {
+  it('EC-ENV-2: calls every simulator endpoint from sandbox.ts, and calls none of them from anywhere else', () => {
     const files = sourceFiles()
     // The scan found the module it is talking about, so the negative below is not vacuous.
     const sandbox = files.find((f) => f.name === 'sandbox.ts')

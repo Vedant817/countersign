@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { money } from '@countersign/core'
-import type { AttemptId } from '@countersign/core'
+import type { AttemptId, MandateId } from '@countersign/core'
 import type { GateDecision } from '../src/types'
 import type { ProductRow } from '@countersign/db'
 

@@ -26,7 +26,7 @@ import { captureSchema, ppResponseAmountToMoney } from '../src/types'
 import { captureResponse } from './fixtures/transport-double'
 
 describe('EC-FX-2: a capture states what the buyer was charged, and we convert nothing', () => {
-  it('parses seller_receivable_breakdown — gross, fee, net and the exchange rate', () => {
+  it('EC-FX-2: parses seller_receivable_breakdown — gross, fee, net and the exchange rate', () => {
     const parsed = captureSchema.safeParse(captureResponse({ value: '48.00' }).body)
     expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true)
     if (!parsed.success) return

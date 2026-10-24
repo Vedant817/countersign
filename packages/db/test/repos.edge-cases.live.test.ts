@@ -232,7 +232,7 @@ afterAll(async () => {
 })
 
 describe.skipIf(!hasDatabase)('EC-BUY-6: the serial-disputer count is per wallet and per window', () => {
-  it("counts a wallet's disputes in the window, and only that wallet's", async () => {
+  it("EC-BUY-6: counts a wallet's disputes in the window, and only that wallet's", async () => {
     const built = await inTx(async (tx) => {
       await seedWorld(tx)
 

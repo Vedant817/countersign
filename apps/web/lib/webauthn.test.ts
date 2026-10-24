@@ -41,7 +41,7 @@ vi.mock('./idb', () => ({
     transaction: () => ({
       objectStore: () => ({
         get: (key: string) => ({ result: store.get(key) }),
-        put: (record: { userId: string }) => {
+        put: (record: { userId: string; credentialId: string }) => {
           store.set(record.userId, record)
           return { result: undefined }
         },
@@ -82,6 +82,12 @@ function bytes(...values: number[]): ArrayBuffer {
   return new Uint8Array(values).buffer
 }
 
+/** Flatten a `BufferSource` to numbers — it is `ArrayBuffer | ArrayBufferView`, not iterable. */
+function toNumbers(source: BufferSource): number[] {
+  if (source instanceof ArrayBuffer) return [...new Uint8Array(source)]
+  return [...new Uint8Array(source.buffer, source.byteOffset, source.byteLength)]
+}
+
 /** The `navigator.credentials` double, typed so the captured options can be asserted without `any`. */
 function fakeCredentials() {
   return {
@@ -103,7 +109,7 @@ afterEach(() => {
 })
 
 describe('EC-FAM-1: signing a mandate demands a passkey user-verification, not just a session', () => {
-  it('asserts with userVerification: "required", bound to the stored credential and the challenge digest', async () => {
+  it('EC-FAM-1: asserts with userVerification: "required", bound to the stored credential and the challenge digest', async () => {
     const credentials = fakeCredentials()
     installBrowser(credentials)
     store.set(USER_ID, { userId: USER_ID, credentialId: 'cred-1' })
@@ -121,12 +127,16 @@ describe('EC-FAM-1: signing a mandate demands a passkey user-verification, not j
     expect(options?.userVerification).toBe('required')
     expect(options?.rpId).toBe('countersign.example')
     // The assertion names the credential the UI believes it holds, decoded from the stored id.
-    expect([...(options?.allowCredentials?.[0]?.id ?? [])]).toEqual([
+    const allow = options?.allowCredentials?.[0]?.id
+    expect(allow === undefined ? [] : toNumbers(allow)).toEqual([
       ...base64UrlToBytes('cred-1'),
     ])
     // A 32-byte SHA-256 digest of the caller's string — the same string the server will verify against.
-    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('the L2 signing input')))
-    expect([...(options?.challenge ?? [])]).toEqual([...digest])
+    const digest = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode('the L2 signing input')),
+    )
+    const challenge = options?.challenge
+    expect(challenge === undefined ? [] : toNumbers(challenge)).toEqual([...digest])
 
     // And the assertion the caller signs with is the authenticator's output, base64url-encoded.
     expect(assertion).toMatchObject({
