@@ -109,25 +109,46 @@ if (trips) → suspendMandate(mandateId, `velocity guard: ${detail}`)
 So four consecutive BLOCKed **attempts** move the mandate to `SUSPENDED`. Nothing in the run has to
 be the agent's fault.
 
-### Why a third party can forge the signal
+### Why a third party can forge the signal — and why that is weaker than it first reads
 
-An attempt is BLOCKed when the Gate refuses the cart. The cart is chosen by **the merchant**. Three
+An attempt is BLOCKed when the Gate refuses the cart, and the cart is chosen by **the merchant**. Three
 carts priced above the mandate cap produce three BLOCKs, and the fourth suspends the buyer's mandate.
-The merchant — or a listing carrying injected instructions that make an agent retry — controls the
-input and the buyer wears the consequence. It is a denial-of-service on the buyer's spending
-authority, triggered by someone who is not the buyer.
 
-The comment above the check already anticipates the shape of the problem and gets the _direction_ of
-the error right:
+**But the merchant cannot create an attempt.** Attempts are created by the buyer's agent, so the
+attack needs the agent to try four times against a cart that keeps failing. A shop cannot suspend a
+buyer who walks away — only one who keeps coming back. That is materially weaker than "any listing can
+knock a user's agent offline", which is how it was reported and how I repeated it.
 
-> Suspending rather than revoking is the conservative choice — a burst of BLOCKs is much more often a
-> confused agent or an injection than a compromised key, and an irreversible action taken on a signal
-> that can fire on a legitimate user is the worse error.
+What survives is still worth fixing, and it is a different problem:
 
-That reasoning is correct and it stops one step short. `SUSPENDED` is reversible, but it is still
-_reachable by an attacker_, and "reversible" is not the same as "not an attack".
+- **A retrying agent is punished for the merchant's pricing.** An agent that retries a blocked cart
+  four times is behaving badly and suspension is arguably the control _working_. But the recorded
+  reason is `velocity guard: 4 consecutive block(s)`, which reads as _the agent is compromised_ when
+  the truth may be _this shop is too expensive_. The buyer is told the wrong thing about their own
+  agent, and the resume path ("review the attempts") does not reveal it either.
+- **Injection makes retrying likely.** A listing carrying "retry until it works" is a natural route to
+  four attempts, and §13's threat model already concedes an agent loop can be steered.
 
-### The fix (not yet implemented)
+**Corrected severity: major, not fatal** — a real griefing surface for one plausible agent behaviour,
+plus a diagnostic that misattributes the cause.
+
+### Why I am not implementing this in the same pass
+
+The narrow fix — count only agent-attributable BLOCKs — needs the failing check's code on the attempt
+row. `AttemptState` is a bare state string (`'CREATED' | 'GATED_BLOCK' | …`, `types.ts:376`) and
+`recentAttemptStates` returns only states, so the code would have to be threaded through the
+`GateDeps` port, the `@countersign/db` repository and every test double. That is a cross-package change
+to a **security control**, and `packages/gate`'s 162 tests all have to keep passing.
+
+A smaller fix is available and is the better first move: **record why the streak tripped.** Put the
+first failing check code into the suspension reason and the `REVIEW` message, so a buyer suspended
+because a shop was too expensive is told that rather than being told their agent looks compromised.
+That is a message change, not a control change, and it removes the misattribution without touching the
+signal.
+
+**Status: analysis corrected, implementation deliberately not started.**
+
+### The fix, for when it is done properly
 
 The control exists to catch a **runaway agent**, and a runaway agent is characterised by BLOCKs that
 are _its own_ fault. So the streak should count only attempts whose BLOCK is attributable to the

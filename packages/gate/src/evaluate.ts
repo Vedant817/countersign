@@ -215,7 +215,13 @@ async function runDecision(
   // (3, second half) A tripped velocity guard suspends the mandate — and it does so *after* the record
   // is signed, because the record says what was decided and the suspension is what followed from it.
   if (outcome === 'REVIEW' && state.velocity?.trips) {
-    await suspendForVelocity(deps, i.mandateId, state.velocity)
+    // The checks that actually refused the streak, so the suspension reason distinguishes "this agent
+    // is compromised" from "this shop's cart did not satisfy the mandate". The codes are already on
+    // the decision; this only stops them being discarded at the moment they matter most.
+    const refusedBy = checks
+      .filter((c) => !c.passed && !c.notApplicable && c.n !== 12)
+      .map((c) => c.code)
+    await suspendForVelocity(deps, i.mandateId, state.velocity, refusedBy)
   }
 
   return decision

@@ -254,6 +254,67 @@ describe('the consequence', () => {
     expect(seen[0]!.reason).toContain('6 attempt(s)')
   })
 
+  it('records WHICH check refused the streak, so the reason is not misread as a compromised agent', async () => {
+    // Why this matters: `velocity guard: 4 consecutive block(s)` is true and misleading. It reads as
+    // *this agent is compromised* when the commoner cause is *this shop's cart did not satisfy the
+    // mandate*. An agent refused for PRICE_LOCK and stopping is the control working; four REPLAYs is
+    // the control earning its keep. A support agent reads this string, so it has to distinguish them.
+    const verdict = await assessVelocity({
+      deps: deps({
+        recentAttemptStates: async () => ({
+          ok: true,
+          value: ['GATED_BLOCK', 'GATED_BLOCK', 'GATED_BLOCK', 'GATED_BLOCK'] as AttemptState[],
+        }),
+      }),
+      mandateId: MANDATE,
+      nowSec: NOW_SEC,
+    })
+    if (!verdict.ok) throw new Error(verdict.error.message)
+
+    const seen: Array<{ mandateId: string; reason: string }> = []
+    await suspendForVelocity(
+      deps({
+        suspendMandate: async (id, reason) => {
+          seen.push({ mandateId: id, reason })
+          return { ok: true, value: true as const }
+        },
+      }),
+      MANDATE,
+      verdict.value,
+      // Repeated on purpose: the streak came from one constraint, and the reason should say so once.
+      ['PRICE_LOCK', 'PRICE_LOCK'],
+    )
+
+    expect(seen[0]!.reason).toContain('PRICE_LOCK')
+    expect(seen[0]!.reason.match(/PRICE_LOCK/g)).toHaveLength(1)
+  })
+
+  it('omits the refusal clause entirely when the caller does not supply one', async () => {
+    // Backward compatibility that is also correctness: an older caller that passes nothing gets the
+    // previous string rather than a dangling 'Refused by: ' with nothing after it.
+    const verdict = await assessVelocity({
+      deps: deps({ countRecentAttempts: async () => ({ ok: true, value: 6 }) }),
+      mandateId: MANDATE,
+      nowSec: NOW_SEC,
+    })
+    if (!verdict.ok) throw new Error(verdict.error.message)
+
+    const seen: string[] = []
+    await suspendForVelocity(
+      deps({
+        suspendMandate: async (_id, reason) => {
+          seen.push(reason)
+          return { ok: true, value: true as const }
+        },
+      }),
+      MANDATE,
+      verdict.value,
+    )
+
+    expect(seen[0]).toContain('velocity guard')
+    expect(seen[0]).not.toContain('Refused by')
+  })
+
   it('the REVIEW copy says paused-and-nothing-charged, not "blocked"', async () => {
     const verdict = await assessVelocity({
       deps: deps({ countRecentAttempts: async () => ({ ok: true, value: 6 }) }),

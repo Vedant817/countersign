@@ -151,8 +151,20 @@ export async function suspendForVelocity(
   deps: GateDeps,
   mandateId: MandateId,
   verdict: VelocityVerdict,
+  /**
+   * The check slugs that refused the attempts in the streak, in order.
+   *
+   * Recorded because `velocity guard: 4 consecutive block(s)` is a true statement that misleads: it
+   * reads as *this agent is compromised* when the commoner cause is *this shop's cart did not satisfy
+   * the mandate*. An agent that is refused for `PRICE_LOCK` and stops is the control working; an agent
+   * refused for `REPLAY` four times is the control earning its keep. The reason string is what a
+   * support agent reads, so it has to distinguish them.
+   */
+  failingCodes: readonly string[] = [],
 ): Promise<Result<true, CsError>> {
-  const reason = `velocity guard: ${verdict.detail}`
+  const why =
+    failingCodes.length === 0 ? '' : `. Refused by: ${[...new Set(failingCodes)].join(', ')}`
+  const reason = `velocity guard: ${verdict.detail}${why}`
   const suspended = await deps.suspendMandate(mandateId, reason)
   if (!suspended.ok) return suspended
   return { ok: true, value: true }
@@ -165,11 +177,18 @@ export async function suspendForVelocity(
  * are listed, and nothing was charged. Saying only "blocked" would make a paused mandate look like a
  * spent cap, and the buyer would spend an hour discovering they had not been charged.
  */
-export function reviewReason(verdict: VelocityVerdict): { message: string; userMessage: string } {
+export function reviewReason(
+  verdict: VelocityVerdict,
+  failingCodes: readonly string[] = [],
+): { message: string; userMessage: string } {
+  // The buyer is told which constraint refused their agent, because "your agent looks compromised" is
+  // the wrong thing to say to somebody whose agent simply stopped at a price it was not allowed to pay.
+  const why =
+    failingCodes.length === 0 ? '' : ` It was refused by: ${[...new Set(failingCodes)].join(', ')}.`
   return {
-    message: `Decision escalated to REVIEW: ${verdict.detail}. Mandate suspended for a human to confirm.`,
+    message: `Decision escalated to REVIEW: ${verdict.detail}. Mandate suspended for a human to confirm.${why}`,
     userMessage:
       'We paused this purchase and paused your agent, because it tried the same thing too many times. ' +
-      'Nothing was charged. Review the attempts and resume the mandate whenever you like.',
+      `Nothing was charged.${why} Review the attempts and resume the mandate whenever you like.`,
   }
 }
