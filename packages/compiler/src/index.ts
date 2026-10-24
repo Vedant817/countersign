@@ -119,6 +119,9 @@ export {
   decimalAmountSchema,
   llmProposalSchema,
   localiseProposal,
+  mergeProposal,
+  modelProposedAbove,
+  proposalFromParsedIntent,
   scoredFieldsOfMandate,
 } from './proposal'
 export type { Localised, LocaliseContext, LlmProposal, ScoredFields } from './proposal'
@@ -126,6 +129,18 @@ export type { Localised, LocaliseContext, LlmProposal, ScoredFields } from './pr
 // --- reading the buyer's own words -------------------------------------------
 export { currenciesNamedIn, literalCapIn, mentionsRecurrence, resolveCurrency } from './literal'
 export type { CurrencyResolution } from './literal'
+
+// --- the deterministic intent parser (P0-7) ----------------------------------
+export { parseIntent, utcDateOf } from './parser'
+export type { ParsedIntent, ParserContext, ParseConflict } from './parser'
+export {
+  attributesInText,
+  buildLexicon,
+  matchMerchants,
+  matchSkus,
+  normaliseTokens,
+} from './lexicon'
+export type { CatalogLexicon, LexiconEntry } from './lexicon'
 
 // --- the read-back ----------------------------------------------------------
 export {

@@ -39,6 +39,7 @@ import {
 import { z } from 'zod'
 
 import { frequenciesInText, frequencyInText, mentionsRecurrence } from './literal'
+import type { ParsedIntent } from './parser'
 import {
   isoDateSchema,
   frequencySchema,
@@ -642,6 +643,7 @@ export function localiseProposal(p: LlmProposal, ctx: LocaliseContext): Result<L
  * conversion inside a metric is how a money bug becomes a passing eval. `core.toPayPalValue` does the one
  * conversion, once, on the compiler's own output.
  */
+
 export interface ScoredFields {
   readonly amountMax: string | null
   readonly budgetMax: string | null
@@ -669,4 +671,143 @@ export function scoredFieldsOfMandate(c: CompiledMandate): ScoredFields {
     skus: skuIdsIn(c.constraints),
     currency: c.currency,
   }
+}
+
+// ---------------------------------------------------------------------------
+// The deterministic half: parser output → proposal, and the merge with the model
+// ---------------------------------------------------------------------------
+
+/**
+ * The proposal the **parser alone** produces, in the same shape the model is asked for.
+ *
+ * Everything here is derived from the buyer's bytes: money as `toPayPalValue` decimal strings (the one
+ * conversion, so a JPY amount stays integral), merchants and items from the catalog lexicon, cadence from
+ * the closed word list, and the start date from the **injected clock** rather than the wall clock. Nothing
+ * in this function can be influenced by a model, which is what lets `compile` use it as the authority it
+ * merges everything else *into*.
+ *
+ * A missing field is left missing rather than defaulted. `null` here means "the buyer did not say", and
+ * §8.8 turns exactly that into a question.
+ */
+export function proposalFromParsedIntent(parsed: ParsedIntent, currency: Currency): LlmProposal {
+  const asDecimal = (minor: bigint | null): string | undefined =>
+    minor === null ? undefined : toPayPalValue({ minor, currency })
+
+  const amountMin = asDecimal(parsed.amountMinMinor)
+  const amountMax = asDecimal(parsed.amountMaxMinor)
+  const budgetMin = asDecimal(parsed.budgetMinMinor)
+  const budgetMax = asDecimal(parsed.budgetMaxMinor)
+
+  const preferences: LlmProposal['preferences'] = {
+    ...(parsed.preferences.colour !== undefined ? { color: parsed.preferences.colour } : {}),
+    ...(parsed.preferences.size !== undefined ? { size: parsed.preferences.size } : {}),
+    ...(parsed.preferences.model !== undefined ? { model: parsed.preferences.model } : {}),
+  }
+
+  return {
+    currency,
+    ...(parsed.merchantIds.length > 0 ? { merchantIds: [...parsed.merchantIds] } : {}),
+    ...(parsed.skuIds.length > 0
+      ? {
+          lineItems: [
+            {
+              skuIds: [...parsed.skuIds],
+              quantity: parsed.quantity ?? 1,
+              matchMode: 'minimum' as const,
+            },
+          ],
+        }
+      : {}),
+    ...(amountMin !== undefined ? { amountMin } : {}),
+    ...(amountMax !== undefined ? { amountMax } : {}),
+    ...(budgetMin !== undefined ? { budgetMin } : {}),
+    ...(budgetMax !== undefined ? { budgetMax } : {}),
+    ...(parsed.frequency !== null ? { recurrence: recurrenceFor(parsed) } : {}),
+    ...(Object.keys(preferences).length > 0 ? { preferences } : {}),
+  }
+}
+
+/** The recurrence proposal a parsed cadence implies: the window starts on the clock's day, not "now". */
+function recurrenceFor(parsed: ParsedIntent): NonNullable<LlmProposal['recurrence']> {
+  // `frequency` is non-null at every call site; the guard keeps the type honest without a cast.
+  const frequency = parsed.frequency ?? 'MNTH'
+  return {
+    frequency: frequency as NonNullable<LlmProposal['recurrence']>['frequency'],
+    startDate: parsed.startDate ?? '1970-01-01',
+    ...(parsed.endDate !== null ? { endDate: parsed.endDate } : {}),
+  }
+}
+
+/**
+ * Merge the parser's proposal with the model's, **field by field**, in the only direction that is safe.
+ *
+ * | Field | Winner | Why |
+ * |---|---|---|
+ * | `amountMin`, `amountMax`, `budgetMin`, `budgetMax` | parser | A model value may not raise *or* lower a cap the buyer wrote; `compile` records an assumption when the model tried to |
+ * | `currency` | parser | Resolved from the text, the catalog and the account (EC-FX-1) |
+ * | `merchantIds`, `lineItems` | parser when non-empty | The buyer's own words beat a guess; the model fills these only when the lexicon matched nothing |
+ * | `recurrence` | parser when a cadence was read | A cadence is an authority, not a hint; the model may fill it only when the text names none, and the existing text checks then apply |
+ * | `preferences` | parser per key, model for the rest | Not a constraint, not signed (§8.8) — the one field where a suggestion is free |
+ * | `ttlSeconds`, `assumptions`, `ambiguities` | model | Clamped/validated downstream, and none of them widens a limit |
+ *
+ * The `lineItems` rule deserves the note: `matchMode: 'minimum'` is what the parser emits, so a caller
+ * replacing an unhandled SKU with a model guess cannot silently widen the cart — the item list is a
+ * restriction, and the parser's list is the one the buyer's words support.
+ */
+export function mergeProposal(base: LlmProposal, model: LlmProposal): LlmProposal {
+  const preferences = { ...model.preferences, ...base.preferences }
+  return {
+    currency: base.currency,
+    ...(base.merchantIds !== undefined && base.merchantIds.length > 0
+      ? { merchantIds: base.merchantIds }
+      : model.merchantIds !== undefined
+        ? { merchantIds: model.merchantIds }
+        : {}),
+    ...(base.lineItems !== undefined && base.lineItems.length > 0
+      ? { lineItems: base.lineItems }
+      : model.lineItems !== undefined
+        ? { lineItems: model.lineItems }
+        : {}),
+    ...(base.amountMin !== undefined ? { amountMin: base.amountMin } : {}),
+    ...(base.amountMax !== undefined ? { amountMax: base.amountMax } : {}),
+    ...(base.budgetMin !== undefined ? { budgetMin: base.budgetMin } : {}),
+    ...(base.budgetMax !== undefined ? { budgetMax: base.budgetMax } : {}),
+    ...(base.recurrence !== undefined
+      ? { recurrence: base.recurrence }
+      : model.recurrence !== undefined
+        ? { recurrence: model.recurrence }
+        : {}),
+    ...(base.agentRecurrence !== undefined
+      ? { agentRecurrence: base.agentRecurrence }
+      : model.agentRecurrence !== undefined
+        ? { agentRecurrence: model.agentRecurrence }
+        : {}),
+    ...(model.ttlSeconds !== undefined ? { ttlSeconds: model.ttlSeconds } : {}),
+    ...(Object.keys(preferences).length > 0 ? { preferences } : {}),
+    ...(model.assumptions !== undefined ? { assumptions: model.assumptions } : {}),
+    ...(model.ambiguities !== undefined ? { ambiguities: model.ambiguities } : {}),
+  }
+}
+
+/**
+ * Did the model try to spend **above** the cap the buyer wrote?
+ *
+ * Used only to raise the assumption that says so. The value itself is never copied — the merge above has
+ * already decided that — so this function can never change a mandate, only explain one.
+ */
+export function modelProposedAbove(
+  model: LlmProposal | null,
+  cap: bigint | null,
+  currency: Currency,
+): boolean {
+  if (model === null || cap === null) return false
+  for (const raw of [model.amountMax, model.budgetMax]) {
+    if (raw === undefined) continue
+    try {
+      if (fromPayPalValue(raw, currency).minor > cap) return true
+    } catch {
+      // An amount we cannot parse is an amount we would refuse; it is not evidence of an overshoot.
+    }
+  }
+  return false
 }

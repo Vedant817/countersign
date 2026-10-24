@@ -181,14 +181,20 @@ function toMinor(
  *
  * The digit group's leading lookbehind rejects a preceding `-` or `.`, so a *negative* amount ("under -50")
  * is not read as a positive cap. `$` immediately before the digits is fine and still matches.
+ *
+ * The trailing `(?![\w])` is not decoration: without it, the `m` of `"$138 maximum"` is read as a
+ * *magnitude*, and a $138 ceiling silently becomes $138,000,000. Found while building the deterministic
+ * parser (`parser.ts`), which reads the same sentence as $138 — the two must not disagree about what the
+ * buyer typed.
  */
 const SYMBOL_AMOUNT_RE =
-  /([A-Za-z]{0,2})\s?([$€£₹¥])\s*(?<![\d.-])(\d[\d,]*(?:\.\d+)?)\s*([kmb])?/giu
+  /([A-Za-z]{0,2})\s?([$€£₹¥])\s*(?<![\d.-])(\d[\d,]*(?:\.\d+)?)\s*([kmb])?(?![\w])/giu
 
 /**
  * `130 dollars`, `1M USD`, `200 rupees` — a currency word immediately after the number.
  *
- * Same leading lookbehind as {@link SYMBOL_AMOUNT_RE}, for the same reason.
+ * Same leading lookbehind as {@link SYMBOL_AMOUNT_RE}, for the same reason, and the same trailing
+ * lookahead so `"1,000 but"` is $1,000 and not $1 trillion.
  */
 const NAMED_AMOUNT_RE =
   /(?<![\d.-])(\d[\d,]*(?:\.\d+)?)\s*([kmb])?\s*(usd|eur|gbp|inr|jpy|aud|cad|dollars?|euros?|pounds?|rupees?|yen)\b/giu

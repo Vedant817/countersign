@@ -193,9 +193,16 @@ export interface CatalogReader {
  *
  * `clock` is a `Clock` rather than a call to `Date.now()` so a test can pin a mandate's expiry and the
  * snapshot of "Expires Fri 9 Oct, 11:59 PM IST" can be an assertion rather than a race.
+ *
+ * `llm` is **optional** (P0-7). The deterministic parser reads money, currency, cadence, merchants and
+ * dates from the buyer's own sentence, so a model is only consulted for the one gap a reader cannot
+ * fill: naming a product the buyer described rather than named. A caller with no provider — the offline
+ * corpus runner, the determinism check, a judge without an API key — compiles every sentence that states
+ * a limit, and gets a question for the ones that do not. Adding the field to the type is the honest way
+ * to say that; requiring it would make "no key" look like "broken".
  */
 export interface CompileDeps {
-  readonly llm: LanguageModel
+  readonly llm?: LanguageModel
   readonly catalog: CatalogReader
   readonly clock: { nowSec(): number }
 }
