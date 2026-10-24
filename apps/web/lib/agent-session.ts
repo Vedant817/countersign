@@ -573,12 +573,28 @@ export function sessionMandatePort(): MandatePort {
           allowedMerchantIds: constraints
             .filter((constraint) => constraint.type === 'mandate.checkout.allowed_merchants')
             .flatMap((constraint) => constraint.allowed.map((entry) => entry.id)),
-          acceptableItems: [],
+          // The items the buyer actually authorised, read from the signed mandate's own `line_items`
+          // entry. `read_my_mandate` reports them and the lawful shopper only buys from them — vi enforces
+          // the same list at `l3/create`, so an agent that ignored this list would simply be refused
+          // later, with a worse error.
+          acceptableItems: acceptableItemsOf(constraints),
           expiresAtEpochSec: Number(row.exp),
         },
       }
     },
   }
+}
+
+/** Every `{id, title}` an `line_items` constraint names, de-duplicated by id. */
+function acceptableItemsOf(constraints: readonly VIConstraint[]): { id: string; title: string }[] {
+  const items = new Map<string, string>()
+  for (const constraint of constraints) {
+    if (constraint.type !== 'mandate.checkout.line_items') continue
+    for (const requirement of constraint.items) {
+      for (const item of requirement.acceptable_items) items.set(item.id, item.title)
+    }
+  }
+  return [...items.entries()].map(([id, title]) => ({ id, title }))
 }
 
 function currencyOf(constraints: readonly VIConstraint[]): string | null {

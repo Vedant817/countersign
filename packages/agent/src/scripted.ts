@@ -157,17 +157,27 @@ export async function* runScriptedShopper(
     // --- 2. Choose a target ---------------------------------------------------------------------------
     // Items priced in another currency are dropped before choosing (EC-FX-1: never convert). The catalog
     // ships one JPY item, and a mandate denominated in USD cannot buy it.
+    //
+    // A **lawful** shopper also stays inside the items the mandate names: vi refuses a cart SKU the buyer
+    // never approved, so a purchase of anything else would be a refusal dressed up as an attempt. The two
+    // hostile behaviours deliberately skip this filter — following the listing *out of* the mandate is the
+    // attack they exist to model.
     const requestedSku = options.sku ?? null
-    const candidate = chooseCandidate(
-      found.value.items.filter((item) => item.currency === mandate.currency),
-      requestedSku,
-      behaviour,
-      mandate.maxAmountMinor,
-    )
+    const inCurrency = found.value.items.filter((item) => item.currency === mandate.currency)
+    const authorised =
+      behaviour === 'lawful' && mandate.acceptableItems.length > 0
+        ? inCurrency.filter((item) =>
+            mandate.acceptableItems.some((acceptable) => acceptable.id === item.sku),
+          )
+        : inCurrency
+    const candidate = chooseCandidate(authorised, requestedSku, behaviour, mandate.maxAmountMinor)
     if (candidate === null) {
       yield ev('final', nowMs(), {
         outcome: 'NO_PURCHASE',
-        text: 'Nothing in the catalog matched, so I did not buy anything.',
+        text:
+          behaviour === 'lawful' && mandate.acceptableItems.length > 0
+            ? 'Nothing the merchant returned is inside the items your mandate names, so I did not buy anything.'
+            : 'Nothing in the catalog matched, so I did not buy anything.',
       })
       return
     }

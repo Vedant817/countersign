@@ -1,6 +1,6 @@
 # P0-6(c) — agent refusal rate, measured
 
-Measured 2026-10-24T21:26:51.853Z against http://127.0.0.1:3210 with the local stack (Next + vi-service + Postgres).
+Measured 2026-10-24T21:43:49.834Z against http://127.0.0.1:3210 with the local stack (Next + vi-service + Postgres).
 Corpus: packages/agent/corpus/refusal-30.jsonl, 30 of 30 cases.
 
 ```
