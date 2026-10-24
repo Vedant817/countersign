@@ -40,7 +40,14 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 
 import { fenceAndInspect, fenceMerchantResult, type InjectionFlag } from './fence'
-import type { GateCheckView, GateOutcomeView, GateReasonView, MandateView, ShopDeps } from './types'
+import type {
+  GateCheckView,
+  GateOutcomeView,
+  GateReasonView,
+  MandateView,
+  MerchantToolResult,
+  ShopDeps,
+} from './types'
 
 /* ------------------------------------------------------------------------------------------ */
 /* MCP result decoding                                                                           */
@@ -53,10 +60,7 @@ import type { GateCheckView, GateOutcomeView, GateReasonView, MandateView, ShopD
  * else — no content, a non-text part, invalid JSON — is a **failure**, never an empty object: a tool
  * result that silently becomes `{}` reads to the model as "nothing matched", and it would act on that.
  */
-export function decodeToolResult(result: {
-  readonly isError?: boolean
-  readonly content?: readonly { readonly type: string; readonly text?: string }[]
-}): Result<unknown, CsError> {
+export function decodeToolResult(result: MerchantToolResult): Result<unknown, CsError> {
   const text = result.content?.find((part) => part.type === 'text')?.text
   if (typeof text !== 'string' || text === '') {
     return {

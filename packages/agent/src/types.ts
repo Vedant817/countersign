@@ -238,10 +238,19 @@ export interface MerchantMcp {
   close(): Promise<void>
 }
 
-/** The subset of MCP's `CallToolResult` this package reads. */
+/**
+ * The subset of MCP's `CallToolResult` this package reads.
+ *
+ * `type` is optional, and the interface carries an index signature, on purpose: the protocol's result is
+ * a union that includes members with no `content` at all (a tool-result block) and members with no `type`
+ * on their content parts. A narrower type here makes `MCPClient` structurally incompatible with
+ * {@link MerchantMcp} — which is how this was found, twice. `decodeToolResult` looks for the text part and
+ * refuses everything else, so widening the accepted input does not widen what is accepted as a value.
+ */
 export interface MerchantToolResult {
   readonly isError?: boolean
-  readonly content?: readonly { readonly type: string; readonly text?: string }[]
+  readonly content?: readonly { readonly type?: string; readonly text?: string }[]
+  readonly [key: string]: unknown
 }
 
 /* ------------------------------------------------------------------------------------------ */
