@@ -1512,3 +1512,45 @@ would appear as a real buyer's authority in any evidence packet filed from such 
 unconfigured refused even on loopback; production refused even when enabled; enabled local allowed
 while a foreign origin and a public host are refused), and the README's statement of the requirement.
 `scripts/dev-local.mjs` supplies the flag only for its own loopback servers.
+
+## D-052 - A status code is not a domain claim: `packages/vi-client` no longer infers "not found" from a 404
+
+**Date:** 2026-10-24
+**Decision:** `mapViError`'s `STATUS_FALLBACK` keeps only `401 → CS_UNAUTHENTICATED`,
+`403 → CS_FORBIDDEN` and `429 → CS_RATE_LIMITED`. Every other status that arrives without a
+`CsErrorBody` — or with a code core does not recognise — becomes `CS_INTERNAL`, with the HTTP status
+kept in `details.http_status` and `vi_code` kept when the body named one. The service's own
+recognised code still wins verbatim.
+**Reason:** An independent review found that locking a price for an in-stock item told the buyer
+*"We could not find that. It may have been removed."* The cause was environmental — a different
+service was listening on the vi port and answered 404 for `/v1/checkout-jwt` — but the **response to
+it was a code defect**: `apps/vi` wraps every non-2xx in a `CsErrorBody`, so a body with no envelope
+provably did not come from vi, and the module's own comment said so ("a proxy, a load balancer or a
+different service answered — `CS_INTERNAL` is the honest code"). The map disagreed with the comment
+and turned an unattributable status into a claim about our domain. The three statuses kept are the
+ones a gateway can legitimately assert about the *caller* rather than about an object we own.
+**Evidence:** `packages/vi-client/src/client.ts` (`STATUS_FALLBACK`, the three-case fallback in
+`mapViError`), `packages/vi-client/test/client.test.ts` — the regression test names the incident and
+asserts both that 404 no longer produces `CS_NOT_FOUND` and that the status is still visible in
+`details` so the information is not lost, only the claim. 186 tests pass.
+
+## D-053 - Missing configuration is a state, not an exception
+
+**Date:** 2026-10-24
+**Decision:** `/v/<packetId>` validates the packet id shape **before** reading any configuration and
+then checks its four required variables as a value (`missingVerifierEnv`), rendering a page that
+names the missing variables — never their values — instead of throwing. `/status` reports
+`paypalEnvRejected` only when `PAYPAL_ENV` is set to something other than `sandbox`, which is the
+EC-ENV-1 case, and says "not configured" when it is absent.
+**Reason:** Two versions of the same mistake, both found by the same review. The verifier called
+`requiredEnv` from inside `verifierDeps()` before validating the id, so on a deployment without
+`PUBLIC_BASE_URL` **every** `/v/*` URL returned Next's generic "a server error occurred" — including
+`/v/not-a-packet`, which EC-DSP-9 makes a 404. That URL is printed on an evidence PDF a stranger
+scans, so a generic error reads as "the evidence was withdrawn". Separately, `/status` described a
+*running* process as one that "should have refused" to boot, because it treated "not sandbox" and
+"not set" as the same fact; EC-ENV-1 rejects a live value, and an unset variable is simply an
+unconfigured demo.
+**Evidence:** `apps/web/app/v/[packetId]/config.ts` + `config.test.ts` (five tests: complete
+environment, every-absent case, blank-as-missing, variables-not-values, singular/plural phrasing),
+`apps/web/app/v/[packetId]/page.tsx` (shape check moved above configuration), and
+`apps/web/app/status/probe.ts` (`paypalEnvRejected` documented as distinct from `!sandboxOnly`).

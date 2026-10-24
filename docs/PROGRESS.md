@@ -51,9 +51,9 @@ buildable now.
 | WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | todo | | E2E + table fallback |
 | WP-17f | Landing, status, design polish | A | 17a–e | wip | `d0fe7ea` | Landing/nav/judge/status/`/regions` copy reworked, 360 px layout fixed, 14 E2E green; Lighthouse ≥ 90 a11y not yet measured |
 | WP-18 | Public verifier `/v/[packetId]` | B | 03, 15d | done | `774e8a4` | AT-M18 ✅ 226 |
-| WP-19 | Privacy, logging, audit, status | A | 02, 12 | todo | | AT-M19 |
+| WP-19 | Privacy, logging, audit, status | A | 02, 12 | wip | `e3b3174` | AT-M19.1 ✅ 49 offline (merge `0878bd3`); AT-M19.2 is `packages/core`'s logger · remaining: the purge sweep job, and wiring `webhookHealth` into `/status` |
 | WP-20 | Evals + Judge Mode | A | 11, 13, 15e | todo | | J1–J4 green ×20 |
-| WP-21 | Edge-case sweep: every §12 row tested | all | all | todo | | `pnpm test:ec` = 109/109; currently **87/109 referenced, 22 unclaimed**, and 2 rows whose test exists but is still `todo` in the ledger (`EC-IDEM-4`, `EC-MER-1`) |
+| WP-21 | Edge-case sweep: every §12 row tested | all | all | todo | | `pnpm test:ec` = 109/109; currently **90/109 referenced, 19 unclaimed**, and `EC-IDEM-4`/`EC-MER-1` are still `todo` in the ledger despite having tests |
 | WP-22 | Docs, README, Devpost assets, video shot list | A | 20 | todo | | §19–§20 checklists |
 
 WP-15e is **not** blocked: its code and tests can be built against the PayPal client's verified
@@ -270,3 +270,40 @@ WP-06s and everything needing live sandbox is not started.
   EC-MA/EC-LLM-4…5, live sandbox EC-ENV-2/3/EC-PP-3/4) rather than a test someone forgot to write. Two
   further rows (`EC-IDEM-4`, `EC-MER-1`) have tests but are still `status: todo` in the ledger and need
   confirming rather than labelling.
+
+- **2026-10-24 (IST)** — **WP-19 `@countersign/privacy` (merge `0878bd3`).** The package answers four
+  questions and owns no I/O, so its 49 tests run without credentials: how long we may keep each class
+  of data (`RETENTION_POLICY` is §12.13's table as data, so the sweep, the page and the erasure
+  planner read one set of numbers), whether an erasure may run today (`planErasure`), what "erased"
+  means for a row (`pseudonymiseUser` — domain-separated digests under a `PRIVACY_PSEUDONYM_SALT`, so
+  a bare `sha256(email)` is not what an operator gets), and what the subject is told (the 48-hour
+  DPDP notice, the subject-access export, the prompt allow-list, the cross-border statement).
+  AT-M19.1 is covered end to end, including the part a weak implementation gets wrong: **resolution
+  releases the dispute hold but not the 540-day evidence window**, so a closed case inside the window
+  stays held with a date rather than being deleted. A dispute hold reports the earliest legal date and
+  marks it `provisional`, because EC-PRIV-1 requires a date in the message and the case can outlive
+  the window. Ledger movement: **22 → 19 unclaimed rows**, 557 → 562 references; `EC-PRIV-1/2/4/5/6`
+  are now handled with tests (`EC-PRIV-3` was already the verifier's).
+
+- **2026-10-24 (IST)** — **The independent review round found three real defects in the running app,
+  all fixed and regression-tested.** The reviewer confirmed the `/status` mobile fix and then found
+  what the automated suite could not see, because all three need a *misconfigured or moved* deployment
+  rather than a test double:
+
+  1. **A different service on the vi port made a price lock lie.** Locking a price for an in-stock
+     item redirected to *"We could not find that. It may have been removed."* — `CS_NOT_FOUND`
+     produced by `packages/vi-client`'s `STATUS_FALLBACK`, which mapped any 404 with no `CsErrorBody`
+     to "not found". The module's own comment already said a body with no envelope means *something
+     between us and vi answered*; the code disagreed with it. Only 401/403/429 are now inferred from
+     the status, because those are facts a gateway can assert about the caller.
+  2. **Every `/v/<packetId>` URL was a 500** when `PUBLIC_BASE_URL` was unset, including
+     `/v/not-a-packet`, which EC-DSP-9 says must be a 404 — `verifierDeps()` threw from `requiredEnv`
+     before the id was validated. The shape check now runs first and the configuration is checked as a
+     value, so an unconfigured deployment names the missing variables (never their values) in a
+     sentence.
+  3. **`/status` claimed a running process should not have booted.** The PayPal line appended "not
+     sandbox; boot should have refused (§6, EC-ENV-1)" whenever `PAYPAL_ENV` was not `sandbox`,
+     including when it was absent. EC-ENV-1 is about a *live* value; absent is unconfigured.
+  The reviewer's remaining observation was environmental, not a code defect: the local vi-service had
+  stopped and a stray process was serving port 8000, which is why the review could not complete a
+  quote. The E2E suite had passed 14/14 against the real service earlier in the session.
