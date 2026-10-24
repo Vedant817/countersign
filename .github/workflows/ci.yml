@@ -112,6 +112,21 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.12.22'
+          enable-cache: true
+      - name: sync the pinned Verifiable Intent project
+        # `packages/verifier/test/qa4-checkout-parity.test.ts` (EC-PRICE-1 / AT-M18.1) runs the
+        # generated `verify.py` through `uv run --project apps/vi`, and `test/verify-py.test.ts`
+        # does the same. This job never installed uv, so the spawn failed with ENOENT and the test
+        # reported exit code `-1` with empty output — a missing interpreter that read like a
+        # verification verdict. The interpreter is a prerequisite of the §12 acceptance test, so it
+        # is installed here rather than the assertion being relaxed.
+        working-directory: apps/vi
+        run: |
+          uv python pin 3.13
+          uv sync --frozen --extra dev
       - name: unit and integration tests
         # `test:ci`, not `vitest` — deliberate, and it was a real bug once already.
         #
