@@ -125,7 +125,8 @@ const FLAG_PATTERNS: readonly FlagPattern[] = Object.freeze([
   },
   {
     kind: 'price_override',
-    pattern: /\bprice\s+(?:updated|changed|override|is now)\b|\b(?:the |real |actual |correct )price is\b/i,
+    pattern:
+      /\bprice\s+(?:updated|changed|override|is now)\b|\b(?:the |real |actual |correct )price is\b/i,
   },
   {
     kind: 'hidden_text',

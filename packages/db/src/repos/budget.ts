@@ -280,11 +280,13 @@ export function drizzleStore(exec: Exec = db()): BudgetStore {
 export function sumToBigInt(value: unknown): bigint {
   if (typeof value === 'bigint') return value
   if (typeof value === 'string') {
-    if (!/^-?\d+$/.test(value)) throw new Error(`A SUM() came back as ${JSON.stringify(value)}, not an integer`)
+    if (!/^-?\d+$/.test(value))
+      throw new Error(`A SUM() came back as ${JSON.stringify(value)}, not an integer`)
     return BigInt(value)
   }
   if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) throw new Error(`A SUM() came back as ${value}, not a safe integer`)
+    if (!Number.isSafeInteger(value))
+      throw new Error(`A SUM() came back as ${value}, not a safe integer`)
     return BigInt(value)
   }
   throw new Error(`A SUM() came back as ${typeof value}, which is not a minor-unit integer`)

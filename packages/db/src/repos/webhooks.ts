@@ -278,7 +278,10 @@ export function countFailedSince(since: Date, exec?: Exec): Promise<Result<numbe
         .select({ id: webhookEvents.id })
         .from(webhookEvents)
         .where(
-          and(eq(webhookEvents.verified, 'FAILED'), sql`${webhookEvents.received_at} >= ${since.toISOString()}`),
+          and(
+            eq(webhookEvents.verified, 'FAILED'),
+            sql`${webhookEvents.received_at} >= ${since.toISOString()}`,
+          ),
         )
       return rows.length
     },

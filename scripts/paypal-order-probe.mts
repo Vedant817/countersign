@@ -18,7 +18,9 @@ function envLocal(): Record<string, string> {
 
 const env = envLocal()
 const base = env['PAYPAL_API_BASE'] ?? 'https://api-m.sandbox.paypal.com'
-const basic = Buffer.from(`${env['PAYPAL_CLIENT_ID']}:${env['PAYPAL_CLIENT_SECRET']}`).toString('base64')
+const basic = Buffer.from(`${env['PAYPAL_CLIENT_ID']}:${env['PAYPAL_CLIENT_SECRET']}`).toString(
+  'base64',
+)
 
 const tokenResponse = await fetch(`${base}/v1/oauth2/token`, {
   method: 'POST',
@@ -66,6 +68,15 @@ for (const [index, body] of variants.entries()) {
     },
     body: JSON.stringify(body),
   })
-  const json = (await response.json()) as { id?: string; status?: string; name?: string; details?: unknown }
-  console.log(`variant ${index}: ${response.status}`, json.id ?? json.name, JSON.stringify(json.details ?? '').slice(0, 220))
+  const json = (await response.json()) as {
+    id?: string
+    status?: string
+    name?: string
+    details?: unknown
+  }
+  console.log(
+    `variant ${index}: ${response.status}`,
+    json.id ?? json.name,
+    JSON.stringify(json.details ?? '').slice(0, 220),
+  )
 }

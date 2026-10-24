@@ -57,27 +57,27 @@ can be given, so it is next after the sandbox credentials land (`docs/HUMAN_TODO
 
 ## What works today
 
-| Area                                | State                                                                                    |
-| ----------------------------------- | ---------------------------------------------------------------------------------------- |
-| Intent compiler (`/intent`)         | Working. 56/60 on the golden set, non-deterministic — see the numbers below.             |
-| Gate (12 deterministic checks)      | Working. 0/50 injection attack-success on the corpus, and a real checkout now decides.   |
-| Shopping agent (`/agent`)           | Working. Tool loop over the merchant MCP, real mandate, Gate BLOCK/ALLOW shown inline.   |
-| Mandate signing + verifier          | Working. Ed25519 / SD-JWT / JCS, with a standalone `verify.py` a third party can run.    |
-| Storefront (`/shop`)                | Working. 24 products from PostgreSQL, price-quote checkout.                              |
-| `/status`                           | Working. Probes every dependency for real and names the one that is short.               |
-| Vault onboarding                    | Not yet. Blocked on sandbox credentials.                                                 |
-| Judge Mode, merchant + disputes UIs | Not yet.                                                                                 |
+| Area                                | State                                                                                  |
+| ----------------------------------- | -------------------------------------------------------------------------------------- |
+| Intent compiler (`/intent`)         | Working. 56/60 on the golden set, non-deterministic — see the numbers below.           |
+| Gate (12 deterministic checks)      | Working. 0/50 injection attack-success on the corpus, and a real checkout now decides. |
+| Shopping agent (`/agent`)           | Working. Tool loop over the merchant MCP, real mandate, Gate BLOCK/ALLOW shown inline. |
+| Mandate signing + verifier          | Working. Ed25519 / SD-JWT / JCS, with a standalone `verify.py` a third party can run.  |
+| Storefront (`/shop`)                | Working. 24 products from PostgreSQL, price-quote checkout.                            |
+| `/status`                           | Working. Probes every dependency for real and names the one that is short.             |
+| Vault onboarding                    | Not yet. Blocked on sandbox credentials.                                               |
+| Judge Mode, merchant + disputes UIs | Not yet.                                                                               |
 
 ## The numbers, with their denominators
 
-| Report                               | Value                        | Source                                        |
-| ------------------------------------ | ---------------------------- | --------------------------------------------- |
-| Compiler exact match                 | **56/60 (93.3%)**            | `packages/evals/corpus/compiler.jsonl`        |
-| Injection attack-success at the Gate | **0/50 (0.0%)**              | `packages/evals/corpus/injection.jsonl`       |
-| Injection attack-success, live agent | **0/30 (0.0%)**              | `packages/agent/corpus/refusal-30.jsonl`      |
-| Agent refusal rate                   | **30/30 (100%)**             | same corpus, `docs/verification/P0-6-refusal.md` |
-| Liability-router accuracy            | not measured                 | corpus does not exist yet                     |
-| Gate p95 latency                     | not measured                 | no load harness yet                           |
+| Report                               | Value             | Source                                           |
+| ------------------------------------ | ----------------- | ------------------------------------------------ |
+| Compiler exact match                 | **56/60 (93.3%)** | `packages/evals/corpus/compiler.jsonl`           |
+| Injection attack-success at the Gate | **0/50 (0.0%)**   | `packages/evals/corpus/injection.jsonl`          |
+| Injection attack-success, live agent | **0/30 (0.0%)**   | `packages/agent/corpus/refusal-30.jsonl`         |
+| Agent refusal rate                   | **30/30 (100%)**  | same corpus, `docs/verification/P0-6-refusal.md` |
+| Liability-router accuracy            | not measured      | corpus does not exist yet                        |
+| Gate p95 latency                     | not measured      | no load harness yet                              |
 
 ```sh
 pnpm --filter @countersign/evals test        # 22 offline tests — no model, no network

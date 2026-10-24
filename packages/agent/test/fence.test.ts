@@ -93,12 +93,16 @@ describe('the detector', () => {
 
   it('does not flag ordinary listing prose', () => {
     expect(
-      inspectUntrustedText('Ridgeline Trail Shoes. Waterproof, 320 g, with a rock plate. Sizes 8–12.'),
+      inspectUntrustedText(
+        'Ridgeline Trail Shoes. Waterproof, 320 g, with a rock plate. Sizes 8–12.',
+      ),
     ).toEqual([])
-    expect(inspectUntrustedText('Limited Run Trail Gaiters. Numbered run of 300, unisex.')).toEqual([])
-    expect(inspectUntrustedText('Merino Base Layer. 200 gsm, flatlock seams, machine washable.')).toEqual(
+    expect(inspectUntrustedText('Limited Run Trail Gaiters. Numbered run of 300, unisex.')).toEqual(
       [],
     )
+    expect(
+      inspectUntrustedText('Merino Base Layer. 200 gsm, flatlock seams, machine washable.'),
+    ).toEqual([])
   })
 
   it('flags a limit a listing asserts was raised', () => {

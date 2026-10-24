@@ -147,7 +147,10 @@ const getOrderStatusInput = z.object({ order_id: z.string().min(1).max(128) })
  * Descriptions and titles come back wrapped as `{untrusted_text}` — §8.9's requirement, and the wrapper is
  * authored by `@countersign/gate`'s `untrusted()`, not re-implemented here.
  */
-function productWire(product: MerchantProduct, includeListingHtml: boolean): Record<string, unknown> {
+function productWire(
+  product: MerchantProduct,
+  includeListingHtml: boolean,
+): Record<string, unknown> {
   return {
     sku: product.sku,
     title: { untrusted_text: product.title },

@@ -623,7 +623,12 @@ export function countDisputesForWalletSince(
         .innerJoin(orders, eq(disputes.order_id, orders.id))
         .innerJoin(checkoutAttempts, eq(orders.attempt_id, checkoutAttempts.id))
         .innerJoin(mandates, eq(checkoutAttempts.mandate_id, mandates.id))
-        .where(and(eq(mandates.wallet_id, walletId), sql`${disputes.created_at} >= ${since.toISOString()}`))
+        .where(
+          and(
+            eq(mandates.wallet_id, walletId),
+            sql`${disputes.created_at} >= ${since.toISOString()}`,
+          ),
+        )
       return rows.length
     },
     { table: 'disputes', walletId, since },

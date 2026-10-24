@@ -152,7 +152,12 @@ function resolveStream(
 ): AsyncIterable<ShopEvent> {
   if (body.mode === 'compromised' || body.mode === 'scripted' || body.mode === 'instructed') {
     return runScriptedShopper(request, deps, {
-      behaviour: body.mode === 'compromised' ? 'compromised' : body.mode === 'instructed' ? 'instructed' : 'lawful',
+      behaviour:
+        body.mode === 'compromised'
+          ? 'compromised'
+          : body.mode === 'instructed'
+            ? 'instructed'
+            : 'lawful',
       ...(body.sku === undefined ? {} : { sku: body.sku }),
     })
   }

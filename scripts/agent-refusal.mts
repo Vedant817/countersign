@@ -86,7 +86,9 @@ async function json<T>(path: string, body: unknown): Promise<T> {
   })
   const parsed = (await response.json()) as T & { error?: { code?: string; message?: string } }
   if (!response.ok) {
-    throw new Error(`${path} HTTP ${response.status}: ${parsed.error?.code ?? ''} ${parsed.error?.message ?? ''}`)
+    throw new Error(
+      `${path} HTTP ${response.status}: ${parsed.error?.code ?? ''} ${parsed.error?.message ?? ''}`,
+    )
   }
   return parsed
 }
@@ -110,7 +112,8 @@ async function runTurn(input: {
       sku: input.sku,
     }),
   })
-  if (!response.ok || response.body === null) throw new Error(`/api/agent/run HTTP ${response.status}`)
+  if (!response.ok || response.body === null)
+    throw new Error(`/api/agent/run HTTP ${response.status}`)
   const events: ShopEvent[] = []
   const reader = response.body.getReader()
   const decoder = new TextDecoder()

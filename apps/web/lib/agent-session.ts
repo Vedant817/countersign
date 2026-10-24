@@ -258,7 +258,10 @@ export async function provisionAgentSession(
   //    `z.number()`), while `amount_range` uses the `MinorAmount` transform. Passing a `bigint` for the
   //    budget bound is refused by the client's own request validation — which is what happened, and why
   //    the two arrays are built side by side instead of cast.
-  const capNumber = Number(input.capMinor)
+  // vi's `budget` bound is a pydantic `int`, so the wire carries a JSON number (the vi-client's schema is
+  // `z.number()`). `toJsonSafe` is the compiler's sanctioned bigint → number boundary, and it **refuses**
+  // a value outside the safe range rather than rounding it the way `Number()` would.
+  const capNumber = toJsonSafe(input.capMinor) as number
 
   // --- 4a. What the buyer's sentence covers ---------------------------------------------------------
   //
@@ -432,7 +435,9 @@ async function hasMerchantKey(): Promise<boolean> {
  * Adding one to another work package's package would be the wrong move for a demo step; if a second
  * caller appears, that is the moment to move it.
  */
-export async function syncViKeys(vi: ViClient = createViClientOrThrow()): Promise<Result<number, CsError>> {
+export async function syncViKeys(
+  vi: ViClient = createViClientOrThrow(),
+): Promise<Result<number, CsError>> {
   const response = await vi.jwks()
   if (!response.ok) return response
   let written = 0
@@ -442,7 +447,9 @@ export async function syncViKeys(vi: ViClient = createViClientOrThrow()): Promis
     if (typeof kid !== 'string' || kid === '') continue
     if (typeof role !== 'string' || !KNOWN_ROLES.has(role)) continue
     const status =
-      typeof entry['status'] === 'string' && KNOWN_STATUS.has(entry['status']) ? entry['status'] : 'ACTIVE'
+      typeof entry['status'] === 'string' && KNOWN_STATUS.has(entry['status'])
+        ? entry['status']
+        : 'ACTIVE'
     const publicJwk = Object.fromEntries(
       Object.entries(entry).filter(
         ([key]) => !['role', 'status', 'owner_id', 'not_before', 'retired_at'].includes(key),
@@ -469,7 +476,10 @@ export async function syncViKeys(vi: ViClient = createViClientOrThrow()): Promis
         })
     } catch (cause) {
       return err(
-        csError('CS_INTERNAL', `Could not mirror the key ${kid} into jwks_keys: ${describe(cause)}`),
+        csError(
+          'CS_INTERNAL',
+          `Could not mirror the key ${kid} into jwks_keys: ${describe(cause)}`,
+        ),
       )
     }
     written += 1
@@ -523,7 +533,10 @@ export async function acceptableItemsFor(
     )
   }
   // Bounded so a one-word intent cannot authorise the entire catalog in one entry.
-  return { ok: true, value: matches.slice(0, 25).map((product) => ({ id: product.sku, title: product.title })) }
+  return {
+    ok: true,
+    value: matches.slice(0, 25).map((product) => ({ id: product.sku, title: product.title })),
+  }
 }
 
 /* ------------------------------------------------------------------------------------------ */

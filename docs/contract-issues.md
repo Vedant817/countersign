@@ -125,21 +125,21 @@ are corrected separately so the next implementer does not chase them.
 
 ## 10. Date parameters inside Drizzle `sql` templates throw `ERR_INVALID_ARG_TYPE` (found 2026-10-25, P0-6)
 
-**Where:** `packages/db/src/repos/{attempts,budget,disputes,orders,webhooks}.ts` — every
+**Where:** `packages/db/src/repos/{attempts,budget,disputes,orders,webhooks}.ts` ï¿½ every
 `sql\`${column} >= ${someDate}\`` comparison (10 sites).
 
 **Symptom:** the query fails with
 
 ```
 Failed query: select "id" from "checkout_attempts" where ("mandate_id" = $1 and "created_at" >= $2)
-params: mdt_…,Sun Oct 25 2026 02:42:58 GMT+0530 (India Standard Time)
+params: mdt_ï¿½,Sun Oct 25 2026 02:42:58 GMT+0530 (India Standard Time)
   inner: ERR_INVALID_ARG_TYPE The "string" argument must be of type string or an instance of Buffer or
          ArrayBuffer. Received an instance of Date
 ```
 
 **Why it matters:** `countRecentAttempts` is Gate check 12 and `budget.ts`'s `since` filters are Gate
 check 8/9's reads. On Node 24.13.1 with drizzle-orm 0.45.3 / postgres 3.4.9 the comparison throws, so
-**every Gate evaluation blocks with `CS_INTERNAL`** before anything is reserved — the velocity guard
+**every Gate evaluation blocks with `CS_INTERNAL`** before anything is reserved ï¿½ the velocity guard
 reports "check threw" and the budget check cannot complete. A plain `eq()` on text works, and
 `postgres.js` handles a `Date` parameter correctly on its own: it is Drizzle's `sql` template that
 mangles the value. Passing `.toISOString()` fixes it.

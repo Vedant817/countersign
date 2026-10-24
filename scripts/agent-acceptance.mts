@@ -62,7 +62,6 @@ function loadEnvLocal(): Record<string, string> {
 
 const env = loadEnvLocal()
 const BASE = (env['COUNTERSIGN_ACCEPTANCE_BASE'] ?? 'http://127.0.0.1:3000').replace(/\/+$/, '')
-const MERCHANT_ID = env['MERCHANT_ID'] ?? ''
 const MERCHANT_NAME = env['MERCHANT_NAME'] ?? 'Northwind Outfitters'
 
 interface ShopEvent {
@@ -104,7 +103,9 @@ async function json<T>(path: string, body: unknown): Promise<T> {
   })
   const parsed = (await response.json()) as T & { error?: { code?: string; message?: string } }
   if (!response.ok) {
-    throw new Error(`${path} answered HTTP ${response.status}: ${parsed.error?.code ?? ''} ${parsed.error?.message ?? ''}`)
+    throw new Error(
+      `${path} answered HTTP ${response.status}: ${parsed.error?.code ?? ''} ${parsed.error?.message ?? ''}`,
+    )
   }
   return parsed
 }
@@ -183,7 +184,9 @@ async function main(): Promise<void> {
 
   const status = await fetch(`${BASE}/status`).catch(() => null)
   if (status === null) {
-    throw new Error(`${BASE} is not reachable. Start the web app with COUNTERSIGN_AGENT_DEMO=1 first.`)
+    throw new Error(
+      `${BASE} is not reachable. Start the web app with COUNTERSIGN_AGENT_DEMO=1 first.`,
+    )
   }
 
   /* --- Scenario 0: the literal acceptance sentence, at its literal cap --------------------------- */
@@ -197,7 +200,6 @@ async function main(): Promise<void> {
       message: 'Buy running shoes under $50',
       mode: 'scripted',
     })
-    const gate = gateOf(events)
     const final = finalOf(events)
     // The literal sentence is run at its literal cap. The Northwind catalogue has no shoe at or under $50
     // (the cheapest are $119 and $128), so the *correct* result is a refusal with a reason — and the claim
@@ -205,8 +207,9 @@ async function main(): Promise<void> {
     claim(
       final.outcome !== 'ORDERED' && final.outcome !== undefined,
       'the literal sentence "buy running shoes under $50" is handled honestly',
-      `outcome=${final.outcome}, no PayPal order claimed, no capture implied. ` +
-        (final.text ?? '').slice(0, 200),
+      `outcome=${final.outcome}, no PayPal order claimed, no capture implied. ${(
+        final.text ?? ''
+      ).slice(0, 200)}`,
     )
   }
 
@@ -306,7 +309,11 @@ async function main(): Promise<void> {
     const clientId = env['PAYPAL_CLIENT_ID'] ?? ''
     const clientSecret = env['PAYPAL_CLIENT_SECRET'] ?? ''
     if (clientId === '' || clientSecret === '' || amountMinor === null || currency === null) {
-      claim(false, 'C: a real sandbox order', 'PayPal credentials or the ALLOW amount were unavailable')
+      claim(
+        false,
+        'C: a real sandbox order',
+        'PayPal credentials or the ALLOW amount were unavailable',
+      )
     } else {
       const client = new PayPalClient({
         baseUrl: env['PAYPAL_API_BASE'] ?? 'https://api-m.sandbox.paypal.com',
@@ -345,8 +352,9 @@ async function main(): Promise<void> {
         claim(
           false,
           'C: a real sandbox order',
-          `createOrder failed: ${created.error.code} ${created.error.message} ` +
-            JSON.stringify(created.error.details ?? {}).slice(0, 240),
+          `createOrder failed: ${created.error.code} ${created.error.message} ${JSON.stringify(
+            created.error.details ?? {},
+          ).slice(0, 240)}`,
         )
       } else {
         const reread = await client.getOrder(created.value.id)
@@ -354,8 +362,9 @@ async function main(): Promise<void> {
           reread.ok && reread.value.id === created.value.id,
           'C: a real sandbox order exists and re-reads by id',
           `paypal_order_id=${created.value.id} status=${created.value.status} ` +
-            `amount=${amountMinor === null ? 'n/a' : cents(amountMinor)} ${currency}` +
-            (reread.ok ? '' : ` (re-read failed: ${reread.error.code})`),
+            `amount=${amountMinor === null ? 'n/a' : cents(amountMinor)} ${currency}${
+              reread.ok ? '' : ` (re-read failed: ${reread.error.code})`
+            }`,
         )
         claim(
           created.value.status === 'CREATED' || created.value.status === 'PAYER_ACTION_REQUIRED',

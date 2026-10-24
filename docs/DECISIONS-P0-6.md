@@ -29,11 +29,11 @@ Four consequences are decisions rather than implementation detail:
    browser tab to hold a non-extractable device key. It is single-use, never persisted, and gated behind
    `COUNTERSIGN_AGENT_DEMO=1` outside production. Everything else in a session is real: vi mints the agent
    key, issues the L1, prepares the L2, verifies the P-256 signature on finalize, and the mandate, budget
-   and wallet cap land in Postgres. The one thing lost is *key custody*, and it is stated in the module
+   and wallet cap land in Postgres. The one thing lost is _key custody_, and it is stated in the module
    header rather than hidden.
 
-**Reason.** The judge panel scored "agentic commerce" 3/10 with the sentence *"The agent doesn't exist
-(WP-13)"*, which was literally true — `packages/agent/src/index.ts` was `export {}`. §8.13 also makes an
+**Reason.** The judge panel scored "agentic commerce" 3/10 with the sentence _"The agent doesn't exist
+(WP-13)"_, which was literally true — `packages/agent/src/index.ts` was `export {}`. §8.13 also makes an
 architectural claim that is worth being able to demonstrate rather than assert: the agent is allowed to be
 wrong, confidently and at length, because every authority in a run is a **tool result**. The `compromised`
 behaviour exists to show the consequence: an agent that fabricates an authorisation still gets a Gate BLOCK,
@@ -57,7 +57,7 @@ and the block carries a sentence a buyer can read.
 faults made **every** Gate evaluation block with `CS_INTERNAL`, so no purchase could be decided at all:
 `Date` parameters inside Drizzle `sql` templates throw `ERR_INVALID_ARG_TYPE` (10 call sites, fixed with
 `.toISOString()`), and `sum(bigint)` comes back from postgres.js as a **string** while the code types it
-`bigint`, so `claimed + amount.minor` threw *"Cannot mix BigInt and other types"* in Gate check 9 (fixed
+`bigint`, so `claimed + amount.minor` threw _"Cannot mix BigInt and other types"_ in Gate check 9 (fixed
 with one `sumToBigInt` boundary helper). Both are recorded because they are the difference between "the
 Gate works" and "the Gate has never run".
 
