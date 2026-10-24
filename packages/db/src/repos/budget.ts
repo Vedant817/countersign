@@ -40,7 +40,7 @@
  * asserted separately from the schema. **No PayPal is involved anywhere** — that is our own database
  * (AGENTS.md rule 5 applies to PayPal, not to this).
  */
-import { and, eq, ne, sql } from 'drizzle-orm'
+import { and, eq, gte, ne, sql } from 'drizzle-orm'
 
 import {
   money as makeMoney,
@@ -234,7 +234,11 @@ export function drizzleStore(exec: Exec = db()): BudgetStore {
         COMMIT: 0n,
         REVERSE: 0n,
       }
-      for (const r of rows) totals[r.kind] = sumToBigInt(r.total)
+      // `BigInt(...)`: postgres-js returns `int8`/`numeric` as **strings** by default (they may exceed
+      // `Number.MAX_SAFE_INTEGER`), and a raw `sql<bigint>` expression gets no drizzle mapping. Without
+      // this, `computeFromEntries` mixed a number with `0n` and threw — a failure only a real database
+      // could show, because every unit test injects a store that already returns BigInts.
+      for (const r of rows) totals[r.kind] = BigInt(r.total)
       return totals
     },
     async walletSpendInPeriod(walletId, currency, period, at, excludeAttemptId) {
@@ -252,44 +256,20 @@ export function drizzleStore(exec: Exec = db()): BudgetStore {
           and(
             eq(mandates.wallet_id, walletId),
             eq(budgetEntries.currency, currency),
-            sql`${budgetEntries.at} >= ${since.toISOString()}`,
+            // `gte`, not a raw `sql` fragment: a `Date` embedded directly is handed to postgres-js
+            // untouched, and it refuses one ("The string argument must be of type string or an instance
+            // of Buffer or ArrayBuffer"). `gte` routes it through the timestamp column's encoder.
+            gte(budgetEntries.at, since),
             // Gate check 9 runs after check 8 has reserved this attempt's cart, so excluding it is what
             // stops the current cart being counted twice. See the BudgetStore docstring (D-021).
             excludeAttemptId ? ne(budgetEntries.attempt_id, excludeAttemptId) : undefined,
           ),
         )
       const row = rows[0]
-      return row ? sumToBigInt(row.reserved) - sumToBigInt(row.released) : 0n
+      // `BigInt(...)` for the same reason as `sumEntriesByKind`: the driver hands back strings.
+      return row ? BigInt(row.reserved) - BigInt(row.released) : 0n
     },
   }
-}
-
-/**
- * Read a `SUM()` result as **integer minor units**.
- *
- * Postgres `sum(bigint)` has type `numeric`, not `bigint`, and `postgres.js` returns a `numeric` as a
- * **string** so a value beyond `Number.MAX_SAFE_INTEGER` is not silently rounded. Drizzle's
- * `sql<bigint>` annotation is a claim about our intent, not about the wire — and the difference is not
- * cosmetic: `Record<BudgetEntryKind, bigint>` filled with `"13300"` makes `computeFromEntries` subtract
- * strings, and `claimed + amount.minor` in the Gate's check 9 throws
- * *"Cannot mix BigInt and other types"*, which blocks **every** purchase with `CS_INTERNAL`.
- *
- * A value that is not an integer is refused rather than coerced: `Number("13300.5")` would be a float,
- * and money is never a float (AGENTS.md rule 9).
- */
-export function sumToBigInt(value: unknown): bigint {
-  if (typeof value === 'bigint') return value
-  if (typeof value === 'string') {
-    if (!/^-?\d+$/.test(value))
-      throw new Error(`A SUM() came back as ${JSON.stringify(value)}, not an integer`)
-    return BigInt(value)
-  }
-  if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value))
-      throw new Error(`A SUM() came back as ${value}, not a safe integer`)
-    return BigInt(value)
-  }
-  throw new Error(`A SUM() came back as ${typeof value}, which is not a minor-unit integer`)
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -1078,7 +1058,8 @@ export function countCommitsSince(
           and(
             eq(budgetEntries.mandate_id, mandateId),
             eq(budgetEntries.kind, 'COMMIT'),
-            sql`${budgetEntries.at} >= ${since.toISOString()}`,
+            // See `walletSpendInPeriod`: a `Date` in a raw `sql` fragment is a runtime failure.
+            gte(budgetEntries.at, since),
           ),
         )
       return rows.length

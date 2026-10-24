@@ -31,7 +31,7 @@ import {
   scoreCase,
   summarise,
 } from '../eval/runner'
-import { replayModel, runEvalCase } from '../eval/replay'
+import { replayModelByText, runEvalCase } from '../eval/replay'
 
 const golden = loadGoldenSet()
 const cached = loadCachedAnswers()
@@ -62,9 +62,12 @@ describe('eval:ci — the cached golden subset', () => {
   })
 
   it('scores above the floor, and every field the cached cases state matches', async () => {
-    const answers = new Map(cached.map((c) => [c.id, c.answer]))
-    const order = cached.map((c) => c.id)
-    const model = replayModel(answers, order)
+    /*
+     * Keyed by the intent, not by position. Since P0-7 the parser serves cases end to end and the model is
+     * never called for them (`compile` asks only when the sentence states a limit but names no product),
+     * so a positional queue would shift every later case onto the wrong recording.
+     */
+    const model = replayModelByText(new Map(cached.map((c) => [c.text, c.answer])))
 
     const results = []
     for (const answer of cached) {
@@ -95,15 +98,15 @@ describe('eval:ci — the cached golden subset', () => {
 
   it("the AT-M8.5 case compiles to the buyer's own $130 even though the recorded answer is hostile", async () => {
     // g53's recorded answer is a deliberately over-ceiling $999,999.99 in a text that says $130. The
-    // pipeline clamps it down and says so, so this case scores as correct on amount, budget and currency —
-    // which is the assertion AT-M8.5 actually asks for.
-    const byId = new Map(cached.map((c) => [c.id, c.answer]))
+    // deterministic parser reads the $130, the merge refuses to copy the model's number, and the pipeline
+    // says so in the read-back — which is the assertion AT-M8.5 actually asks for.
     const testCase = golden.find((c) => c.id === 'g53')
     expect(testCase).toBeDefined()
-    const outcome = await runEvalCase(replayModel(byId, ['g53']), catalog, {
-      id: 'g53',
-      text: testCase!.text,
-    })
+    const outcome = await runEvalCase(
+      replayModelByText(new Map(cached.map((c) => [c.text, c.answer]))),
+      catalog,
+      { id: 'g53', text: testCase!.text },
+    )
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) return
     expect(outcome.scored.amountMax).toBe('130.00')
@@ -112,12 +115,12 @@ describe('eval:ci — the cached golden subset', () => {
   })
 
   it('the g56 case produces exactly one blocking ambiguity rather than an invented cap', async () => {
-    const byId = new Map(cached.map((c) => [c.id, c.answer]))
     const testCase = golden.find((c) => c.id === 'g56')
-    const outcome = await runEvalCase(replayModel(byId, ['g56']), catalog, {
-      id: 'g56',
-      text: testCase!.text,
-    })
+    const outcome = await runEvalCase(
+      replayModelByText(new Map(cached.map((c) => [c.text, c.answer]))),
+      catalog,
+      { id: 'g56', text: testCase!.text },
+    )
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) return
     expect(outcome.value.ambiguities).toHaveLength(1)

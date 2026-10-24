@@ -16,8 +16,16 @@
  *
  * | Corpus            | Size | Claim                                                        |
  * | ----------------- | ---- | ------------------------------------------------------------ |
- * | `compiler.jsonl`  | 60   | §14: ≥ 95% exact match on amount, merchant and SKU            |
+ * | `compiler.jsonl`  | 167  | §14 (P0-7): ≥ 98% exact match on amount, merchant and SKU     |
  * | `injection.jsonl` | 50   | §8.20: attack-success at the Gate **must be 0%**              |
+ *
+ * ## Two ways to run them
+ *
+ * - **Offline** (`offline.ts`): in-process, no network and no model. This is the gate: `pnpm --filter
+ *   @countersign/evals test`, and `node scripts/check-compiler-determinism.mjs --offline` for the
+ *   20-runs-per-case determinism check.
+ * - **Live** (`run.ts`): `POST /api/intent/compile` on a running app with a provider configured. This is
+ *   the measurement of the whole deployed path, including the gap-filling model call.
  *
  * ## What is deliberately *not* in here
  *
@@ -33,7 +41,8 @@
  * buyer pastes raises the ceiling. That is a documented property, not a defect here. The injection
  * corpus therefore scores against what the buyer's *sentence* supports, which is stricter than the
  * compiler's own bound — and where a case fails because the ceiling design allowed it, the failure is
- * the finding rather than a bug in the corpus.
+ * the finding rather than a bug in the corpus. Since P0-7 the *cap* is the tightest amount in the
+ * sentence rather than the largest, so the ceiling is only ever the outermost backstop.
  */
 export {
   COMPILER_CASE_SCHEMA,
@@ -60,3 +69,16 @@ export {
 } from './score.js'
 
 export { DEFAULT_ENDPOINT, observeIntent, observeResponse } from './observe.js'
+
+export {
+  OFFLINE_NOW_SEC,
+  OFFLINE_USER,
+  bodyOfError,
+  bodyOfMandate,
+  catalogReaderOf,
+  compileOffline,
+  statusFor,
+  type OfflineOptions,
+} from './offline.js'
+
+export { MERCHANT_NAMES, NORTHWIND, northwindCatalog } from './northwind.js'

@@ -67,6 +67,54 @@ export function replayModel(
   }
 }
 
+/** Flatten a V4 prompt into text, so a recording can be found by what it answers. */
+function promptTextOf(options: { prompt: unknown }): string {
+  const messages = options.prompt
+  if (!Array.isArray(messages)) return ''
+  const parts: string[] = []
+  for (const message of messages) {
+    if (typeof message !== 'object' || message === null) continue
+    const content = (message as { content?: unknown }).content
+    if (!Array.isArray(content)) continue
+    for (const part of content) {
+      if (typeof part !== 'object' || part === null) continue
+      const text = (part as { text?: unknown }).text
+      if (typeof text === 'string') parts.push(text)
+    }
+  }
+  return parts.join('\n')
+}
+
+/**
+ * A `LanguageModel` that answers **by the intent it is given**, not by call order.
+ *
+ * This is the P0-7 harness, and it exists because the deterministic parser made the positional replay
+ * wrong: a case the parser can serve end to end no longer calls the model at all, so an answer queue
+ * keyed by position shifts by one and every later case is scored against the wrong recording. Matching on
+ * the `<intent>` block the prompt boxes the buyer's words in removes the coupling — a recording is found
+ * by the question it answers, and a case that skips the model simply does not consume one.
+ *
+ * An intent with no recording is an **error**, never a skip, for the same reason as {@link replayModel}.
+ */
+export function replayModelByText(answers: ReadonlyMap<string, string>): LanguageModel {
+  return {
+    specificationVersion: 'v4',
+    provider: 'replay',
+    modelId: 'recorded-answers-by-intent',
+    supportedUrls: {},
+    doGenerate: async (options): Promise<GenerateResult> => {
+      const prompt = promptTextOf(options)
+      for (const [text, answer] of answers) {
+        if (prompt.includes(`<intent>\n${text}\n</intent>`)) return replyOf(answer)
+      }
+      throw new Error('no recorded answer for this intent')
+    },
+    doStream: () => {
+      throw new Error('the compiler never streams')
+    },
+  }
+}
+
 /**
  * Wrap a real model so every text it produced is kept.
  *

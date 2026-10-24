@@ -167,7 +167,7 @@ function renderCache(entries: readonly CachedAnswer[]): string {
     '// on what each case tests; this file records only what the model answered.',
     '//',
     '// After recording, the cached gate measures the pipeline on real output. It still does not measure the',
-    '// model: only `eval:live` over all 60 cases does that.',
+    '// model: only `eval:live` over every case does that.',
   ].join('\n')
   return `${header}\n${entries.map((e) => JSON.stringify(e)).join('\n')}\n`
 }

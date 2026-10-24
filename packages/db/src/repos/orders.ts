@@ -24,7 +24,6 @@ import { and, eq, sql } from 'drizzle-orm'
 import type { CsError, Currency, Money, OrderId, Result, ShipmentId } from '@countersign/core'
 
 import { db, type Exec } from '../client'
-import { sumToBigInt } from './budget'
 import {
   authorizations,
   captures,
@@ -453,8 +452,9 @@ export async function sumCapturedForAuthorization(
         .select({ total: sql<bigint>`coalesce(sum(${captures.amount_minor}), 0)` })
         .from(captures)
         .where(eq(captures.authorization_id, authorizationId))
-      // `sum()` is `numeric` on the wire and postgres.js returns it as a string — see `sumToBigInt`.
-      return rows[0] === undefined ? 0n : sumToBigInt(rows[0].total)
+      // `BigInt(...)`: postgres-js returns the aggregate as a string, and a caller doing
+      // `alreadyCaptured + request.minor` would otherwise mix a string with a BigInt.
+      return rows[0] === undefined ? 0n : BigInt(rows[0].total)
     },
     { table: 'captures', authorizationId, op: 'sum' },
   )

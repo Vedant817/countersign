@@ -17,6 +17,11 @@ concurrency:
 
 permissions:
   contents: read
+  # gitleaks-action lists a pull request's commits to scan them; `GET /pulls/{n}/commits` answers
+  # 403 `Resource not accessible by integration` with `contents` alone (the response's own
+  # `x-accepted-github-permissions` header asks for `pull_requests=read`). Read-only: the scan is
+  # still the same scan.
+  pull-requests: read
 
 env:
   # Node 24 LTS (spec §4). The pnpm version is declared ONCE, in package.json's `packageManager` field;
@@ -52,6 +57,11 @@ jobs:
       - name: gitleaks (full history)
         uses: gitleaks/gitleaks-action@v2
         env:
+          # The action refuses to scan a pull request without it ("GITHUB_TOKEN is now required to
+          # scan pull requests"), which is why the first PR-triggered run of this workflow failed on
+          # this step alone while every push-triggered run passed. Supplying the automatic token is
+          # the action's documented setup; nothing about what is scanned changes.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
       - name: assert .env files are ignored except .env.example
         run: |
@@ -112,6 +122,21 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.12.22'
+          enable-cache: true
+      - name: sync the pinned Verifiable Intent project
+        # `packages/verifier/test/qa4-checkout-parity.test.ts` (EC-PRICE-1 / AT-M18.1) runs the
+        # generated `verify.py` through `uv run --project apps/vi`, and `test/verify-py.test.ts`
+        # does the same. This job never installed uv, so the spawn failed with ENOENT and the test
+        # reported exit code `-1` with empty output — a missing interpreter that read like a
+        # verification verdict. The interpreter is a prerequisite of the §12 acceptance test, so it
+        # is installed here rather than the assertion being relaxed.
+        working-directory: apps/vi
+        run: |
+          uv python pin 3.13
+          uv sync --frozen --extra dev
       - name: unit and integration tests
         # `test:ci`, not `vitest` — deliberate, and it was a real bug once already.
         #
@@ -204,6 +229,31 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------------------------
+  # P0-7: the compiler is deterministic, and this job is what makes that checkable rather than
+  # asserted. It runs the whole ≥150-case corpus (plus the five demo sentences and the injection
+  # sentence) in **recorded-response mode**: in-process, no network, no provider, fixed clock. A
+  # sentence whose output depends on a wall clock, an iteration order or a model sample fails here.
+  #
+  # Why its own job: this is the one gate a judge can reproduce with no credentials, so it should be
+  # legible on its own — and it must run even when the app cannot build.
+  # ---------------------------------------------------------------------------------------------
+  compiler-determinism:
+    name: compiler determinism (no model, no network)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: offline corpus (≥ 98% exact match, 0% injection success)
+        run: pnpm --filter @countersign/evals test
+      - name: 20 runs per case, byte-identical
+        run: node scripts/check-compiler-determinism.mjs --offline --runs 20
+
+  # ---------------------------------------------------------------------------------------------
   # Builds. `main` must always build (AGENTS.md rule 1).
   # ---------------------------------------------------------------------------------------------
   build:
@@ -287,6 +337,14 @@ jobs:
         run: pnpm db:seed
       - name: seed again (AT-M2.2 — must be idempotent)
         run: pnpm db:seed
+      - name: package tests against the seeded database
+        # `packages/db`'s live suites (`repos.live.test.ts`, `repos.edge-cases.live.test.ts`) skip
+        # without `DATABASE_URL`, so they never ran anywhere. This is the job with a database, so it is
+        # the job that executes them — which is what those files' own headers say should happen. They
+        # cover repository statements the Gate depends on: the wallet-cap period, the recurrence count,
+        # the two dispute readers, and agent-key rotation. Reviewing them found four Date-in-`sql`
+        # runtime failures and a string/BigInt mismatch that no unit test could have shown.
+        run: pnpm --filter @countersign/db exec vitest run
       - name: assert no money column is a float
         # The structural money rule. A `numeric` or `doublePrecision` money column would pass every
         # unit test in the repo and still lose a cent in production, so it is asserted against the
@@ -318,17 +376,27 @@ jobs:
   all-gates-green:
     name: all gates green
     if: always()
-    needs: [secret-scan, static, test-node, test-python, build, db-migrations]
+    needs: [secret-scan, static, test-node, test-python, compiler-determinism, build, db-migrations]
     runs-on: ubuntu-latest
     steps:
       - name: fail if any job failed
         run: |
           set -euo pipefail
+          # Read the results from `toJSON(needs)`, **not** from `${{ needs.*.result }}`.
+          #
+          # The previous form interpolated `needs.*.result` into a shell variable, and when a
+          # dependency is a matrix job (test-node has three shards) that expression resolves to an
+          # array, which renders as the literal string `Array`. `echo "Array" | grep -qv success`
+          # matches, so this gate failed *unconditionally* — it has never been able to pass, and
+          # because everything else was red too nobody could tell. That is the same class of broken
+          # check as the VI pin (`sed` matching no line) and the defender source scan (a path that
+          # did not exist): a gate that reports failure without testing anything.
           echo '${{ toJSON(needs) }}'
-          RESULT="${{ needs.*.result }}"
-          if echo "$RESULT" | grep -qv success; then
-            echo "FAIL: at least one gate did not pass." >&2
-            echo "$RESULT" | tr ' ' '\n' | grep -v success >&2 || true
+          FAILED=$(echo '${{ toJSON(needs) }}' \
+            | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"')
+          if [ -n "$FAILED" ]; then
+            echo "FAIL: at least one gate did not pass:" >&2
+            echo "$FAILED" >&2
             exit 1
           fi
           echo "ok: every gate passed"

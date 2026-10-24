@@ -180,6 +180,9 @@ function escape(s) {
 
 function statusOf(r) {
   if (r.status === 'blocked') return r.testCount > 0 ? 'blocked (tested)' : 'blocked (no test)'
+  // `dropped` is a *decision* (out of scope), not an unfinished row. Rendering it as "todo" made the
+  // published ledger claim work was pending when the ledger's own JSON said otherwise.
+  if (r.status === 'dropped') return r.testCount > 0 ? 'dropped (tested)' : 'dropped — out of scope'
   if (r.testCount === 0) return r.status === 'wip' ? 'wip — no test' : 'todo — no test'
   return r.status === 'done'
     ? 'done'

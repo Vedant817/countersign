@@ -1,40 +1,51 @@
 /**
- * `compile` — spec **§8.8 (M8)**, WP-08.
+ * `compile` — spec **§8.8 (M8)**, WP-08, P0-7.
  *
  * ```ts
- * compile(i: CompileInput, deps: { llm: LanguageModel; catalog: CatalogReader }): Promise<Result<CompiledMandate>>
+ * compile(i: CompileInput, deps: { llm?: LanguageModel; catalog: CatalogReader }): Promise<Result<CompiledMandate>>
  * ```
  *
- * ## The shape of the whole function
- *
- * Everything the model can influence happens in one place, and everything that constrains the model
- * happens around it:
+ * ## The shape of the whole function — the parser runs first (P0-7)
  *
  * ```
  *   1. read the catalog          ── deterministic, our data
  *   2. resolve the currency      ── from the user's own words (literal.ts)
- *   3. compute the literal cap   ── from the user's own bytes (literal.ts)
- *   4. build the prompts         ── pure (prompt.ts)
- *   5. generateText, temperature 0, structured zod output
- *   6. on a schema failure: ONE repair retry listing the issues      (EC-LLM-2)
- *   7. on a transport failure:  LLM_UNAVAILABLE, nothing partial    (EC-LLM-1)
- *   8. localise the proposal into constraints, refusing every defect (proposal.ts)
- *   9. validate the constraints as a set                             (constraints.ts)
- *  10. add the blocking ambiguity the intent did not answer          (ambiguity.ts)
+ *   3. parse the sentence        ── deterministic: money, cadence, merchants, items, dates (parser.ts)
+ *   4. build a proposal          ── from step 3 alone
+ *   5. the model, only for gaps  ── line items the lexicon could not match, and search hints
+ *   6. merge                     ── parser wins on every field that can widen authority
+ *   7. localise into constraints ── refusing every defect (proposal.ts)
+ *   8. validate the set          ── invariants, including the AT-M8.5 ceiling
+ *   9. add the blocking ambiguity the intent did not answer
  * ```
  *
- * Steps 2, 3 and 8–10 are the parts that matter. They are deterministic, they run on data the model does
- * not control, and they are the reason §8.0 rule 4 ("no LLM output is authoritative") is a property of
- * this code rather than an aspiration in a design document.
+ * Steps 2, 3, 4 and 6–9 are deterministic and run on data the model does not control. That is what makes
+ * §8.0 rule 4 ("no LLM output is authoritative") a property of this code rather than an aspiration: the
+ * cap the buyer signs is the cap their own sentence supports, read by `parser.ts`, and a model's number is
+ * only ever *compared* against it.
+ *
+ * ## What changed from the model-first version, and why
+ *
+ * The previous pipeline asked the model first and clamped what came back to the largest number in the text.
+ * The clamp was sound; the *arrangement* was not, and the judge panel measured the consequence
+ * (`docs/review/REVERIFY.md` F8): ten runs of one sentence gave nine signable mandates and one question,
+ * and "fifty dollars" produced no cap at all. Clamping cannot fix either — both are the model being the
+ * reader of a number.
+ *
+ * So the model is now consulted **only when the parser found a cap but no item**, which is the one gap a
+ * deterministic reader cannot fill: `"something warm for the trip, under $100"` names no product, and
+ * choosing between a down jacket and a sleeping bag is a judgement, not a reading. Everything else — the
+ * demo sentences, the corpus, and most real requests — never reaches a model at all, which is why they are
+ * byte-for-byte reproducible across runs (proof: `packages/evals/src/determinism.ts`, 20 runs per case).
  *
  * ## EC-LLM-1: an outage returns an error, never a half-filled mandate
  *
- * When the model is unreachable, `compile` returns `err(LLM_UNAVAILABLE)` and **nothing else**. It does
- * not return a `CompiledMandate` with the constraints it managed to build, and it does not invent a
- * default cap so the user has something to sign. A partial mandate is the worst possible outcome: it
- * renders a confident read-back that is missing the limit, and the user signs it. §12.14's fallback for
- * the compiler is the manual constraint form, and `LLM_UNAVAILABLE`'s registry copy already says so
- * ("The model is unavailable. You can do this part by hand.").
+ * When the model is unreachable *and it was needed*, `compile` returns `err(LLM_UNAVAILABLE)` and nothing
+ * else (EC-LLM-1). It does not return a `CompiledMandate` with the constraints it managed to build: a
+ * partial mandate renders a confident read-back that is missing something, and the user signs it. §12.14's
+ * fallback for the compiler is the manual constraint form, and `LLM_UNAVAILABLE`'s registry copy already
+ * says so. When the model is **not** needed the dependency is not touched, which is why the whole
+ * deterministic path compiles with no provider configured at all.
  *
  * ## EC-LLM-2: exactly one repair retry
  *
@@ -68,10 +79,14 @@ import {
   mergeAmbiguities,
 } from './ambiguity'
 import { isoDateSchema, matchModeSchema, type Frequency, type VIConstraint } from './constraints'
-import { currenciesNamedIn, literalCapIn, mentionsRecurrence, resolveCurrency } from './literal'
+import { currenciesNamedIn, mentionsRecurrence, resolveCurrency } from './literal'
+import { parseIntent, utcDateOf } from './parser'
 import {
   localiseProposal,
+  mergeProposal,
+  modelProposedAbove,
   llmProposalSchema,
+  proposalFromParsedIntent,
   decimalAmountSchema,
   type LlmProposal,
 } from './proposal'
@@ -363,6 +378,15 @@ interface AskOutcome {
  * into `LLM_UNAVAILABLE` (EC-LLM-1). Keeping "the model was unreachable" and "the model's answer was
  * unusable" apart matters: one is retryable by the buyer in ten seconds, the other is not retryable at all
  * without changing the request.
+ *
+ * ## The sampling settings, and why there are only two of them
+ *
+ * `temperature: 0` and a fixed `seed` are what the caller asked for, and both are forwarded. The third
+ * setting a reader might expect — `reasoningEffort: 'none'` — is deliberately **not** here: it is an
+ * OpenAI-specific field, and this package is provider-agnostic (`OPENAI_BASE_URL` may point at Groq,
+ * OpenRouter, Ollama or a Modal endpoint), so sending it to a model that does not know it turns a working
+ * answer into a 400. Since P0-7 the model's whole job is "name items for this sentence, if you can"; every
+ * value that carries authority is read by `parser.ts` before this function is reached.
  */
 async function askOnce(model: LanguageModel, system: string, prompt: string): Promise<AskOutcome> {
   const result = await generateText({
@@ -370,6 +394,7 @@ async function askOnce(model: LanguageModel, system: string, prompt: string): Pr
     system,
     prompt,
     temperature: 0,
+    seed: 0,
     output: Output.object({ schema: llmProposalSchema, name: 'spending_mandate' }),
   })
   return { proposal: result.output, schemaFailure: null }
@@ -465,65 +490,130 @@ export async function compile(
   }
   const mandateCurrency: Currency = resolution.currency
 
-  const literalCap = literalCapIn(input.value.text, mandateCurrency)
-  const system = buildSystemPrompt({
+  const nowSec = clock.nowSec()
+
+  // --- 3–4. the deterministic reader runs first, and is never skipped ------------------------------
+  const parsed = parseIntent(input.value.text, {
+    currency: mandateCurrency,
     catalog: projection,
-    currency: mandateCurrency,
-    locale: input.value.locale,
+    nowEpochSec: nowSec,
   })
-  const userPrompt = buildUserPrompt({
-    input: input.value,
-    currency: mandateCurrency,
-    literalCeiling: literalCap,
-    locale: input.value.locale,
-    // The clock is injected, so "today" is a value this function was given rather than one it reads.
-    // That is what keeps a prompt snapshot in a test an assertion instead of a race with midnight UTC.
-    todayIso: new Date(clock.nowSec() * 1000).toISOString().slice(0, 10),
-  })
+  const baseProposal = proposalFromParsedIntent(parsed, mandateCurrency)
 
-  // --- EC-LLM-2: one repair retry, then a typed error -------------------------------
-  const first = await attemptAsk(deps.llm, system, userPrompt, projection)
-  if (!first.ok) return first
+  /*
+   * --- 5. is there anything left for a model? -------------------------------------------------------
+   *
+   * Only one gap is worth a call: a sentence that states a limit but names no product the catalog
+   * lexicon can match (`"something warm for the trip, under $100"`). Everything else the model used to
+   * be asked for is either already read (money, cadence, merchants, dates) or not a constraint at all
+   * (`preferences`). A sentence with no cap is a question (§8.8), and asking a model to fill it would be
+   * the guess §8.8 forbids — so the model is not consulted at all.
+   *
+   * `deps.llm` being absent is a supported state, not a degradation: it is what lets the corpus, the
+   * determinism check and a judge with no API key compile every sentence in this repository.
+   */
+  const hasCap = parsed.amountMaxMinor !== null || parsed.budgetMaxMinor !== null
+  const askModel =
+    deps.llm !== undefined && parsed.conflicts.length === 0 && hasCap && parsed.skuIds.length === 0
 
-  let outcome = first.value
-  if (outcome.schemaFailure !== null) {
-    const repairPrompt = buildRepairPrompt({
-      previousIssues: outcome.schemaFailure.issues,
-      userPrompt:
-        outcome.schemaFailure.text === null
-          ? userPrompt
-          : `${userPrompt}\n\nYour previous answer was:\n${outcome.schemaFailure.text}`,
+  let modelProposal: LlmProposal | null = null
+  if (askModel) {
+    const llm = deps.llm as LanguageModel
+    const system = buildSystemPrompt({
+      catalog: projection,
+      currency: mandateCurrency,
+      locale: input.value.locale,
     })
-    const second = await attemptAsk(deps.llm, system, repairPrompt, projection)
-    if (!second.ok) return second
-    outcome = second.value
+    const userPrompt = buildUserPrompt({
+      input: input.value,
+      currency: mandateCurrency,
+      // The ceiling is the parser's, so the prompt and the merge agree about the buyer's own bytes.
+      literalCeiling: parsed.ceilingMinor,
+      locale: input.value.locale,
+      // The clock is injected, so "today" is a value this function was given rather than one it reads.
+      // That is what keeps a prompt snapshot in a test an assertion instead of a race with midnight UTC.
+      todayIso: utcDateOf(nowSec),
+    })
+
+    // --- EC-LLM-2: one repair retry, then a typed error ---------------------------------------------
+    const first = await attemptAsk(llm, system, userPrompt, projection)
+    if (!first.ok) return first
+
+    let outcome = first.value
     if (outcome.schemaFailure !== null) {
+      const repairPrompt = buildRepairPrompt({
+        previousIssues: outcome.schemaFailure.issues,
+        userPrompt:
+          outcome.schemaFailure.text === null
+            ? userPrompt
+            : `${userPrompt}\n\nYour previous answer was:\n${outcome.schemaFailure.text}`,
+      })
+      const second = await attemptAsk(llm, system, repairPrompt, projection)
+      if (!second.ok) return second
+      outcome = second.value
+      if (outcome.schemaFailure !== null) {
+        return err(
+          csError(
+            'LLM_SCHEMA',
+            `The model's answer did not match the required schema after one repair attempt. Issues: ${outcome.schemaFailure.issues.join('; ')}`,
+            { issues: outcome.schemaFailure.issues, attempts: 2, ec: 'EC-LLM-2' },
+            {
+              userMessage:
+                'We could not read that request as spending limits. Please enter the limits by hand.',
+            },
+          ),
+        )
+      }
+    }
+
+    modelProposal = outcome.proposal
+    if (modelProposal === null) {
+      // Unreachable: `attemptAsk` yields either a proposal or a schema failure, and both failures above
+      // return. Kept as a loud invariant rather than a silent empty mandate.
       return err(
-        csError(
-          'LLM_SCHEMA',
-          `The model's answer did not match the required schema after one repair attempt. Issues: ${outcome.schemaFailure.issues.join('; ')}`,
-          { issues: outcome.schemaFailure.issues, attempts: 2, ec: 'EC-LLM-2' },
-          {
-            userMessage:
-              'We could not read that request as spending limits. Please enter the limits by hand.',
-          },
-        ),
+        csError('CS_INTERNAL', 'compile reached an impossible state: no proposal and no failure', {
+          ec: 'COMPILER-INVARIANT',
+        }),
       )
     }
   }
 
-  const proposal = outcome.proposal
-  if (proposal === null) {
-    // Unreachable: `attemptAsk` yields either a proposal or a schema failure, and both failures above
-    // return. Kept as a loud invariant rather than a silent empty mandate.
-    return err(
-      csError('CS_INTERNAL', 'compile reached an impossible state: no proposal and no failure', {
-        ec: 'COMPILER-INVARIANT',
-      }),
+  /*
+   * --- 6. merge, in the one safe direction ----------------------------------------------------------
+   *
+   * The parser's cap is the cap. A model that answered with a bigger number is not clamped into the
+   * mandate — the number is simply not copied, and the buyer is told. This is the safety invariant
+   * `test/parser.test.ts` proves directly, with a model told to answer $999,999.99 for a $30 sentence.
+   */
+  const proposal =
+    modelProposal === null ? baseProposal : mergeProposal(baseProposal, modelProposal)
+
+  const assumptions: string[] = [...resolution.assumptions, ...(modelProposal?.assumptions ?? [])]
+  if (
+    modelProposedAbove(
+      modelProposal,
+      parsed.amountMaxMinor ?? parsed.budgetMaxMinor,
+      mandateCurrency,
+    )
+  ) {
+    const tightest =
+      parsed.ceilingMinor !== null && parsed.ceilingMinor > (parsed.amountMaxMinor ?? 0n)
+    assumptions.push(
+      `The limit on a single payment was lowered to the ${tightest ? 'tightest' : 'largest'} amount you ` +
+        'wrote. Something in the request asked for a higher one, and a limit only ever comes from your ' +
+        'own words.',
+    )
+  }
+  if (modelProposedAbove(modelProposal, parsed.budgetMaxMinor, mandateCurrency)) {
+    const tightest =
+      parsed.ceilingMinor !== null && parsed.ceilingMinor > (parsed.budgetMaxMinor ?? 0n)
+    assumptions.push(
+      `The limit on the total was lowered to the ${tightest ? 'tightest' : 'largest'} amount you wrote. ` +
+        'Something in the request asked for a higher one, and a limit only ever comes from your own words.',
     )
   }
 
-  const nowSec = clock.nowSec()
+  const literalCap = parsed.ceilingMinor
 
   const localised = localiseProposal(proposal, {
     mandateCurrency,
@@ -536,7 +626,7 @@ export async function compile(
   })
   if (!localised.ok) return localised
 
-  const assumptions: string[] = [...resolution.assumptions, ...localised.value.assumptions]
+  assumptions.push(...localised.value.assumptions)
 
   const windows = resolveRecurrenceWindows(proposal, localised.value.constraints, nowSec)
   if (!windows.ok) return windows
@@ -546,25 +636,37 @@ export async function compile(
   if (!ttl.ok) return ttl
 
   // --- §8.8: an intent with no cap is an ambiguity, never a guess ----------------------
-  const hasCap = localised.value.amountMax !== null || localised.value.budgetMax !== null
-  const ambiguities: Ambiguity[] = []
-  if (!hasCap) {
+  const hasAmountCap = localised.value.amountMax !== null || localised.value.budgetMax !== null
+  const required: Ambiguity[] = []
+  if (!hasAmountCap) {
     const skuIds = (proposal.lineItems ?? []).flatMap((line) => line.skuIds)
-    ambiguities.push(
+    required.push(
       amountCapAmbiguity({
         currency: mandateCurrency,
         candidates: capCandidatesFor(projection, skuIds, mandateCurrency),
       }),
     )
   }
-  const merged = mergeAmbiguities(ambiguities, proposal.ambiguities ?? [])
+  /*
+   * A text that supports two readings of the same field (two cadences, a range that ends below where it
+   * starts) is a question, never a preference. These come from the parser, which is the only component
+   * that can see that the *buyer's own sentence* is ambiguous — a model disagreement is not a conflict,
+   * because the model is not a source of authority.
+   */
+  const conflicts: Ambiguity[] = parsed.conflicts.map((c) => ({
+    field: c.field,
+    question: c.question,
+    options: [...c.options],
+  }))
+  const merged = mergeAmbiguities(required, [...conflicts, ...(proposal.ambiguities ?? [])])
 
   const preferences: CompiledPreferences = proposal.preferences ?? {}
   if (
     mentionsRecurrence(input.value.text) === false &&
     (proposal.recurrence !== undefined || proposal.agentRecurrence !== undefined)
   ) {
-    // Unreachable: `localiseProposal` already refuses a recurrence the text does not justify.
+    // Reachable now only through a model answer: the parser emits a recurrence only from a recurrence
+    // word, and this is the check that refuses a model-invented one.
     return err(
       csError('CS_INTERNAL', 'compile accepted a recurrence the intent does not justify', {
         ec: 'COMPILER-INVARIANT',

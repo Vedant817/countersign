@@ -26,14 +26,18 @@ import { STANDARD_CATALOG } from './helpers'
 const golden = loadGoldenSet()
 const catalog = loadEvalCatalog()
 
-/** AT-M8.1 says "a 60-case golden set". */
-const GOLDEN_SIZE = 60
+/**
+ * AT-M8.1 says "a 60-case golden set". It is 61 since P0-7: `g59` ("Buy shoes for twenty dollars") stopped
+ * being a no-cap case when the parser learned to read spelled-out amounts, and the data check below requires
+ * at least five no-cap cases, so `g61` was added. 61 ≥ 60, and the number is pinned rather than drifting.
+ */
+const GOLDEN_SIZE = 61
 
 const merchantIds = new Set(catalog.merchants.map((m) => m.id))
 const skuIds = new Set(catalog.skus.map((s) => s.id))
 
 describe('the golden set', () => {
-  it('has exactly 60 cases with unique ids', () => {
+  it('has exactly 61 cases with unique ids', () => {
     expect(golden).toHaveLength(GOLDEN_SIZE)
     expect(new Set(golden.map((c) => c.id)).size).toBe(GOLDEN_SIZE)
   })

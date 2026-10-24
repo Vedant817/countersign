@@ -69,6 +69,40 @@ describe('the model adapter refuses rather than half-configuring', () => {
     if (result.ok) throw new Error('unreachable')
     expect(result.error.code).toBe('LLM_UNAVAILABLE')
   })
+
+  it('EC-LLM-5: the model id is configuration — LLM_MAIN_MODEL wins, and nothing here is model-specific', () => {
+    /**
+     * The whole answer to "what happens when the provider deprecates the model" is that the id is a
+     * variable, not a constant. Two assertions make that real:
+     *
+     *  1. a distinct value in `LLM_MAIN_MODEL` comes back out unchanged (so a switch is an env
+     *     change, not a code change), and
+     *  2. with nothing set the default is a **real, currently-served** id — the previous default was
+     *     `gpt-6.1-sol`, a model that does not exist (`942ffca`).
+     *
+     * The eval runner reads the same variable (`packages/compiler/eval/run-live.ts:76`), which is
+     * what lets the corpus be re-run on a switched model without touching the compiler.
+     */
+    const switched = readLlmConfig({
+      OPENAI_API_KEY: 'k',
+      OPENAI_BASE_URL: 'https://api.groq.com/openai/v1',
+      LLM_MAIN_MODEL: 'llama-3.3-70b-versatile',
+      LLM_CHEAP_MODEL: 'llama-3.1-8b-instant',
+    })
+    if (!switched.ok) throw new Error('expected a config')
+    expect(switched.value.mainModel).toBe('llama-3.3-70b-versatile')
+    expect(switched.value.cheapModel).toBe('llama-3.1-8b-instant')
+
+    // Whitespace is not a model name: it falls back rather than producing `"   "`.
+    const fallback = readLlmConfig({
+      OPENAI_API_KEY: 'k',
+      OPENAI_BASE_URL: 'https://api.groq.com/openai/v1',
+      LLM_MAIN_MODEL: '   ',
+    })
+    if (!fallback.ok) throw new Error('expected a config')
+    expect(fallback.value.mainModel).toBe(fallback.value.cheapModel)
+    expect(fallback.value.mainModel).toMatch(/^[a-z0-9][a-z0-9.-]*$/)
+  })
 })
 
 /**
