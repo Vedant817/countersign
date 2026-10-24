@@ -444,6 +444,47 @@ describe('check 6 — price lock, totals and currency', () => {
     expect(check(decision, 6).detail).toContain(MERCHANT_ID)
   })
 
+  it('EC-MA-3: one agent, many mandates — each checkout is gated against the mandate it presents', async () => {
+    /**
+     * An agent that shops for two merchants holds two mandates. The Gate is handed **the one being
+     * presented** (`GateInput.mandateId`) plus the L3 pair, and it has to gate *that* pairing: the
+     * mandate resolves and stays within its own budget, and the payment the agent signed must be the
+     * one this session is for.
+     *
+     * The mandate's own `aud`/merchant binding lives inside the signed L2 and is verified by vi in
+     * check 4 — a stub in this world, deliberately (see `fixtures.ts`). What is asserted here is the
+     * Gate's half, which is the half that must hold even if check 4's answer is wrong: a payment for
+     * another merchant is refused at the payee check, and it is refused **by name**.
+     */
+    const otherMandate = 'mdt_0000000000000000000000000B' as MandateId
+    const otherMerchant = 'MERCHANT_OTHER'
+    const world = await makeWorld({
+      extraMandates: [{ id: otherMandate, cap: money(CAP_MINOR, 'USD') }],
+    })
+
+    // The second mandate, presented at its own checkout with the session's merchant as payee: ALLOW.
+    const own = await decide(world, {
+      attemptId: 'att_0000000000000000000000000B' as AttemptId,
+      mandateId: otherMandate,
+      l3a: fakeL3a({ nonce: 'l3-nonce-2' }),
+    })
+    expect(own.decision).toBe('ALLOW')
+    expect(own.checks.every((c) => c.passed || c.notApplicable)).toBe(true)
+
+    // The crossed pair: mandate A's payment presented at merchant B's checkout. BLOCK, with both
+    // merchant names in the detail so a support engineer can see which agreement went where.
+    const crossed = await decide(world, {
+      attemptId: 'att_0000000000000000000000000C' as AttemptId,
+      l3a: fakeL3a({ nonce: 'l3-nonce-3', payee_id: otherMerchant }),
+    })
+    expect(crossed.decision).toBe('BLOCK')
+    expect(codes(crossed)).toContain('VI_CHAIN_INVALID')
+    expect(check(crossed, 6).detail).toContain(MERCHANT_ID)
+    expect(check(crossed, 6).detail).toContain(otherMerchant)
+    // And the buyer-facing reason is a sentence, not a server error.
+    expect(crossed.reasons.find((r) => r.code === 'VI_CHAIN_INVALID')?.userMessage).toBeTruthy()
+  })
+
   it('refuses a non-integer amount_minor as CS_ROUNDING rather than rounding it — EC-FX-6', async () => {
     const world = await makeWorld()
     const decision = await decide(world, { l3a: fakeL3a({ amount_minor: 3000.5 }) })
