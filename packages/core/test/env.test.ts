@@ -80,7 +80,7 @@ describe('parseEnv tolerates a real shell but still refuses a typo of ours', () 
     expect(env.DATABASE_URL).toBe(COMPLETE['DATABASE_URL'])
   })
 
-  it('EC-OPS-1: every one of fourteen unrelated shell variables is ignored, individually', () => {
+  it('env hygiene: every one of fourteen unrelated shell variables is ignored, individually', () => {
     for (const noise of SHELL_NOISE) {
       // Individually, so a failure names the offender instead of "one of fourteen".
       expect(() => parseEnv({ ...COMPLETE, [noise]: 'whatever' }), noise).not.toThrow()
@@ -171,7 +171,7 @@ describe('the declared key list is derived, not maintained', () => {
     expect([...ENV_KEYS]).toEqual([...ENV_KEYS].sort())
   })
 
-  it('EC-OPS-1: COMPLETE covers exactly the required set, so a new required key fails here', () => {
+  it('env hygiene: COMPLETE covers exactly the required set, so a new required key fails here', () => {
     // The point of deriving this is that a future required variable breaks ONE test here with a
     // readable message, instead of breaking every case in this file with "Unrecognized key".
     const required = Object.entries(envSchema.shape)
@@ -181,7 +181,7 @@ describe('the declared key list is derived, not maintained', () => {
     expect(Object.keys(COMPLETE).sort()).toEqual(required)
   })
 
-  it('EC-OPS-1: every key we test for a typo is one the schema actually declares', () => {
+  it('env hygiene: every key we test for a typo is one the schema actually declares', () => {
     for (const required of Object.keys(COMPLETE)) {
       expect(ENV_KEYS, required).toContain(required)
     }
@@ -189,7 +189,7 @@ describe('the declared key list is derived, not maintained', () => {
     expect(ENV_KEYS).toContain('OPENAI_API_KEY')
   })
 
-  it('EC-OPS-1: the whole product boots without an OpenAI key', () => {
+  it('env hygiene: the whole product boots without an OpenAI key', () => {
     // The model is the one dependency this project is designed to work without (D-018, D-023, and
     // WP-15e's optional `FileDeps.llm`). Making its key required meant nobody without one could run
     // the Gate, the router or the verifier.
