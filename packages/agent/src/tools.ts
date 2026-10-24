@@ -202,6 +202,8 @@ export interface SignL3Output {
   readonly code?: string
   readonly message?: string
   readonly user_message?: string
+  /** The signer's structured detail (which side failed, which constraint). Never a secret. */
+  readonly details?: unknown
   readonly l3a?: string
   readonly l3b?: string
   readonly jti?: string
@@ -393,6 +395,7 @@ export function createAgentOps(context: OpsContext): AgentOps {
           code: signed.error.code,
           message: signed.error.message,
           user_message: signed.error.userMessage,
+          ...(signed.error.details === undefined ? {} : { details: signed.error.details }),
         },
       }
     },

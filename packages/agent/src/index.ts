@@ -44,7 +44,7 @@ export {
 } from './agent'
 
 // --- the scripted shopper ----------------------------------------------------------------------
-export { runScriptedShopper, chooseCandidate, fabricateL3 } from './scripted'
+export { runScriptedShopper, chooseCandidate, contentWords, fabricateL3 } from './scripted'
 export type { ScriptedBehaviour, ScriptedOptions } from './scripted'
 
 // --- the tools and the merchant-MCP surface -----------------------------------------------------

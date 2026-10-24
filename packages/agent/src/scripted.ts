@@ -110,7 +110,24 @@ export async function* runScriptedShopper(
 
   try {
     // --- 1. Find candidates -------------------------------------------------------------------------
-    const found = await ops.searchProducts({ query: request.message.slice(0, 200) })
+    //
+    // The merchant's search is a literal substring match on the title, SKU and listing (§8.9). A buyer's
+    // sentence is not a search query, so the shopper tries the sentence, then its own content words, and
+    // records which query produced the results. Without this, "buy the cheapest trail shoes you can find,
+    // under $150" matches nothing and the demo reports an empty catalog — a fact about string matching
+    // rather than about the purchase.
+    let found = await ops.searchProducts({ query: request.message.slice(0, 200) })
+    let attempted: unknown = { query: request.message.slice(0, 200) }
+    if (found.ok && found.value.items.length === 0) {
+      for (const keyword of contentWords(request.message)) {
+        const attempt = await ops.searchProducts({ query: keyword })
+        if (attempt.ok && attempt.value.items.length > 0) {
+          found = attempt
+          attempted = { query: keyword, note: 'keyword search: the buyer sentence matched nothing' }
+          break
+        }
+      }
+    }
     if (!found.ok) {
       yield ev('error', nowMs(), {
         error: { code: found.error.code, message: found.error.message },
@@ -121,7 +138,7 @@ export async function* runScriptedShopper(
       })
       return
     }
-    yield toolCall(nowMs(), 'search_products', { query: request.message.slice(0, 200) })
+    yield toolCall(nowMs(), 'search_products', attempted)
     yield ev('tool_result', nowMs(), {
       tool: 'search_products',
       ok: true,
@@ -138,9 +155,11 @@ export async function* runScriptedShopper(
     }
 
     // --- 2. Choose a target ---------------------------------------------------------------------------
+    // Items priced in another currency are dropped before choosing (EC-FX-1: never convert). The catalog
+    // ships one JPY item, and a mandate denominated in USD cannot buy it.
     const requestedSku = options.sku ?? null
     const candidate = chooseCandidate(
-      found.value.items,
+      found.value.items.filter((item) => item.currency === mandate.currency),
       requestedSku,
       behaviour,
       mandate.maxAmountMinor,
@@ -240,7 +259,12 @@ export async function* runScriptedShopper(
             behaviour === 'instructed'
               ? `The listing asked me to buy ${candidate.sku}, but the signing service refused: ${reason}. ` +
                 'I did not buy anything, and no money moved.'
-              : `The signing service refused this cart: ${reason}. I did not buy anything, and no money moved.`,
+              : `The signing service refused this cart (${signed.value.code ?? 'VI_CONSTRAINT_VIOLATION'}): ${reason} ` +
+                `I did not buy anything, and no money moved.${
+                  signed.value.details === undefined
+                    ? ''
+                    : ` Detail: ${JSON.stringify(signed.value.details).slice(0, 300)}`
+                }`,
         })
         return
       }
@@ -315,6 +339,47 @@ export async function* runScriptedShopper(
 /* ------------------------------------------------------------------------------------------ */
 /* Helpers                                                                                       */
 /* ------------------------------------------------------------------------------------------ */
+
+/**
+ * Content words from a buyer's sentence, longest first — a poor man's query planner.
+ *
+ * Deliberately tiny and deterministic (no stemmer, no synonyms, no model): the point is only to turn a
+ * sentence into something the merchant's substring search can match. Anything cleverer here would be a
+ * second intent parser competing with `@countersign/compiler`, and the demo does not need one.
+ */
+export function contentWords(message: string): string[] {
+  const words = message.toLowerCase().match(/[a-z][a-z0-9-]{3,}/g) ?? []
+  const content = words.filter((word) => !SEARCH_STOPWORDS.has(word))
+  return [...new Set(content)].sort((a, b) => b.length - a.length)
+}
+
+const SEARCH_STOPWORDS: ReadonlySet<string> = new Set([
+  'about',
+  'anything',
+  'buy',
+  'can',
+  'cheap',
+  'cheapest',
+  'could',
+  'find',
+  'from',
+  'give',
+  'just',
+  'looking',
+  'please',
+  'purchase',
+  'show',
+  'some',
+  'spend',
+  'that',
+  'them',
+  'then',
+  'under',
+  'want',
+  'what',
+  'with',
+  'would',
+])
 
 function ev(kind: ShopEvent['kind'], at: number, data: ShopEventData): ShopEvent {
   return { kind, at, data }

@@ -56,7 +56,7 @@ const requestSchema = z
     mandate_id: z.string().min(1).max(128),
     agent_id: z.string().regex(/^agt_[A-Za-z0-9_-]+$/u),
     message: z.string().min(1).max(500),
-    mode: z.enum(['llm', 'scripted', 'compromised']).default('llm'),
+    mode: z.enum(['llm', 'scripted', 'compromised', 'instructed']).default('llm'),
     /** The SKU the scripted shopper should target. Ignored by the LLM path. */
     sku: z
       .string()
@@ -150,9 +150,9 @@ function resolveStream(
   deps: ShopDeps,
   model: ReturnType<typeof languageModel>,
 ): AsyncIterable<ShopEvent> {
-  if (body.mode === 'compromised' || body.mode === 'scripted') {
+  if (body.mode === 'compromised' || body.mode === 'scripted' || body.mode === 'instructed') {
     return runScriptedShopper(request, deps, {
-      behaviour: body.mode === 'compromised' ? 'compromised' : 'lawful',
+      behaviour: body.mode === 'compromised' ? 'compromised' : body.mode === 'instructed' ? 'instructed' : 'lawful',
       ...(body.sku === undefined ? {} : { sku: body.sku }),
     })
   }
