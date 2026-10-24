@@ -231,13 +231,13 @@ export default async function VerifierPage({ params }: PageProps) {
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
       <header>
-        <p className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+        <p className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
           Countersign public verifier
         </p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
           Evidence packet {packet.packetId}
         </h1>
-        <p className="mt-3 max-w-2xl text-pretty text-[--color-ink-soft]">
+        <p className="mt-3 max-w-2xl text-pretty text-ink-soft">
           This page re-checks one payment’s evidence chain. Everything below is either computed here
           or returned by a service whose answer is named. You do not need to trust Countersign to
           use it — and you do not need a Countersign server at all if you{' '}
@@ -259,7 +259,7 @@ export default async function VerifierPage({ params }: PageProps) {
         <h2 id="checks" className="text-xl font-semibold">
           Per-check results
         </h2>
-        <p className="mt-2 text-sm text-[--color-ink-soft]">
+        <p className="mt-2 text-sm text-ink-soft">
           Every check names itself, its verdict and its reason in words. A check that could not run
           says so — it is never reported as a pass.
         </p>
@@ -274,7 +274,7 @@ export default async function VerifierPage({ params }: PageProps) {
 
       <CanonicalisationSection report={report} />
 
-      <footer className="mt-16 border-t border-[--color-rule] pt-6 text-sm text-[--color-ink-faint]">
+      <footer className="mt-16 border-t border-rule pt-6 text-sm text-ink-faint">
         <p>
           This page shows a <strong>redacted</strong> document.{' '}
           <a
@@ -317,12 +317,12 @@ function VerdictBanner({
     return (
       <section
         aria-labelledby="verdict"
-        className="mt-8 rounded-[--radius-card] border-2 border-[--color-danger] bg-[--color-paper-raised] p-5"
+        className="mt-8 rounded-card border-2 border-danger bg-paper-raised p-5"
       >
-        <h2 id="verdict" className="text-lg font-semibold text-[--color-danger]">
+        <h2 id="verdict" className="text-lg font-semibold text-danger">
           {failures.length} of {failures.length + warnings.length} checks did not pass
         </h2>
-        <p className="mt-2 text-[--color-ink-soft]">
+        <p className="mt-2 text-ink-soft">
           Something about this evidence does not match what was published. Read the failing checks
           below before relying on it — and note that a failure here is a statement about the
           document, not about the payment.
@@ -330,7 +330,7 @@ function VerdictBanner({
         <ul className="mt-4 space-y-2">
           {failures.map((c) => (
             <li key={c.id} className="text-sm">
-              <span className="font-mono font-semibold text-[--color-danger]">[FAIL]</span>{' '}
+              <span className="font-mono font-semibold text-danger">[FAIL]</span>{' '}
               <span className="font-medium">{c.label}</span> — {c.detail}
             </li>
           ))}
@@ -342,12 +342,12 @@ function VerdictBanner({
     return (
       <section
         aria-labelledby="verdict"
-        className="mt-8 rounded-[--radius-card] border border-[--color-caution] bg-[--color-paper-raised] p-5"
+        className="mt-8 rounded-card border border-caution bg-paper-raised p-5"
       >
         <h2 id="verdict" className="text-lg font-semibold">
           No check failed, and {warnings.length} could not be conclusive
         </h2>
-        <p className="mt-2 text-[--color-ink-soft]">
+        <p className="mt-2 text-ink-soft">
           That distinction is the point of this page. A check that could not run is listed below
           rather than folded into a pass.
         </p>
@@ -365,12 +365,12 @@ function VerdictBanner({
   return (
     <section
       aria-labelledby="verdict"
-      className="mt-8 rounded-[--radius-card] border border-[--color-signed] bg-[--color-paper-raised] p-5"
+      className="mt-8 rounded-card border border-signed bg-paper-raised p-5"
     >
-      <h2 id="verdict" className="text-lg font-semibold text-[--color-signed]">
+      <h2 id="verdict" className="text-lg font-semibold text-signed">
         Every check on this page passed
       </h2>
-      <p className="mt-2 text-[--color-ink-soft]">
+      <p className="mt-2 text-ink-soft">
         The digests reproduce, the consent read-back matches its published hash, the agent’s
         authorisation commits to exactly this price lock, and Countersign’s own signature on the
         Gate decision record verifies. None of that requires a Countersign server.
@@ -385,7 +385,7 @@ function SummaryCard({ report }: { readonly report: VerifierReport }) {
   // page that rendered `$NaN` because of an unchecked cast would be a poor advertisement for a verifier.
   const amount: Money = money(report.amount.minor, currency(report.amount.currency))
   return (
-    <section className="mt-8 rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-5">
+    <section className="mt-8 rounded-card border border-rule bg-paper-raised p-5">
       <dl className="grid gap-4 sm:grid-cols-2">
         <Field label="Packet" value={report.packetId} mono />
         <Field label="Dispute" value={report.disputeId} mono />
@@ -415,9 +415,7 @@ function Field({
 }) {
   return (
     <div>
-      <dt className="font-mono text-xs uppercase tracking-wider text-[--color-ink-faint]">
-        {label}
-      </dt>
+      <dt className="font-mono text-xs uppercase tracking-wider text-ink-faint">{label}</dt>
       <dd className={mono ? 'mt-1 font-mono text-sm break-all' : 'mt-1 text-sm break-words'}>
         {value}
       </dd>
@@ -444,7 +442,7 @@ function CheckTable({ checks }: { readonly checks: readonly VerifierCheck[] }) {
           Every check this page performed, with its verdict and the reason for it
         </caption>
         <thead>
-          <tr className="border-b border-[--color-rule]">
+          <tr className="border-b border-rule">
             <th scope="col" className="py-2 pr-3 font-mono text-xs uppercase tracking-wider">
               Verdict
             </th>
@@ -461,18 +459,16 @@ function CheckTable({ checks }: { readonly checks: readonly VerifierCheck[] }) {
         </thead>
         <tbody>
           {checks.map((c) => (
-            <tr key={c.id} className="border-b border-[--color-rule] align-top">
+            <tr key={c.id} className="border-b border-rule align-top">
               <td className="py-3 pr-3 font-mono font-semibold whitespace-nowrap">{c.status}</td>
               <td className="py-3 pr-3">
                 <span className="font-medium">{c.label}</span>
-                <span className="mt-1 block font-mono text-xs text-[--color-ink-faint]">
+                <span className="mt-1 block font-mono text-xs text-ink-faint">
                   {c.id} · {c.source === 'local' ? 'computed here' : 'asked of vi-service'}
                 </span>
               </td>
-              <td className="py-3 pr-3 text-[--color-ink-soft]">{c.detail}</td>
-              <td className="py-3 font-mono text-xs text-[--color-ink-faint]">
-                {c.authority ?? '—'}
-              </td>
+              <td className="py-3 pr-3 text-ink-soft">{c.detail}</td>
+              <td className="py-3 font-mono text-xs text-ink-faint">{c.authority ?? '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -494,7 +490,7 @@ function SkippedPanel({ report }: { readonly report: VerifierReport }) {
       <h2 id="skipped" className="text-xl font-semibold">
         Not evaluated by anyone
       </h2>
-      <p className="mt-2 max-w-2xl text-sm text-[--color-ink-soft]">
+      <p className="mt-2 max-w-2xl text-sm text-ink-soft">
         These constraints were disclosed in the chain and the Verifiable Intent library evaluates{' '}
         <em>none</em> of them — its own source calls them network-enforced. Countersign’s Gate
         enforces them (spec D19), so a satisfied verdict from the library says nothing either way.
@@ -525,7 +521,7 @@ function RedactedViewSection({
       <h2 id="redacted" className="text-xl font-semibold">
         The redacted bundle
       </h2>
-      <p className="mt-2 max-w-2xl text-sm text-[--color-ink-soft]">{redacted.redacted.note}</p>
+      <p className="mt-2 max-w-2xl text-sm text-ink-soft">{redacted.redacted.note}</p>
 
       <dl className="mt-5 grid gap-4 sm:grid-cols-2">
         <Field label="Buyer email" value={redacted.buyer.payer_email_masked} mono />
@@ -545,15 +541,15 @@ function RedactedViewSection({
       </dl>
 
       <h3 className="mt-8 text-base font-semibold">Signed artefacts</h3>
-      <p className="mt-1 text-sm text-[--color-ink-soft]">
+      <p className="mt-1 text-sm text-ink-soft">
         Lengths and SHA-256 digests, so you can confirm this page describes the file you downloaded.
       </p>
       <ul className="mt-3 space-y-2">
         {redacted.artefacts.map((a) => (
           <li key={a.name} className="text-sm">
             <span className="font-mono font-semibold">{a.name}</span>{' '}
-            <span className="text-[--color-ink-soft]">{a.role}</span>
-            <span className="mt-1 block font-mono text-xs break-all text-[--color-ink-faint]">
+            <span className="text-ink-soft">{a.role}</span>
+            <span className="mt-1 block font-mono text-xs break-all text-ink-faint">
               {a.present ? `${a.bytes} bytes · sha256 ${a.sha256}` : 'not in this packet'}
             </span>
           </li>
@@ -563,10 +559,8 @@ function RedactedViewSection({
       {redacted.consent.readback !== null ? (
         <>
           <h3 className="mt-8 text-base font-semibold">What the buyer signed, in plain English</h3>
-          <p className="mt-2 text-sm text-pretty text-[--color-ink-soft]">
-            {redacted.consent.readback}
-          </p>
-          <p className="mt-2 font-mono text-xs break-all text-[--color-ink-faint]">
+          <p className="mt-2 text-sm text-pretty text-ink-soft">{redacted.consent.readback}</p>
+          <p className="mt-2 font-mono text-xs break-all text-ink-faint">
             sha256 {redacted.consent.readback_sha256}
           </p>
           {redacted.consent.preferences !== null ? (
@@ -575,14 +569,14 @@ function RedactedViewSection({
               {Object.entries(redacted.consent.preferences)
                 .map(([k, v]) => `${k} ${v}`)
                 .join(', ')}{' '}
-              <span className="font-mono text-xs text-[--color-ink-faint]">
+              <span className="font-mono text-xs text-ink-faint">
                 (sha256 {redacted.consent.preferences_sha256})
               </span>
             </p>
           ) : null}
         </>
       ) : (
-        <p className="mt-8 text-sm text-[--color-danger]">
+        <p className="mt-8 text-sm text-danger">
           This packet carries no consent read-back. Spec EC-MER-6 makes it a required field, so the
           omission is itself a finding.
         </p>
@@ -627,49 +621,49 @@ function VerifyNowSection({
         Re-verify it yourself
       </h2>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-5">
+        <div className="rounded-card border border-rule bg-paper-raised p-5">
           <h3 className="font-semibold">Verify now</h3>
-          <p className="mt-2 text-sm text-[--color-ink-soft]">
+          <p className="mt-2 text-sm text-ink-soft">
             Asks our vi-service to re-verify the chain with the pinned Verifiable Intent library,
             and shows every check it performed and every check it skipped. Rate-limited to 30
             requests a minute per IP.
           </p>
           <Link
-            className="mt-4 inline-block rounded-[--radius-card] border border-[--color-rule] px-4 py-2 font-medium"
+            className="mt-4 inline-block rounded-card border border-rule px-4 py-2 font-medium"
             href={`/v/${packetId}/verify-now`}
           >
             Re-verify now
           </Link>
         </div>
-        <div className="rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-5">
+        <div className="rounded-card border border-rule bg-paper-raised p-5">
           <h3 className="font-semibold">Verify offline</h3>
-          <p className="mt-2 text-sm text-[--color-ink-soft]">
+          <p className="mt-2 text-sm text-ink-soft">
             A real Python file with this packet’s digests baked in. It uses no network at all, so it
             works with no Countersign server running — which is the only way to check us without our
             help.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <a
-              className="inline-block rounded-[--radius-card] border border-[--color-rule] px-4 py-2 font-medium"
+              className="inline-block rounded-card border border-rule px-4 py-2 font-medium"
               href={verifyScriptUrl(baseUrl, packetId)}
               download
             >
               Download verify.py
             </a>
             <a
-              className="inline-block rounded-[--radius-card] px-4 py-2 underline underline-offset-4"
+              className="inline-block rounded-card px-4 py-2 underline underline-offset-4"
               href={rawBundleUrl(baseUrl, packetId)}
               download
             >
               Download bundle.json
             </a>
           </div>
-          <p className="mt-3 font-mono text-xs text-[--color-ink-faint]">
+          <p className="mt-3 font-mono text-xs text-ink-faint">
             uv run python verify.py bundle.json
           </p>
         </div>
       </div>
-      <p className="mt-4 text-sm text-[--color-ink-soft]">
+      <p className="mt-4 text-sm text-ink-soft">
         This page is at{' '}
         <span className="font-mono break-all">{publicPacketUrl(baseUrl, packetId)}</span>, which is
         the address encoded in the QR code on the filed PDF.
@@ -689,7 +683,7 @@ function CanonicalisationSection({ report }: { readonly report: VerifierReport }
       <h2 id="canonicalisation" className="text-xl font-semibold">
         How the hashes are computed
       </h2>
-      <p className="mt-2 text-sm text-[--color-ink-soft]">
+      <p className="mt-2 text-sm text-ink-soft">
         Stated here so you can recompute any digest on this page with <code>sha256</code> and
         nothing else of ours. {c.note}
       </p>

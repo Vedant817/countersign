@@ -28,10 +28,11 @@ test.describe('Northwind storefront', () => {
   test('S-13 locks a price and starts the checkout countdown', async ({ page }) => {
     await page.goto(`${SHOP_PATH}/${PLAIN_SKU}`)
     await page.getByLabel('Quantity').fill('2')
+    await page.getByLabel('Ship to').selectOption('US')
     await page.getByRole('button', { name: 'Lock price' }).click()
 
     await expect(page).toHaveURL(/\/shop\/checkout\/chk_/)
-    await expect(page.getByText(/Paying with: agent under mandate/)).toBeVisible()
+    await expect(page.getByText('No order has been placed. No money has moved.')).toBeVisible()
     await expect(page.getByTestId('price-lock-countdown')).toHaveText(/\d{2}:\d{2}/)
   })
 })

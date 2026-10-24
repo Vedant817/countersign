@@ -228,6 +228,7 @@ export {
 export {
   CHECKOUT_PRICE_LOCK_SECONDS,
   FLAT_SHIPPING_MINOR,
+  SHIPPING_CURRENCY,
   TAX_MINOR,
   createCheckout,
   getOrderStatus,
