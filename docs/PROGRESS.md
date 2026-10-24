@@ -37,7 +37,7 @@ buildable now.
 | WP-11 | `packages/orders` — order orchestrator | C | 06, 10 | wip | | AT-M11 (H-01 for live) · binder `e0fb068` |
 | WP-12 | `packages/webhooks` + reconciler + worker | C | 06, 02 | done | `beb5f3d` | AT-M12 ✅ 154 · worker 116 |
 | WP-13 | `packages/agent` — shopping agent + injection defences | D | 09, 14, 04 | todo | | AT-M13 |
-| WP-14 | Merchant MCP server | D | 09 | review | | AT-M14 local: Inspector 5 tools, 401, Gate BLOCKED round-trip; persistent purchase integration remains open |
+| WP-14 | Merchant MCP server | D | 09 | review | `cbdce9e` | Merged `ea2124d`; AT-M14 local: Inspector 5 tools, 401, Gate BLOCKED round-trip; persistent purchase integration remains open |
 | WP-15a | Liability router (pure) | E | 01, 02 | done | `7b95e71` | AT-M15.1 ✅ 40/40 |
 | WP-15b | Evidence planner (reason → evidence enum) | E | 15a | done | `7b95e71` | plan tests per reason ✅ |
 | WP-15c | Drafter + citation checker | E | 15b | done | `1d465bc` | AT-M15.2 ✅ forged number fails |
@@ -227,3 +227,14 @@ WP-06s and everything needing live sandbox is not started.
   typecheck, `format:check`, `secret-scan`, 2519 tests, build (Next 16.3.8, all eight routes). The shop
   catalog and checkout adapters are in-memory process state; the countdown island is the only client JS,
   and it uses `epochSecFrom` so the money-discipline guard has nothing to flag.
+
+- **2026-10-24 (IST)** — **Integrated every local work branch into `main` (`ea2124d`).** WP-14's
+  merchant MCP transport and WP-11's outstanding binder commits were combined on
+  `wp/00-integration-verification`, with both sides of the documentation conflicts retained and the
+  duplicate binder decision renamed D-047. Gates passed: typecheck, lint, format, 2,536 TypeScript
+  tests, 207 Python tests, Python lint/format, secret scan, and build. After installing the missing
+  Chromium binary, all seven device-signing and storefront E2Es passed against the local VI service.
+  The merged production build served the five checked pages and passed the MCP Inspector/HTTP smoke
+  checks. The normal app `/status` is **503** because Postgres, VI and PayPal are not configured;
+  successful payment integration, persistent app adapters and unfinished screens remain open.
+  See `docs/FINAL_REPORT.md` for the exact boundary of the evidence.
