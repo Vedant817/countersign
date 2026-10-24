@@ -37,9 +37,9 @@ export function PriceLockCountdown({
     return (
       <p
         data-testid="price-lock-countdown"
-        className="mt-6 rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] px-5 py-4 font-mono text-sm text-[--color-ink-soft]"
+        className="mt-6 rounded-card border border-rule bg-paper-raised px-5 py-4 font-mono text-sm text-ink-soft"
       >
-        Prices refreshed.{' '}
+        Quote expired. The displayed total has not been refreshed.{' '}
         <Link href={requoteHref} className="underline underline-offset-4">
           Re-quote this item
         </Link>
@@ -50,10 +50,10 @@ export function PriceLockCountdown({
   return (
     <p
       data-testid="price-lock-countdown"
-      className="mt-6 rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] px-5 py-4 font-mono text-sm text-[--color-ink-soft]"
+      className="mt-6 rounded-card border border-rule bg-paper-raised px-5 py-4 font-mono text-sm text-ink-soft"
     >
       {remaining === null
-        ? 'Price locked while the mandate is checked.'
+        ? 'Checking the quote’s remaining time…'
         : `Price locked for ${formatRemaining(remaining)}`}
     </p>
   )

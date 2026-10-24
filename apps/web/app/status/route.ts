@@ -288,6 +288,7 @@ function renderHtml(report: StatusReport): string {
 <meta name="robots" content="noindex, follow">
 <title>Countersign status</title>
 <style>
+  * { box-sizing: border-box; }
   :root { color-scheme: light dark; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 2rem 1rem; line-height: 1.55;
          max-width: 62rem; margin-inline: auto; }
@@ -301,9 +302,20 @@ function renderHtml(report: StatusReport): string {
   .num { font-variant-numeric: tabular-nums; }
   .req { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; opacity: .7; }
   .meta { font-size: .8rem; opacity: .8; }
+  nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin-bottom: 1.5rem; }
+  nav a { display: inline-flex; align-items: center; min-height: 44px; }
+  @media (max-width: 640px) {
+    table, caption, tbody, tr, th, td { display: block; width: 100%; }
+    thead { display: none; }
+    tr { margin-block: 1rem; border: 1px solid #8884; padding: .5rem; border-radius: .5rem; }
+    tbody th { white-space: normal; }
+    td, th { border: 0; overflow-wrap: anywhere; }
+    .num { text-align: left; }
+    code { overflow-wrap: anywhere; }
+  }
 </style>
 </head><body>
-<p><a href="/">&larr; Countersign</a></p>
+<nav aria-label="Main navigation"><a href="/">Countersign</a><a href="/shop">Storefront</a><a href="/lab/device-sign">Signing lab</a><a href="/judge">Demo guide</a><a href="/regions">Coverage</a></nav>
 ${headline}
 <table>
 <caption class="meta">Every row is an actual call to that dependency, made moments ago.</caption>

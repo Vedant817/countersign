@@ -54,6 +54,7 @@ export default defineConfig({
       reuseExistingServer: !process.env['CI'],
       env: {
         VI_SERVICE_URL: 'http://127.0.0.1:8000',
+        SIGNING_LAB_ENABLED: 'true',
         VI_SERVICE_TOKEN: viServiceToken,
         VI_AGENT_ISS: 'https://agent.countersign.test',
       },

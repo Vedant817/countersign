@@ -40,6 +40,10 @@ export const MCP_TOKEN_ISSUER = 'countersign'
 export const MCP_READ_SCOPE = 'merchant:read'
 export const MCP_CHECKOUT_SCOPE = 'merchant:checkout'
 
+// Bound inputs before JWT decoding/signing. Agent IDs retain the existing agt_ namespace.
+const AGENT_ID_PATTERN = /^agt_[A-Za-z0-9_-]{1,124}$/u
+const MAX_TOKEN_LENGTH = 8192
+
 export interface MintAgentTokenOptions {
   /** `agt_…`. Rejected before signing when the prefix is wrong, so a malformed subject cannot be minted. */
   readonly agentId: string
@@ -78,10 +82,17 @@ export async function mintAgentToken(
       ),
     )
   }
-  if (!options.agentId.startsWith('agt_') || options.agentId.length === 4) {
+  if (!AGENT_ID_PATTERN.test(options.agentId)) {
     return err(csError('CS_VALIDATION', 'An MCP agent token subject must be an agt_ id.'))
   }
   const now = options.nowSec ?? Math.floor(Date.now() / 1000)
+  if (
+    !Number.isSafeInteger(now) ||
+    now < 0 ||
+    now > Number.MAX_SAFE_INTEGER - MCP_TOKEN_TTL_SECONDS
+  ) {
+    return err(csError('CS_VALIDATION', 'An MCP issuance time must be safe integer epoch seconds.'))
+  }
   const requestedTtl = options.ttlSeconds ?? MCP_TOKEN_TTL_SECONDS
   const ttl = Number.isInteger(requestedTtl)
     ? Math.min(Math.max(requestedTtl, 1), MCP_TOKEN_TTL_SECONDS)
@@ -115,6 +126,7 @@ export async function mintAgentToken(
  * token with a five-minute grace would be a 20-minute token.
  */
 export async function verifyAgentToken(token: string): Promise<AuthInfo | undefined> {
+  if (token.length === 0 || token.length > MAX_TOKEN_LENGTH) return undefined
   const key = signingKey()
   if (key === null) return undefined
   try {
@@ -125,15 +137,31 @@ export async function verifyAgentToken(token: string): Promise<AuthInfo | undefi
       clockTolerance: 5,
     })
     const subject = payload.sub
-    if (typeof subject !== 'string' || !subject.startsWith('agt_') || subject.length === 4) {
+    if (typeof subject !== 'string' || !AGENT_ID_PATTERN.test(subject)) {
       return undefined
     }
-    if (typeof payload.exp !== 'number') return undefined
+    const { iat, exp, scope } = payload
+    if (
+      typeof iat !== 'number' ||
+      typeof exp !== 'number' ||
+      !Number.isSafeInteger(iat) ||
+      !Number.isSafeInteger(exp) ||
+      iat < 0 ||
+      iat > Math.floor(Date.now() / 1000) + 5 ||
+      exp <= iat ||
+      exp - iat > MCP_TOKEN_TTL_SECONDS
+    )
+      return undefined
+    if (typeof scope !== 'string' || scope.length === 0) return undefined
+    const grantedScopes = scope.split(' ')
+    if (grantedScopes.some((grant) => grant !== MCP_READ_SCOPE && grant !== MCP_CHECKOUT_SCOPE)) {
+      return undefined
+    }
 
     return {
       token,
       clientId: subject,
-      scopes: scopes(),
+      scopes: [...new Set(grantedScopes)],
       expiresAt: payload.exp,
       extra: { agentId: subject },
     }
@@ -146,7 +174,7 @@ export async function verifyAgentToken(token: string): Promise<AuthInfo | undefi
 export function agentIdFromAuth(auth: AuthInfo | undefined): string | null {
   const extra = auth?.extra
   const fromExtra = extra?.['agentId']
-  if (typeof fromExtra === 'string' && fromExtra.startsWith('agt_')) return fromExtra
-  if (auth !== undefined && auth.clientId.startsWith('agt_')) return auth.clientId
+  if (typeof fromExtra === 'string' && AGENT_ID_PATTERN.test(fromExtra)) return fromExtra
+  if (auth !== undefined && AGENT_ID_PATTERN.test(auth.clientId)) return auth.clientId
   return null
 }

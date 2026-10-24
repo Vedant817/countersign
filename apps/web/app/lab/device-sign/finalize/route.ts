@@ -7,6 +7,7 @@ import {
   failureResponse,
   readJson,
   readServiceConfig,
+  signingLabAllowed,
 } from '../vi'
 
 const requestSchema = z.strictObject({
@@ -15,6 +16,13 @@ const requestSchema = z.strictObject({
 })
 
 export async function POST(request: Request): Promise<Response> {
+  if (!signingLabAllowed(request)) {
+    return failure(
+      403,
+      'CS_UNAUTHENTICATED',
+      'Sample signing is available only in an explicitly enabled local signing lab.',
+    )
+  }
   const config = readServiceConfig()
   if (config === null) {
     return failure(500, 'CS_INTERNAL', MISSING_CONFIG)

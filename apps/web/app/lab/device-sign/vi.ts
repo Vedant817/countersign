@@ -27,6 +27,16 @@ export interface ServiceConfig {
 
 export const MISSING_CONFIG = 'VI_SERVICE_URL and VI_SERVICE_TOKEN must be set for the lab harness.'
 
+/** Sample identities must never be issued by a publicly deployed application. */
+export function signingLabAllowed(request: Request): boolean {
+  if (process.env.SIGNING_LAB_ENABLED !== 'true' || process.env.NODE_ENV === 'production')
+    return false
+  const url = new URL(request.url)
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) return false
+  const origin = request.headers.get('origin')
+  return origin === null || origin === url.origin
+}
+
 const CLIENT_STATUS: Record<string, number> = {
   CS_VALIDATION: 400,
   CS_NOT_FOUND: 404,

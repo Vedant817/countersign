@@ -250,13 +250,13 @@ export default function DeviceSignPage() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-10 px-6 py-16">
       <header>
-        <span className="label-signed font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+        <span className="label-signed font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
           Lab · AT-M5
         </span>
         <h1 className="mt-4 text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
           Device-signed intent
         </h1>
-        <p className="mt-4 max-w-2xl text-pretty text-[--color-ink-soft]">
+        <p className="mt-4 max-w-2xl text-pretty text-ink-soft">
           This page creates a non-extractable P-256 key in this browser, asks the vi-service to
           prepare an L2 whose signing input names that key, then asks for a WebAuthn step-up before
           signing. The token below is the result: a device-signed mandate intent this browser could
@@ -264,48 +264,42 @@ export default function DeviceSignPage() {
         </p>
       </header>
 
-      <section className="rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-6">
-        <h2 className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+      <section className="rounded-card border border-rule bg-paper-raised p-6">
+        <h2 className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
           1 · Device key
         </h2>
         {deviceKey !== null ? (
           <dl className="mt-4 space-y-2 font-mono text-sm">
             <div className="flex flex-wrap gap-2">
-              <dt className="text-[--color-ink-faint]">kid</dt>
+              <dt className="text-ink-faint">kid</dt>
               <dd data-testid="device-kid" className="break-all">
                 {deviceKey.kid}
               </dd>
             </div>
             <div className="flex flex-wrap gap-2">
-              <dt className="text-[--color-ink-faint]">jkt</dt>
-              <dd className="break-all text-[--color-ink-soft]">{deviceKey.jkt}</dd>
+              <dt className="text-ink-faint">jkt</dt>
+              <dd className="break-all text-ink-soft">{deviceKey.jkt}</dd>
             </div>
             <div className="flex flex-wrap gap-2">
-              <dt className="text-[--color-ink-faint]">created</dt>
-              <dd className="text-[--color-ink-soft]">{formatIst(deviceKey.createdAt)}</dd>
+              <dt className="text-ink-faint">created</dt>
+              <dd className="text-ink-soft">{formatIst(deviceKey.createdAt)}</dd>
             </div>
           </dl>
         ) : deviceError === null ? (
-          <p className="mt-4 text-sm text-[--color-ink-soft]">
-            Creating a P-256 key in this browser…
-          </p>
+          <p className="mt-4 text-sm text-ink-soft">Creating a P-256 key in this browser…</p>
         ) : null}
         {deviceError !== null ? (
-          <p
-            data-testid="device-error"
-            role="alert"
-            className="mt-4 text-sm text-[--color-blocked]"
-          >
+          <p data-testid="device-error" role="alert" className="mt-4 text-sm text-blocked">
             {deviceError}
           </p>
         ) : null}
         {deviceLost ? (
           <div
             data-testid="device-lost"
-            className="mt-5 rounded-[--radius-card] border-l-4 border-[--color-blocked] bg-[--color-blocked-soft] p-4"
+            className="mt-5 rounded-card border-l-4 border-blocked bg-blocked-soft p-4"
           >
             <p className="font-semibold">This device is new</p>
-            <p className="mt-1 text-sm text-[--color-ink-soft]">
+            <p className="mt-1 text-sm text-ink-soft">
               Reconnect PayPal to create a key. Your existing mandates still work; revoke them?
             </p>
             <button
@@ -313,7 +307,7 @@ export default function DeviceSignPage() {
               onClick={() => {
                 window.location.reload()
               }}
-              className="mt-3 rounded-[--radius-card] border border-[--color-blocked] px-4 py-2 text-sm font-semibold"
+              className="mt-3 rounded-card border border-blocked px-4 py-2 text-sm font-semibold"
             >
               Enrol this device
             </button>
@@ -321,9 +315,9 @@ export default function DeviceSignPage() {
         ) : null}
       </section>
 
-      <section className="rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-6">
+      <section className="rounded-card border border-rule bg-paper-raised p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+          <h2 className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
             2 · Prepare the L2
           </h2>
           <button
@@ -333,7 +327,7 @@ export default function DeviceSignPage() {
             onClick={() => {
               void onPrepare()
             }}
-            className="rounded-[--radius-card] border border-[--color-rule] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            className="rounded-card border border-rule px-4 py-2 text-sm font-semibold disabled:opacity-50"
           >
             {preparing ? 'Preparing…' : 'Prepare the L2'}
           </button>
@@ -342,31 +336,25 @@ export default function DeviceSignPage() {
           <div className="mt-5 space-y-4">
             <dl className="space-y-2 font-mono text-sm">
               <div className="flex flex-wrap gap-2">
-                <dt className="text-[--color-ink-faint]">prepare_id</dt>
+                <dt className="text-ink-faint">prepare_id</dt>
                 <dd className="break-all">{prepare.prepareId}</dd>
               </div>
               <div className="flex flex-wrap gap-2">
-                <dt className="text-[--color-ink-faint]">expires</dt>
-                <dd className="text-[--color-ink-soft]">{formatIst(prepare.expiresAt)}</dd>
+                <dt className="text-ink-faint">expires</dt>
+                <dd className="text-ink-soft">{formatIst(prepare.expiresAt)}</dd>
               </div>
             </dl>
             <div>
-              <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+              <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
                 Constraints
               </h3>
               <ul className="mt-2 space-y-2">
                 {constraints.map((row, index) => (
-                  <li
-                    key={`${row.type}-${index}`}
-                    className="rounded-[--radius-card] bg-[--color-paper] p-3"
-                  >
-                    <p
-                      data-testid="constraint-type"
-                      className="font-mono text-xs text-[--color-signed]"
-                    >
+                  <li key={`${row.type}-${index}`} className="rounded-card bg-paper p-3">
+                    <p data-testid="constraint-type" className="font-mono text-xs text-signed">
                       {row.type}
                     </p>
-                    <pre className="mt-2 overflow-x-auto font-mono text-xs text-[--color-ink-soft]">
+                    <pre className="mt-2 overflow-x-auto font-mono text-xs text-ink-soft">
                       {row.detail}
                     </pre>
                   </li>
@@ -374,29 +362,29 @@ export default function DeviceSignPage() {
               </ul>
             </div>
             <div>
-              <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+              <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
                 Payload
               </h3>
               <pre
                 data-testid="signed-payload"
-                className="mt-2 overflow-x-auto rounded-[--radius-card] bg-[--color-paper] p-3 font-mono text-xs text-[--color-ink-soft]"
+                className="mt-2 overflow-x-auto rounded-card bg-paper p-3 font-mono text-xs text-ink-soft"
               >
                 {JSON.stringify(prepare.payload, null, 2) ?? ''}
               </pre>
             </div>
           </div>
         ) : (
-          <p className="mt-4 text-sm text-[--color-ink-soft]">
+          <p className="mt-4 text-sm text-ink-soft">
             Prepare asks the vi-service for a signing input bound to this device key.
           </p>
         )}
       </section>
 
-      <section className="rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-6">
-        <h2 className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+      <section className="rounded-card border border-rule bg-paper-raised p-6">
+        <h2 className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
           3 · Step up and sign
         </h2>
-        <p className="mt-3 text-sm text-[--color-ink-soft]">
+        <p className="mt-3 text-sm text-ink-soft">
           Signing asks for a WebAuthn assertion first, then signs the prepared input with the device
           key. The signature is a P1363 r‖s pair.
         </p>
@@ -407,18 +395,18 @@ export default function DeviceSignPage() {
           onClick={() => {
             void onSign()
           }}
-          className="mt-4 rounded-[--radius-card] bg-[--color-ink] px-4 py-2 text-sm font-semibold text-[--color-paper] disabled:opacity-50"
+          className="mt-4 rounded-card bg-ink px-4 py-2 text-sm font-semibold text-paper disabled:opacity-50"
         >
           {signing ? 'Signing…' : 'Step up and sign'}
         </button>
         {signDisabled && prepare !== null && !deviceLost ? (
-          <p className="mt-2 text-xs text-[--color-ink-faint]">
+          <p className="mt-2 text-xs text-ink-faint">
             Take a breath — signing unlocks in a moment.
           </p>
         ) : null}
         <div className="mt-5 space-y-3">
           <div>
-            <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+            <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
               Signature
             </h3>
             <p data-testid="signature-b64url" className="mt-1 break-all font-mono text-xs">
@@ -427,23 +415,23 @@ export default function DeviceSignPage() {
           </div>
           {finalized !== null ? (
             <div>
-              <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
+              <h3 className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
                 L2 token
               </h3>
               <p data-testid="l2-token" className="mt-1 break-all font-mono text-xs">
                 {finalized.l2}
               </p>
-              <dl className="mt-3 space-y-1 font-mono text-xs text-[--color-ink-soft]">
+              <dl className="mt-3 space-y-1 font-mono text-xs text-ink-soft">
                 <div className="flex flex-wrap gap-2">
-                  <dt className="text-[--color-ink-faint]">agent_kid</dt>
+                  <dt className="text-ink-faint">agent_kid</dt>
                   <dd className="break-all">{finalized.agentKid}</dd>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <dt className="text-[--color-ink-faint]">iat</dt>
+                  <dt className="text-ink-faint">iat</dt>
                   <dd>{formatIst(finalized.iat)}</dd>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <dt className="text-[--color-ink-faint]">exp</dt>
+                  <dt className="text-ink-faint">exp</dt>
                   <dd>
                     {finalized.exp === null || finalized.exp === undefined
                       ? 'none'
@@ -457,12 +445,12 @@ export default function DeviceSignPage() {
       </section>
 
       {error !== null ? (
-        <p data-testid="error-message" role="alert" className="text-sm text-[--color-blocked]">
+        <p data-testid="error-message" role="alert" className="text-sm text-blocked">
           {error}
         </p>
       ) : null}
 
-      <footer className="border-t border-[--color-rule] pt-6 text-sm text-[--color-ink-faint]">
+      <footer className="border-t border-rule pt-6 text-sm text-ink-faint">
         The device key never leaves this browser. The signing input and the L2 are produced by the
         vi-service; the signature is the browser&rsquo;s.
       </footer>

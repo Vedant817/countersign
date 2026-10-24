@@ -1,10 +1,10 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 
-import { formatMoney } from '@countersign/core'
+import { displayMoney } from '@/lib/display-money'
 import { searchProducts } from '@countersign/gate'
 
-import { shopCatalog } from './catalog'
+import { shopCatalog, shopCatalogMode } from './catalog'
 
 export const metadata: Metadata = {
   title: 'Shop',
@@ -30,8 +30,8 @@ export default async function ShopPage({
     <div className="mx-auto max-w-5xl px-4 py-10 sm:py-16">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <span className="font-mono text-xs uppercase tracking-[0.2em] text-[--color-ink-faint]">
-            Storefront · S-11
+          <span className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
+            Sandbox storefront
           </span>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
             Northwind Outfitters
@@ -39,11 +39,30 @@ export default async function ShopPage({
         </div>
         <Link
           href="/status"
-          className="font-mono text-xs text-[--color-ink-faint] underline underline-offset-4"
+          className="font-mono text-xs text-ink-faint underline underline-offset-4"
         >
           /status
         </Link>
       </header>
+
+      {shopCatalogMode() !== 'database' ? (
+        <p
+          role="status"
+          className="mt-5 rounded-card border border-proposed bg-proposed-soft p-4 text-sm"
+        >
+          {shopCatalogMode() === 'demo-browse-only'
+            ? 'Demonstration catalog only. Price quotes and checkout require the merchant database.'
+            : 'The merchant database is not configured. Catalog and checkout are unavailable.'}
+        </p>
+      ) : null}
+
+      <p className="mt-5 max-w-3xl text-ink-soft">
+        Browse the sample catalog and lock a price quote. Prices name their original currency;
+        choosing a delivery country does not convert them. No payment is taken here.{' '}
+        <Link href="/regions" className="text-signed underline underline-offset-4">
+          Check coverage
+        </Link>
+      </p>
 
       <form action="/shop" method="get" className="mt-8 flex flex-wrap items-center gap-3">
         <label className="sr-only" htmlFor="q">
@@ -54,23 +73,24 @@ export default async function ShopPage({
           name="q"
           type="search"
           defaultValue={query}
+          maxLength={200}
           placeholder="Search titles, SKUs and listings"
-          className="w-full max-w-sm rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] px-4 py-2"
+          className="w-full max-w-sm rounded-card border border-rule bg-paper-raised px-4 py-2"
         />
         <button
           type="submit"
-          className="rounded-[--radius-card] bg-[--color-ink] px-4 py-2 font-medium text-[--color-paper-raised]"
+          className="rounded-card bg-ink px-4 py-2 font-medium text-paper-raised"
         >
           Search
         </button>
       </form>
 
       {!result.ok ? (
-        <p role="alert" className="mt-8 text-[--color-blocked]">
+        <p role="alert" className="mt-8 text-blocked">
           {result.error.userMessage}
         </p>
       ) : result.value.items.length === 0 ? (
-        <p className="mt-8 text-[--color-ink-soft]">
+        <p className="mt-8 text-ink-soft">
           No items match “{query}”.{' '}
           <Link href="/shop" className="underline underline-offset-4">
             Show all
@@ -81,7 +101,7 @@ export default async function ShopPage({
           {result.value.items.map((product) => (
             <li
               key={product.sku}
-              className="flex flex-col rounded-[--radius-card] border border-[--color-rule] bg-[--color-paper-raised] p-5"
+              className="flex flex-col rounded-card border border-rule bg-paper-raised p-5"
             >
               <Link
                 href={`/shop/${encodeURIComponent(product.sku)}`}
@@ -89,14 +109,14 @@ export default async function ShopPage({
               >
                 {product.title}
               </Link>
-              <p className="mt-1 font-mono text-xs uppercase tracking-wider text-[--color-ink-faint]">
+              <p className="mt-1 font-mono text-xs uppercase tracking-wider text-ink-faint">
                 {product.sku}
               </p>
-              <p className="mt-4 text-lg font-semibold">{formatMoney(product.price)}</p>
-              <p className="mt-1 text-sm text-[--color-ink-soft]">
+              <p className="mt-4 text-lg font-semibold">{displayMoney(product.price)}</p>
+              <p className="mt-1 text-sm text-ink-soft">
                 {product.stock > 0 ? `In stock: ${product.stock}` : 'Sold out'}
               </p>
-              <p className="mt-auto pt-3 font-mono text-xs text-[--color-ink-faint]">
+              <p className="mt-auto pt-3 font-mono text-xs text-ink-faint">
                 {product.digital ? 'Instant delivery' : `Ships in ${product.shipsInDays} days`}
               </p>
             </li>
