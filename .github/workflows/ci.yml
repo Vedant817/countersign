@@ -357,11 +357,21 @@ jobs:
       - name: fail if any job failed
         run: |
           set -euo pipefail
+          # Read the results from `toJSON(needs)`, **not** from `${{ needs.*.result }}`.
+          #
+          # The previous form interpolated `needs.*.result` into a shell variable, and when a
+          # dependency is a matrix job (test-node has three shards) that expression resolves to an
+          # array, which renders as the literal string `Array`. `echo "Array" | grep -qv success`
+          # matches, so this gate failed *unconditionally* — it has never been able to pass, and
+          # because everything else was red too nobody could tell. That is the same class of broken
+          # check as the VI pin (`sed` matching no line) and the defender source scan (a path that
+          # did not exist): a gate that reports failure without testing anything.
           echo '${{ toJSON(needs) }}'
-          RESULT="${{ needs.*.result }}"
-          if echo "$RESULT" | grep -qv success; then
-            echo "FAIL: at least one gate did not pass." >&2
-            echo "$RESULT" | tr ' ' '\n' | grep -v success >&2 || true
+          FAILED=$(echo '${{ toJSON(needs) }}' \
+            | jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"')
+          if [ -n "$FAILED" ]; then
+            echo "FAIL: at least one gate did not pass:" >&2
+            echo "$FAILED" >&2
             exit 1
           fi
           echo "ok: every gate passed"
