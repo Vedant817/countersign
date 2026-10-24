@@ -165,7 +165,9 @@ describe('verifyAgentToken', () => {
   })
 
   it('refuses an oversized bearer', async () => {
-    expect(await verifyAgentToken('x'.repeat(8193))).toBeUndefined()
+    const oversized = await signedClaims({ metadata: 'x'.repeat(8192) })
+    expect(oversized.length).toBeGreaterThan(8192)
+    expect(await verifyAgentToken(oversized)).toBeUndefined()
   })
 
   it.each([
