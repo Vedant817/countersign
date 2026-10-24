@@ -57,3 +57,24 @@ test('malformed checkout returns a controlled client error', async ({ request })
   expect(response.status()).toBe(415)
   expect(((await response.json()) as { error: { code: string } }).error.code).toBe('CS_VALIDATION')
 })
+
+test('digital-only checkout has no physical address or shipping charge', async ({ page }) => {
+  await page.goto('/shop/NW-024')
+  await expect(page.getByLabel('Ship to')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Lock price' }).click()
+  await expect(page).toHaveURL(/\/shop\/checkout\/chk_/)
+  await expect(
+    page
+      .locator('dl > div')
+      .filter({ has: page.locator('dt', { hasText: /^Shipping$/ }) })
+      .locator('dd'),
+  ).toHaveText('USD $0.00')
+})
+
+test('untrusted listing markup is inspectable without becoming active HTML', async ({ page }) => {
+  await page.goto('/shop/NW-011')
+  const listing = page.getByRole('region', { name: 'Merchant listing' })
+  await listing.getByText('Inspect the original untrusted listing').click()
+  await expect(listing.locator('pre')).toBeVisible()
+  await expect(listing.locator('script, style, iframe, img')).toHaveCount(0)
+})

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { displayMoney } from '@/lib/display-money'
 import { searchProducts } from '@countersign/gate'
 
-import { shopCatalog } from './catalog'
+import { shopCatalog, shopCatalogMode } from './catalog'
 
 export const metadata: Metadata = {
   title: 'Shop',
@@ -44,6 +44,17 @@ export default async function ShopPage({
           /status
         </Link>
       </header>
+
+      {shopCatalogMode() !== 'database' ? (
+        <p
+          role="status"
+          className="mt-5 rounded-card border border-proposed bg-proposed-soft p-4 text-sm"
+        >
+          {shopCatalogMode() === 'demo-browse-only'
+            ? 'Demonstration catalog only. Price quotes and checkout require the merchant database.'
+            : 'The merchant database is not configured. Catalog and checkout are unavailable.'}
+        </p>
+      ) : null}
 
       <p className="mt-5 max-w-3xl text-ink-soft">
         Browse the sample catalog and lock a price quote. Prices name their original currency;

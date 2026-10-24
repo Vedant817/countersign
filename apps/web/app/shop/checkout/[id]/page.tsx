@@ -25,7 +25,19 @@ export default async function CheckoutPage({
   const { id } = await params
   const result = await shopCatalog.requireCheckoutSession(id as CheckoutId)
 
-  if (!result.ok || result.value === undefined) notFound()
+  if (!result.ok)
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-12">
+        <h1 className="text-3xl font-semibold">Quote temporarily unavailable</h1>
+        <p role="alert" className="mt-5 text-ink-soft">
+          {result.error.userMessage}
+        </p>
+        <Link href="/shop" className="mt-6 inline-block text-signed underline">
+          Return to the storefront
+        </Link>
+      </div>
+    )
+  if (result.value === undefined) notFound()
 
   const session = result.value
   const requoteSku = session.cart.lines[0]?.sku

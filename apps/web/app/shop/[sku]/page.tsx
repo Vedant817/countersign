@@ -35,7 +35,20 @@ export default async function ProductPage({
   const errorMessage = firstValue(query.error)
   const result = await getProduct({ catalog: shopCatalog }, sku)
 
-  if (!result.ok) notFound()
+  if (!result.ok) {
+    if (result.error.code === 'CS_NOT_FOUND') notFound()
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-12">
+        <h1 className="text-3xl font-semibold">Product temporarily unavailable</h1>
+        <p role="alert" className="mt-5 text-ink-soft">
+          {result.error.userMessage}
+        </p>
+        <Link href="/shop" className="mt-6 inline-block text-signed underline">
+          Return to the storefront
+        </Link>
+      </div>
+    )
+  }
 
   const product = result.value
   const inStock = product.stock > 0
@@ -85,10 +98,24 @@ export default async function ProductPage({
         </p>
       ) : null}
 
-      <div
-        className="mt-6 leading-relaxed text-ink-soft"
-        dangerouslySetInnerHTML={{ __html: listingHtml }}
-      />
+      <section className="mt-6" aria-labelledby="listing-title">
+        <h2 id="listing-title" className="font-semibold">
+          Merchant listing
+        </h2>
+        <p className="mt-2 whitespace-pre-wrap leading-relaxed text-ink-soft">
+          {product.listing.untrusted_text}
+        </p>
+        <details className="mt-4 rounded-card border border-rule p-4 text-sm">
+          <summary className="font-medium">Inspect the original untrusted listing</summary>
+          <p className="mt-3 text-ink-soft">
+            Displayed as text so embedded scripts, styles and instructions cannot run in the
+            storefront.
+          </p>
+          <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-xs">
+            {listingHtml}
+          </pre>
+        </details>
+      </section>
 
       {errorMessage ? (
         <p role="alert" className="mt-8 text-blocked">

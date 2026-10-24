@@ -13,6 +13,32 @@ import { mintAgentToken as mintAgentTokenResult } from '@/lib/mcp-token'
 
 import { POST } from './route'
 
+// Repository doubles isolate transport authorization from a running database. No PayPal calls.
+vi.mock('@countersign/db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@countersign/db')>()
+  const rows = actual.SEED_PRODUCTS.map((product) => ({
+    sku: product.sku,
+    title: product.title,
+    description: product.description,
+    price_minor: product.price.minor,
+    currency: product.price.currency,
+    stock: product.stock,
+    ships_in_days: product.shipsInDays,
+    digital: product.digital,
+    listing_html: product.listingHtml,
+    created_at: new Date(0),
+    updated_at: new Date(0),
+  }))
+  return {
+    ...actual,
+    listProducts: async () => ({ ok: true as const, value: rows }),
+    findProductBySku: async (sku: string) => ({
+      ok: true as const,
+      value: rows.find((row) => row.sku === sku),
+    }),
+  }
+})
+
 const ENDPOINT = 'http://localhost/api/mcp/http'
 // The former fixture principal must not acquire payment authority from its identifier.
 const AGENT = 'agt_00000000000000000000000001'
@@ -87,6 +113,7 @@ function toolText(response: Record<string, unknown>): Record<string, unknown> {
 
 beforeAll(async () => {
   vi.stubEnv('SESSION_SECRET', SECRET)
+  vi.stubEnv('DATABASE_URL', 'repository-test-port')
   // The route fails closed when the VI service is absent; that is the state this test wants. A developer
   // shell may have these set, so remove them for the duration of the file.
   vi.stubEnv('VI_SERVICE_URL', undefined)

@@ -53,7 +53,7 @@ export function PriceLockCountdown({
       className="mt-6 rounded-card border border-rule bg-paper-raised px-5 py-4 font-mono text-sm text-ink-soft"
     >
       {remaining === null
-        ? 'Price locked while the mandate is checked.'
+        ? 'Checking the quote’s remaining time…'
         : `Price locked for ${formatRemaining(remaining)}`}
     </p>
   )
