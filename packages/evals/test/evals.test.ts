@@ -378,16 +378,17 @@ describe('the offline corpus run (P0-7)', () => {
     // Printed whether or not the assertion holds: a score without its denominator, and without the cases
     // that moved, is the kind of green this repository has already been burned by.
     const failures = report.cases.filter((c) => !c.ok)
+    const detail =
+      failures.length === 0
+        ? ''
+        : `\n${failures
+            .map(
+              (c) =>
+                `  ${c.id}: ${c.mismatches.map((m) => `${m.field} expected ${m.expected} got ${m.actual}`).join('; ')}`,
+            )
+            .join('\n')}`
     console.info(
-      `offline compiler corpus (no model, no network): ${formatRate(report)} exact match` +
-        (failures.length === 0
-          ? ''
-          : `\n${failures
-              .map(
-                (c) =>
-                  `  ${c.id}: ${c.mismatches.map((m) => `${m.field} expected ${m.expected} got ${m.actual}`).join('; ')}`,
-              )
-              .join('\n')}`),
+      `offline compiler corpus (no model, no network): ${formatRate(report)} exact match${detail}`,
     )
     expect(report.rate).not.toBeNull()
     expect(report.rate ?? 0).toBeGreaterThanOrEqual(0.98)

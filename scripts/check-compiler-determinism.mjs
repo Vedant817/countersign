@@ -31,7 +31,12 @@ if (process.argv.includes('--offline')) {
    */
   const result = spawnSync(
     process.execPath,
-    ['--import', 'tsx', join(repoRoot, 'packages', 'evals', 'src', 'determinism.ts'), ...process.argv.slice(2).filter((a) => a !== '--offline')],
+    [
+      '--import',
+      'tsx',
+      join(repoRoot, 'packages', 'evals', 'src', 'determinism.ts'),
+      ...process.argv.slice(2).filter((a) => a !== '--offline'),
+    ],
     { cwd: repoRoot, stdio: 'inherit' },
   )
   if (result.error) {

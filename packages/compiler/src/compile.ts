@@ -378,6 +378,15 @@ interface AskOutcome {
  * into `LLM_UNAVAILABLE` (EC-LLM-1). Keeping "the model was unreachable" and "the model's answer was
  * unusable" apart matters: one is retryable by the buyer in ten seconds, the other is not retryable at all
  * without changing the request.
+ *
+ * ## The sampling settings, and why there are only two of them
+ *
+ * `temperature: 0` and a fixed `seed` are what the caller asked for, and both are forwarded. The third
+ * setting a reader might expect — `reasoningEffort: 'none'` — is deliberately **not** here: it is an
+ * OpenAI-specific field, and this package is provider-agnostic (`OPENAI_BASE_URL` may point at Groq,
+ * OpenRouter, Ollama or a Modal endpoint), so sending it to a model that does not know it turns a working
+ * answer into a 400. Since P0-7 the model's whole job is "name items for this sentence, if you can"; every
+ * value that carries authority is read by `parser.ts` before this function is reached.
  */
 async function askOnce(model: LanguageModel, system: string, prompt: string): Promise<AskOutcome> {
   const result = await generateText({
@@ -385,6 +394,7 @@ async function askOnce(model: LanguageModel, system: string, prompt: string): Pr
     system,
     prompt,
     temperature: 0,
+    seed: 0,
     output: Output.object({ schema: llmProposalSchema, name: 'spending_mandate' }),
   })
   return { proposal: result.output, schemaFailure: null }
