@@ -222,8 +222,58 @@ export function matchMerchants(text: string, lexicon: CatalogLexicon): LexiconEn
   return matchAll(text, lexicon.merchants)
 }
 
+/**
+ * Match every SKU the text names, by the **longest** alias that fits, without overlaps.
+ *
+ * ## Why longest-match wins, and why overlaps are suppressed
+ *
+ * "Buy the Alpine Hard Shell Jacket under $200" contains the word *alpine* (also an alias of `Alpine Down
+ * Vest`) and the word *jacket* (also `Tokyo Trail Jacket`). Matching each word independently returns three
+ * items for a sentence that names one, and the mandate then permits two products the buyer never
+ * mentioned. The buyer wrote the *full name* of a product, so the words inside that name belong to it:
+ * the longest alias is matched first, its span is claimed, and an alias that falls inside a claimed span
+ * is part of a name rather than a reference of its own.
+ *
+ * A word that no longer alias covers is still matched on its own (`"socks"` → both sock products), which
+ * is the honest reading of an ambiguous word and is why the rule is "longest wins", not "only full names".
+ */
 export function matchSkus(text: string, lexicon: CatalogLexicon): LexiconEntry[] {
-  return matchAll(text, lexicon.skus)
+  const tokens = normaliseTokens(text)
+  interface Hit {
+    readonly entry: LexiconEntry
+    readonly start: number
+    readonly end: number
+  }
+  const hits: Hit[] = []
+  for (const entry of lexicon.skus) {
+    for (const alias of entry.aliases) {
+      const words = alias.split(' ')
+      if (words.length === 0) continue
+      for (let start = 0; start + words.length <= tokens.length; start += 1) {
+        if (words.every((word, offset) => tokens[start + offset] === word)) {
+          hits.push({ entry, start, end: start + words.length })
+        }
+      }
+    }
+  }
+
+  hits.sort((a, b) => b.end - b.start - (a.end - a.start) || a.start - b.start)
+  const claimed: Array<[number, number]> = []
+  const matched = new Set<string>()
+  for (const hit of hits) {
+    // Two products that share a word produce two hits over the *same* span; both are recorded, because
+    // the buyer's word really does name both. Only a hit that falls inside a **longer** claimed span is
+    // suppressed — there, the words are part of a name the buyer wrote in full.
+    const sameSpan = claimed.some(([start, end]) => start === hit.start && end === hit.end)
+    if (sameSpan) {
+      matched.add(hit.entry.id)
+      continue
+    }
+    if (claimed.some(([start, end]) => hit.start < end && start < hit.end)) continue
+    claimed.push([hit.start, hit.end])
+    matched.add(hit.entry.id)
+  }
+  return lexicon.skus.filter((entry) => matched.has(entry.id))
 }
 
 /**
@@ -233,6 +283,7 @@ export function matchSkus(text: string, lexicon: CatalogLexicon): LexiconEntry[]
  * says `"a nice shade of mauve"` sets nothing, and the model is what fills that gap later (if it is
  * configured). No colour list lives here, which is what keeps this from inventing a preference.
  */
+
 export function attributesInText(
   text: string,
   lexicon: CatalogLexicon,

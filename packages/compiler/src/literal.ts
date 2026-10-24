@@ -286,7 +286,17 @@ export function mentionsRecurrence(text: string): boolean {
 const FREQUENCY_WORDS: Readonly<Record<string, readonly RegExp[]>> = {
   INDA: [/\beach\s+time\b/iu, /\bper\s+purchase\b/iu, /\bevery\s+purchase\b/iu],
   DAIL: [/\bdaily\b/iu, /\bevery\s+day\b/iu, /\ba\s+day\b/iu, /\bper\s+day\b/iu],
-  WEEK: [/\bweekly\b/iu, /\bevery\s+week\b/iu, /\ba\s+week\b/iu, /\bper\s+week\b/iu],
+  /*
+   * The lookbehinds are load-bearing, not cosmetic.
+   *
+   * "biweekly" contains "weekly", "semi-annual" contains "annual", and "half-yearly" contains "yearly".
+   * Without `(?<!bi-)` and friends, `frequenciesInText("bill me biweekly")` returns **two** cadences, the
+   * multi-cadence rule in `proposal.ts` refuses the request as ambiguous, and a buyer who wrote an
+   * ordinary schedule is sent to the manual form. Found by the corpus (`rec-10`), which is exactly what
+   * the corpus is for: the module comment above claims the tables do not overlap, and this is them not
+   * overlapping.
+   */
+  WEEK: [/\b(?<!bi-)weekly\b/iu, /\bevery\s+week\b/iu, /\ba\s+week\b/iu, /\bper\s+week\b/iu],
   TWOK: [/\bfortnight/iu, /\bbi-?weekly\b/iu, /\bevery\s+(two|2)\s+weeks?\b/iu],
   TWMN: [/\bevery\s+(two|2)\s+months?\b/iu, /\bbi-?monthly\b/iu],
   MNTH: [/\bmonthly\b/iu, /\bevery\s+month\b/iu, /\ba\s+month\b/iu, /\bper\s+month\b/iu],
@@ -294,7 +304,13 @@ const FREQUENCY_WORDS: Readonly<Record<string, readonly RegExp[]>> = {
   QUTR: [/\bquarterly\b/iu, /\bevery\s+quarter\b/iu, /\ba\s+quarter\b/iu, /\bper\s+quarter\b/iu],
   FOMN: [/\bevery\s+(four|4)\s+months?\b/iu],
   SEMI: [/\bsemi-?annual/iu, /\bhalf-?yearly\b/iu, /\bevery\s+six\s+months\b/iu],
-  YEAR: [/\byearly\b/iu, /\bannually\b/iu, /\bannual\b/iu, /\bevery\s+year\b/iu, /\ba\s+year\b/iu],
+  YEAR: [
+    /\b(?<!half-)yearly\b/iu,
+    /\bannually\b/iu,
+    /\b(?<!semi-)(?<!bi-)annual\b/iu,
+    /\bevery\s+year\b/iu,
+    /\ba\s+year\b/iu,
+  ],
   TYEA: [/\bevery\s+(two|2)\s+years?\b/iu, /\bbi-?annual\b/iu],
 }
 
