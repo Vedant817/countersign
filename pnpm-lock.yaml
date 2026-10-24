@@ -229,6 +229,9 @@ importers:
       '@countersign/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@countersign/orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/orchestrator
       '@countersign/orders':
         specifier: workspace:*
         version: link:../../packages/orders

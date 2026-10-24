@@ -34,6 +34,7 @@ import {
   type MandateId,
 } from '@countersign/core'
 import { evaluate } from '@countersign/gate'
+import { orchestratorStoreFromRepos } from '@countersign/orchestrator'
 
 import { gateRuntime } from '@/lib/gate-runtime'
 
@@ -123,6 +124,31 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const value = decision.value
+
+  /**
+   * Persist the decision, linked to its attempt, atomically.
+   *
+   * An evaluation that is not recorded is a **permission nobody can audit** — the whole claim of the
+   * project is that an `ALLOW` is provable afterwards, and a decision that exists only in a response
+   * body cannot be. `orchestratorStoreFromRepos().decide` is the writer that already exists for this;
+   * re-implementing the insert here would be a second source of truth for what a decision row means.
+   *
+   * `ok(undefined)` means **nothing was written** because the attempt row does not exist. That is not
+   * an error to swallow: an `ALLOW` with no attempt is a permission that will fail closed one step
+   * later, and the caller is told rather than left to discover it. `recorded` makes the difference
+   * visible in the response instead of inferred from the status code.
+   */
+  const recorded = await orchestratorStoreFromRepos().decide({
+    decision: value,
+    attemptId: body.attempt_id as AttemptId,
+    at: new Date(),
+  })
+  if (!recorded.ok) {
+    return NextResponse.json(toBody(recorded.error), {
+      status: STATUS_BY_CODE[recorded.error.code] ?? 500,
+    })
+  }
+
   return NextResponse.json(
     {
       decision_id: value.id,
@@ -131,6 +157,12 @@ export async function POST(request: Request): Promise<Response> {
       // All twelve, in order, with `notApplicable` preserved: reporting a not-applicable check as
       // `passed` would claim an enforcement that did not happen (D19's failure mode).
       checks: value.checks,
+      /**
+       * Whether the decision reached `gate_decisions`. `false` means the attempt id is unknown to this
+       * deployment, so the decision was **not** persisted — an `ALLOW` in that state cannot become an
+       * order, and saying so here is cheaper than letting the caller find out at order creation.
+       */
+      recorded: recorded.value !== undefined,
     },
     // A `BLOCK` is a successful evaluation, so it is a 200 with an outcome — not a 4xx. A caller that
     // branched on the status would treat "we checked and refused" the same as "we could not check",

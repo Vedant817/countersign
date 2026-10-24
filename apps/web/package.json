@@ -23,6 +23,7 @@
     "@countersign/gate": "workspace:*",
     "@countersign/ledger": "workspace:*",
     "@countersign/orders": "workspace:*",
+    "@countersign/orchestrator": "workspace:*",
     "@countersign/paypal": "workspace:*",
     "@countersign/privacy": "workspace:*",
     "@countersign/verifier": "workspace:*",
