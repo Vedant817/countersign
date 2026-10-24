@@ -10,7 +10,8 @@
   "scripts": {
     "dev": "pnpm --filter @countersign/web dev",
     "dev:worker": "pnpm --filter @countersign/worker dev",
-    "dev:vi": "pnpm --filter @countersign/web exec echo \"cd apps/vi && uv run uvicorn vi_service.main:app --port 8000 --reload\"",
+    "dev:vi": "uv run --project apps/vi uvicorn vi_service.main:app --app-dir apps/vi/src --host 127.0.0.1 --port 8000",
+    "dev:local": "node scripts/dev-local.mjs",
     "build": "pnpm -r build",
     "start": "pnpm --filter @countersign/web start",
     "typecheck": "pnpm -r typecheck",

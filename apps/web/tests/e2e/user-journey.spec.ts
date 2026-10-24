@@ -78,3 +78,11 @@ test('untrusted listing markup is inspectable without becoming active HTML', asy
   await expect(listing.locator('pre')).toBeVisible()
   await expect(listing.locator('script, style, iframe, img')).toHaveCount(0)
 })
+
+test('service status remains readable at a narrow viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 })
+  await page.goto('/status')
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Storefront', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
