@@ -601,6 +601,25 @@ describe('a sentence with no marker that is not boilerplate', () => {
     expect(codes(verdict)).toEqual(['UNCITED_SENTENCE'])
   })
 
+  it('EC-LLM-3: a hallucinated fact is refused, not softened, so the packet never asserts it', () => {
+    /**
+     * The model's failure mode this guards is invention: a sentence that sounds like knowledge we hold
+     * ("our records show the customer has never disputed an order before") for which no artefact
+     * exists. The checker has exactly one honest answer — refuse the sentence — because a warning
+     * would still put the claim in front of an adjudicator.
+     *
+     * The note is otherwise perfectly cited, so this is not a test of the marker format: the
+     * fabricated sentence carries no marker, and the verdict names the sentence it refused.
+     */
+    const verdict = check(
+      'The buyer is disputing USD 129.99 [[clm_dispute_amount]]. ' +
+        'Our records show the customer has never disputed an order before.',
+    )
+    expect(verdict.ok).toBe(false)
+    expect(codes(verdict)).toEqual(['UNCITED_SENTENCE'])
+    expect(verdict.problems[0]?.sentence).toContain('never disputed an order')
+  })
+
   it('refuses every sentence when the packet has no citable claim at all', () => {
     const verdict = checkCitations(
       { notes: 'The buyer is disputing USD 129.99 [[clm_dispute_amount]].' },
