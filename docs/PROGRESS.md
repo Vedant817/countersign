@@ -51,7 +51,7 @@ buildable now.
 | WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | todo | | E2E + table fallback |
 | WP-17f | Landing, status, design polish | A | 17a–e | wip | `d0fe7ea` | Landing/nav/judge/status/`/regions` copy reworked, 360 px layout fixed, 14 E2E green; Lighthouse ≥ 90 a11y not yet measured |
 | WP-18 | Public verifier `/v/[packetId]` | B | 03, 15d | done | `774e8a4` | AT-M18 ✅ 226 |
-| WP-19 | Privacy, logging, audit, status | A | 02, 12 | wip | `e3b3174` | AT-M19.1 ✅ 49 offline (merge `0878bd3`); AT-M19.2 is `packages/core`'s logger · remaining: the purge sweep job, and wiring `webhookHealth` into `/status` |
+| WP-19 | Privacy, logging, audit, status | A | 02, 12 | wip | `e3b3174` | AT-M19.1 ✅ 58 offline (merge `0878bd3`, `/status` wiring `3013725`); AT-M19.2 is `packages/core`'s logger · remaining: the worker job that executes `planSweep` |
 | WP-20 | Evals + Judge Mode | A | 11, 13, 15e | todo | | J1–J4 green ×20 |
 | WP-21 | Edge-case sweep: every §12 row tested | all | all | todo | | `pnpm test:ec` = 109/109; currently **90/109 referenced, 19 unclaimed**, and `EC-IDEM-4`/`EC-MER-1` are still `todo` in the ledger despite having tests |
 | WP-22 | Docs, README, Devpost assets, video shot list | A | 20 | todo | | §19–§20 checklists |
@@ -307,3 +307,26 @@ WP-06s and everything needing live sandbox is not started.
   The reviewer's remaining observation was environmental, not a code defect: the local vi-service had
   stopped and a stray process was serving port 8000, which is why the review could not complete a
   quote. The E2E suite had passed 14/14 against the real service earlier in the session.
+
+- **2026-10-24 (IST)** — **The environment defect behind that review finding, and three smaller
+  ones.** Port 8000 was held by an unrelated project (`amazonhelp-support-triage`) answering 404.
+  Nothing was killed: the launcher's refusal to end a process it did not start is correct, but being
+  unable to move was not, so **`COUNTERSIGN_WEB_PORT` and `COUNTERSIGN_VI_PORT`** now override the
+  defaults in both `scripts/dev-local.mjs` and the Playwright config (`b9a2081`), and the readiness
+  probe distinguishes "404 because something else is listening" from "still starting". Running the E2E
+  suite from a **clean machine** then exposed a real test defect: Playwright's `webServer.env`
+  *replaces* the child's environment, so its Next server had no `DATABASE_URL`, the shop ran in
+  `unavailable`, and seven storefront tests failed — they had only ever passed against a hand-started
+  dev server. Fixed (`5ce46b5`); the suite now starts both servers itself: **14/14 in 19.5 s**.
+  Verified against the running lab afterwards: a quote for NW-001 × 2 to DE returns `303` to a
+  `chk_…` page showing USD $256.00 + $14.00 shipping = $270.00, the pre-hydration countdown reads
+  *"Checking the quote's remaining time."* (the P3 fix, which the reviewer could not observe), and
+  `/v/not-a-packet` is a **404**, not the 500 it used to be.
+- **2026-10-24 (IST)** — **WP-19 finished the two items it had left open.** `/status` now takes its
+  webhook verdict from `webhookHealth` rather than printing raw counts for the reader to judge
+  (`3013725`), which is what keeps §14's five-minute target in one place; `idle` stays distinct from
+  healthy, because a deployment that has never received a webhook looks quiet and is misconfigured.
+  `planSweep` decides what a purge *would* delete and refuses to plan one from a clock before the
+  project existed — a container with no RTC would otherwise schedule every row for deletion, and no
+  backup taken afterwards contains them. What is still missing is the worker job that calls it with
+  real rows and executes the deletes.

@@ -29,9 +29,11 @@ Three separate promises in the spec need code rather than prose:
 | `policy.ts`       | How long may we keep this? `RETENTION_POLICY`, `retentionDeadline`, `withinRetention` |
 | `hold.ts`         | May this be erased today, and what is the subject told? `planErasure`                 |
 | `pseudonymise.ts` | What does "erased" mean for a row? `pseudonymiseUser`, `piiDigest`                    |
+| `sweep.ts`        | What would a purge delete? `planSweep` — a plan, never a delete                       |
 | `notice.ts`       | The 48-hour pre-erasure notice (EC-PRIV-5)                                            |
 | `export.ts`       | The subject-access bundle (EC-PRIV-2)                                                 |
 | `status.ts`       | Is anything stuck? `webhookHealth`, `overallStatus` (§8.19 `/status`, §14 SLOs)       |
+| `disclosure.ts`   | What may reach a model, and where does the data go? (EC-PRIV-4, EC-PRIV-6)            |
 
 Everything is a pure function or a port. There is no database client, no PayPal call and no
 environment read beyond `PRIVACY_PSEUDONYM_SALT` — deliberately, so the acceptance tests run without
@@ -60,8 +62,9 @@ dispute note, and that `redactFreeText` removes a known name that no pattern cou
   digest is a bare `sha256(email)`, which is brute-forceable against a candidate list.
   `pseudonymSaltConfigured()` exists so a caller can refuse; this package does not, because
   configuration belongs to the composition root.
-- **Nothing here purges anything.** The package decides and renders; the sweep job that calls
-  `retentionDeadline` and deletes rows is worker code and is not written yet.
+- **Nothing here purges anything.** `planSweep` decides what a purge _would_ delete and refuses to
+  plan one from a clock before the project existed — but the worker job that calls it with real rows
+  and executes the deletes is not written yet.
 - **§12.13's export is delivered as a value, not a zip.** Turning `ExportBundle` into bytes and a
   download is the delivery layer's job.
 - **No PayPal call is made.** §12.13 says erasure "delete[s] the vault token at PayPal";

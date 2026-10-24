@@ -98,3 +98,14 @@ export {
   type LlmPromptField,
   type PromptViolation,
 } from './disclosure'
+
+export {
+  EARLIEST_PLAUSIBLE_SEC,
+  describeSweep,
+  planSweep,
+  sweepableClasses,
+  type KeptItem,
+  type PurgeItem,
+  type SweepCandidate,
+  type SweepPlan,
+} from './sweep'
