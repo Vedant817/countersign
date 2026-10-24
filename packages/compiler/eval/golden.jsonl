@@ -18,7 +18,7 @@
 {"id":"g18","text":"under ₹450 at Contoso","expect":{"currency":"INR","amountMax":"450.00","budgetMax":"450.00","merchantIds":["mrc_contoso"],"skus":[]}}
 {"id":"g19","text":"a desk lamp under 25 pounds","expect":{"currency":"GBP","amountMax":"25.00","budgetMax":"25.00","merchantIds":[],"skus":["SKU-LAMP-2"]}}
 {"id":"g20","text":"Stoneware Mugs at Fabrikam, cap £15","expect":{"currency":"GBP","amountMax":"15.00","budgetMax":"15.00","merchantIds":["mrc_fabrikam"],"skus":["SKU-MUG-4"]}}
-{"id":"g21","text":"Buy a lamp under 40 euros","expect":{"currency":"EUR","amountMax":"40.00","budgetMax":"40.00","merchantIds":[],"skus":[]}}
+{"id":"g21","text":"Buy a lamp under 40 euros","expect":{"currency":"EUR","amountMax":"40.00","budgetMax":"40.00","merchantIds":[],"skus":["SKU-LAMP-2"]}}
 {"id":"g22","text":"something warm for the trip, max 200 dollars","expect":{"currency":"USD","amountMax":"200.00","budgetMax":"200.00","merchantIds":[],"skus":[]}}
 {"id":"g23","text":"a pair of boots, up to 120 dollars, at Northwind Outfitters","expect":{"currency":"USD","amountMax":"120.00","budgetMax":"120.00","merchantIds":["mrc_northwind"],"skus":["SKU-ALPINE-07"]}}
 {"id":"g24","text":"running shoes under $99","expect":{"currency":"USD","amountMax":"99.00","budgetMax":"99.00","merchantIds":[],"skus":["SKU-ALPINE-07","SKU-TRAIL-42"]}}
@@ -34,7 +34,7 @@
 {"id":"g34","text":"buy the Rain Shell when it is back, under 45 dollars","expect":{"currency":"USD","amountMax":"45.00","budgetMax":"45.00","merchantIds":[],"skus":["SKU-RAIN-11"]}}
 {"id":"g35","text":"alpine boots, at most 89.99 dollars","expect":{"currency":"USD","amountMax":"89.99","budgetMax":"89.99","merchantIds":[],"skus":["SKU-ALPINE-07"]}}
 {"id":"g36","text":"$64 or less for the Trail Runner","expect":{"currency":"USD","amountMax":"64.00","budgetMax":"64.00","merchantIds":[],"skus":["SKU-TRAIL-42"]}}
-{"id":"g37","text":"buy chai and tea under 600 rupees","expect":{"currency":"INR","amountMax":"600.00","budgetMax":"600.00","merchantIds":[],"skus":["SKU-CHAI-9","SKU-TEA-5"]}}
+{"id":"g37","text":"buy chai and tea under 600 rupees","expect":{"currency":"INR","amountMax":"600.00","budgetMax":"600.00","merchantIds":[],"skus":["SKU-CHAI-9"]}}
 {"id":"g38","text":"one item of clothing, max 200 dollars","expect":{"currency":"USD","amountMax":"200.00","budgetMax":"200.00","merchantIds":[],"skus":[]}}
 {"id":"g39","text":"anything from Northwind under 60 dollars","expect":{"currency":"USD","amountMax":"60.00","budgetMax":"60.00","merchantIds":["mrc_northwind"],"skus":[]}}
 {"id":"g40","text":"get a stove but never over 70 dollars","expect":{"currency":"USD","amountMax":"70.00","budgetMax":"70.00","merchantIds":[],"skus":["SKU-CAMP-19"]}}
@@ -43,7 +43,7 @@
 {"id":"g43","text":"new running shoes, maximum 150 dollars, Northwind only","expect":{"currency":"USD","amountMax":"150.00","budgetMax":"150.00","merchantIds":["mrc_northwind"],"skus":["SKU-TRAIL-42"]}}
 {"id":"g44","text":"presents for the family, up to 400 dollars total","expect":{"currency":"USD","amountMax":"400.00","budgetMax":"400.00","merchantIds":[],"skus":[]}}
 {"id":"g45","text":"under 1.5k on tools","expect":{"currency":"USD","amountMax":"1500.00","budgetMax":"1500.00","merchantIds":[],"skus":[]}}
-{"id":"g46","text":"boot and lamp purchase under 200 dollars","expect":{"currency":"USD","amountMax":"200.00","budgetMax":"200.00","merchantIds":[],"skus":[]}}
+{"id":"g46","text":"boot and lamp purchase under 200 dollars","expect":{"currency":"USD","amountMax":"200.00","budgetMax":"200.00","merchantIds":[],"skus":["SKU-ALPINE-07","SKU-LAMP-2"]}}
 {"id":"g47","text":"under 65 dollars for the Slate colourway if you can","expect":{"currency":"USD","amountMax":"65.00","budgetMax":"65.00","merchantIds":[],"skus":[]}}
 {"id":"g48","text":"buy some tea under 25 dollars at Contoso Supply","expect":{"currency":"USD","amountMax":"25.00","budgetMax":"25.00","merchantIds":["mrc_contoso"],"skus":["SKU-TEA-5"]}}
 {"id":"g49","text":"up to 45 dollars, Trail Runner or Alpine Boot","expect":{"currency":"USD","amountMax":"45.00","budgetMax":"45.00","merchantIds":[],"skus":["SKU-ALPINE-07","SKU-TRAIL-42"]}}
@@ -56,5 +56,6 @@
 {"id":"g56","text":"Buy shoes","expect":{"currency":"USD","amountMax":null,"budgetMax":null,"merchantIds":[],"skus":[]}}
 {"id":"g57","text":"Get me something nice","expect":{"currency":"USD","amountMax":null,"budgetMax":null,"merchantIds":[],"skus":[]}}
 {"id":"g58","text":"order whatever is on sale this week","expect":{"currency":"USD","amountMax":null,"budgetMax":null,"merchantIds":[],"skus":[]}}
-{"id":"g59","text":"Buy shoes for twenty dollars","expect":{"currency":"USD","amountMax":null,"budgetMax":null,"merchantIds":[],"skus":[]}}
+{"id":"g59","text":"Buy shoes for twenty dollars","expect":{"currency":"USD","amountMax":"20.00","budgetMax":"20.00","merchantIds":[],"skus":[]}}
 {"id":"g60","text":"the usual, about the same as last time","expect":{"currency":"USD","amountMax":null,"budgetMax":null,"merchantIds":[],"skus":[]}}
+{"id":"g61","text":"get me a headlamp and some socks","expect":{"currency":"USD","amountMax":null,"budgetMax":null,"merchantIds":[],"skus":[]}}

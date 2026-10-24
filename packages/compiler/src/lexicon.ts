@@ -94,10 +94,11 @@ export function normalisePhrase(text: string): string {
  * Every alias a product can be matched by.
  *
  * The **SKU id first** (`"NW-006"` is how the catalogue, the read-back and a test all name an item), then
- * the **full title**, then its individual words. Individual words are only kept when they are at least
- * four characters and are not a measurement word, because `"45"`, `"L"` and `"pack"` name nothing. A word
- * shared by two products (`"trail"`, `"sock"`) matches both — that is the honest reading of an ambiguous
- * word, and it is strictly narrower than the alternative of matching nothing.
+ * the **full title**, then its individual words. Individual words are kept when they are at least three
+ * characters and are not a measurement word: `"mug"`, `"pad"` and `"bag"` name products, while `"45"`,
+ * `"L"`, `"set"` and `"pack"` name nothing. A word shared by two products (`"trail"`, `"sock"`) matches
+ * both — that is the honest reading of an ambiguous word, and it is strictly narrower than the alternative
+ * of matching nothing.
  */
 function skuAliases(sku: CatalogSku): string[] {
   const aliases: string[] = []
@@ -106,7 +107,7 @@ function skuAliases(sku: CatalogSku): string[] {
   const full = normalisePhrase(sku.title)
   if (full !== '' && full !== id) aliases.push(full)
   for (const token of new Set(normaliseTokens(sku.title))) {
-    if (token.length < 4 || MEASURE_WORDS.has(token) || /^\d/iu.test(token)) continue
+    if (token.length < 3 || MEASURE_WORDS.has(token) || /^\d/iu.test(token)) continue
     if (!aliases.includes(token)) aliases.push(token)
   }
   return aliases
