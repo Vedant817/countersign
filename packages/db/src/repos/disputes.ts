@@ -16,7 +16,7 @@
  * deterministic router in §8.15 and is `null` until it has run — a case with no liability has not been
  * assessed, which is different from having been assessed as `UNPROVABLE`.
  */
-import { and, asc, desc, eq, lte, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm'
 
 import type { CsError, DisputeId, Money, PacketId, Result } from '@countersign/core'
 
@@ -150,7 +150,10 @@ export function findDisputesUpdatedSince(
       const rows = await (exec ?? db())
         .select()
         .from(disputes)
-        .where(sql`${disputes.updated_at} >= ${since}`)
+        // `gte`, not a raw `sql` fragment: a `sql` template hands the driver the JS value untouched,
+        // and postgres-js refuses a `Date` ("The string argument must be of type string or an instance
+        // of Buffer or ArrayBuffer"). `gte` routes it through the timestamp column's encoder.
+        .where(gte(disputes.updated_at, since))
         .orderBy(desc(disputes.updated_at))
       return rows as DisputeRow[]
     },
@@ -623,7 +626,7 @@ export function countDisputesForWalletSince(
         .innerJoin(orders, eq(disputes.order_id, orders.id))
         .innerJoin(checkoutAttempts, eq(orders.attempt_id, checkoutAttempts.id))
         .innerJoin(mandates, eq(checkoutAttempts.mandate_id, mandates.id))
-        .where(and(eq(mandates.wallet_id, walletId), sql`${disputes.created_at} >= ${since}`))
+        .where(and(eq(mandates.wallet_id, walletId), gte(disputes.created_at, since)))
       return rows.length
     },
     { table: 'disputes', walletId, since },
