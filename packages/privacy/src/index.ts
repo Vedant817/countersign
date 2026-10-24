@@ -85,3 +85,16 @@ export {
   type WebhookHealthInput,
   type WebhookHealthState,
 } from './status'
+
+export {
+  CROSS_BORDER,
+  DEPLOYMENT_REGION,
+  LLM_DATA_STATEMENT,
+  LLM_PROMPT_ALLOWED_FIELDS,
+  assertPromptIsClean,
+  promptRejectedError,
+  renderPrivacyStatement,
+  type CrossBorderDisclosure,
+  type LlmPromptField,
+  type PromptViolation,
+} from './disclosure'

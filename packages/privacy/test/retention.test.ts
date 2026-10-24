@@ -35,7 +35,7 @@ const NOW = Date.UTC(2027, 0, 15) / 1000
 const insideWindow = NOW - 30 * SECONDS_PER_DAY
 const outsideWindow = NOW - (EVIDENCE_WINDOW_DAYS + 1) * SECONDS_PER_DAY
 
-describe('AT-M19.1: erasure is blocked by a legal hold and allowed after resolution', () => {
+describe('AT-M19.1 / EC-PRIV-1: erasure is blocked by a legal hold and allowed after resolution', () => {
   it('holds while a dispute is open, naming it and promising no date it cannot keep', () => {
     const decision = planErasure({
       userId: 'usr_1',

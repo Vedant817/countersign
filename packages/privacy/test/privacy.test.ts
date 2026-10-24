@@ -11,19 +11,24 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  CROSS_BORDER,
   EXPORT_RETENTION_NOTE,
+  LLM_DATA_STATEMENT,
   RECONCILER_LAG_SLO_SEC,
+  assertPromptIsClean,
   buildExport,
   exportFilename,
   humaniseSeconds,
   isAlreadyErased,
   overallStatus,
   piiDigest,
+  promptRejectedError,
   pseudonymFor,
   pseudonymSaltConfigured,
   pseudonymiseUser,
   redactFreeText,
   renderPreErasureNotice,
+  renderPrivacyStatement,
   webhookHealth,
   type DependencyStatus,
   type PrivacyExportStore,
@@ -324,5 +329,74 @@ describe('the /status reconciler numbers', () => {
     expect(humaniseSeconds(3 * 86_400 + 4 * 3_600)).toBe('3d 4h')
     expect(humaniseSeconds(3_600 + 120)).toBe('1h 2m')
     expect(humaniseSeconds(90)).toBe('1m')
+  })
+})
+
+/* -------------------------------------------------------------------------------------------- */
+/* Provider and cross-border disclosure — EC-PRIV-4 and EC-PRIV-6                                */
+/* -------------------------------------------------------------------------------------------- */
+
+describe('EC-PRIV-4: what may be sent to the model provider', () => {
+  it('accepts a prompt built only from allow-listed product and instruction fields', () => {
+    expect(
+      assertPromptIsClean({
+        intent_text: 'Buy the cheapest trail runner under eighty dollars',
+        product_title: 'Trail Runner',
+        product_sku: 'NW-001',
+        merchant_name: 'Northwind Outfitters',
+      }),
+    ).toEqual([])
+  })
+
+  it('reports a field that is not on the list, which is how a template grows a payer_email', () => {
+    const violations = assertPromptIsClean({
+      intent_text: 'buy it',
+      payer_email: 'asha@example.com',
+    })
+    expect(violations).toHaveLength(1)
+    expect(violations[0]?.field).toBe('payer_email')
+    expect(violations[0]?.reason).toContain('not an allowed prompt field')
+  })
+
+  it('reports PII hiding inside an allowed field, because that is the case code review misses', () => {
+    // "Northwind Outfitters <ops@northwind.example>" is a merchant name that is also an address.
+    const violations = assertPromptIsClean({
+      merchant_name: 'Northwind Outfitters <ops@northwind.example>',
+    })
+    expect(violations.map((v) => v.field)).toEqual(['merchant_name'])
+    expect(violations[0]?.reason).toContain('email')
+  })
+
+  it('catches a vault token and a card number in an instruction the user pasted in', () => {
+    expect(assertPromptIsClean({ intent_text: 'pay with PAYTOKEN-1AB2CD3EF' })).toHaveLength(1)
+    expect(assertPromptIsClean({ intent_text: 'card 4111 1111 1111 1111' })).toHaveLength(1)
+  })
+
+  it('turns a rejection into a CsError that names each problem', () => {
+    const error = promptRejectedError(
+      assertPromptIsClean({ intent_text: 'x', payer_email: 'a@b.com' }),
+    )
+    expect(error.code).toBe('CS_VALIDATION')
+    expect(error.details?.['violations']).toBeDefined()
+  })
+
+  it('documents the retention of prompts and outputs in the statement itself', () => {
+    expect(LLM_DATA_STATEMENT).toContain('30 days')
+    expect(LLM_DATA_STATEMENT).toContain('do not send your name')
+  })
+})
+
+describe('EC-PRIV-6: the cross-border disclosure', () => {
+  it('names the region the deployment actually runs in', () => {
+    expect(CROSS_BORDER.region).toBe('Singapore')
+    expect(CROSS_BORDER.statement).toContain('Singapore')
+  })
+
+  it('renders the transfer notice and the retention windows on the privacy page', () => {
+    const { paragraphs } = renderPrivacyStatement()
+    expect(paragraphs.join(' ')).toContain('cross-border transfer')
+    // The windows on the page are the same constants the sweep enforces, so the page cannot drift.
+    expect(paragraphs.join(' ')).toContain('365 days')
+    expect(paragraphs.join(' ')).toContain('540 days')
   })
 })
