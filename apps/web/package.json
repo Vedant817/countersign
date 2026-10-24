@@ -24,6 +24,7 @@
     "@countersign/ledger": "workspace:*",
     "@countersign/orders": "workspace:*",
     "@countersign/paypal": "workspace:*",
+    "@countersign/privacy": "workspace:*",
     "@countersign/verifier": "workspace:*",
     "@countersign/vi-client": "workspace:*",
     "@countersign/webhooks": "workspace:*",

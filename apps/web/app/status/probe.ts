@@ -37,6 +37,7 @@
  * verdict that maps to the HTTP status. `not_configured` buys a clearer diagnosis, not a softer one.
  */
 import { systemClock } from '@countersign/core'
+import { type WebhookHealth } from '@countersign/privacy'
 import { ViClient } from '@countersign/vi-client'
 
 /* ------------------------------------------------------------------------------------------ */
@@ -95,6 +96,15 @@ export interface StatusReport {
     readonly secondsSinceLast: number | null
     readonly backlogOldestSeconds: number
     readonly unprocessed: number | null
+    /**
+     * The §8.19/§14 verdict, computed by `@countersign/privacy`.
+     *
+     * The route used to render the raw numbers and leave the reader to decide whether they were bad,
+     * which is how an SLO becomes 15 minutes in the UI while it is still 5 in the docs. `state` is
+     * `ok | lagging | stalled | idle`, where **`idle` is not a synonym for healthy**: a deployment that
+     * has never received a webhook looks quiet and is misconfigured.
+     */
+    readonly health: WebhookHealth
     readonly note: string
   }
   readonly viLibCommit: string

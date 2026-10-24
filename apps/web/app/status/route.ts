@@ -48,6 +48,7 @@
  */
 import { formatIst, formatIstHuman, VI_LIB_COMMIT, type CsError } from '@countersign/core'
 import { findLatestWebhookEvent, listUnprocessedEvents } from '@countersign/db'
+import { webhookHealth } from '@countersign/privacy'
 
 import { probeAll, type StatusReport } from './probe'
 
@@ -198,9 +199,30 @@ async function countUnprocessed(): Promise<StatusReport['webhook']> {
   const pending = await listUnprocessedEvents(100)
 
   const nowMs = Date.now()
+  const nowSec = Math.floor(nowMs / 1000)
   const latestRow = latest.ok ? latest.value : undefined
   const at = latestRow?.received_at instanceof Date ? latestRow.received_at : null
   const pendingRows = pending.ok ? pending.value : undefined
+  const oldestPending =
+    pendingRows === undefined || pendingRows.length === 0
+      ? null
+      : Math.min(...pendingRows.map((r) => r.received_at.getTime()))
+
+  /**
+   * The verdict comes from `@countersign/privacy`, not from this file.
+   *
+   * §14 sets the reconciler target at five minutes and `webhookHealth` owns that threshold, so the
+   * page cannot drift from the number the docs quote. It also keeps two states apart that a raw
+   * backlog count conflates: `idle` (nothing has ever arrived — a wiring fault) and `ok` (arrived and
+   * drained).
+   */
+  const health = webhookHealth({
+    lastReceivedAtSec: at === null ? null : Math.floor(at.getTime() / 1000),
+    lastProcessedAtSec: null,
+    pendingCount: pendingRows?.length ?? 0,
+    oldestPendingReceivedAtSec: oldestPending === null ? null : Math.floor(oldestPending / 1000),
+    nowSec,
+  })
 
   return {
     lastReceivedAt:
@@ -212,16 +234,9 @@ async function countUnprocessed(): Promise<StatusReport['webhook']> {
      * wants, and it is honest about its own limit: it measures the webhook channel, not PayPal's state.
      * PayPal-side divergence is the reconciler's job (§8.12) and is not visible here.
      */
-    backlogOldestSeconds:
-      pendingRows === undefined || pendingRows.length === 0
-        ? 0
-        : Math.max(
-            0,
-            Math.round(
-              (nowMs - Math.min(...pendingRows.map((r) => r.received_at.getTime()))) / 1000,
-            ),
-          ),
+    backlogOldestSeconds: health.reconcilerLagSec ?? 0,
     unprocessed: pendingRows?.length ?? null,
+    health,
     note: 'Informational. §8.12 repairs a lost webhook within five minutes; this never fails the check.',
   }
 }
@@ -327,6 +342,7 @@ ${headline}
 <tbody>${rows}</tbody>
 </table>
 <h2>Webhooks</h2>
+<p><code>${escapeHtml(webhook.health.state)}</code> ${escapeHtml(webhook.health.detail)}${webhook.health.sloBreached ? ' <strong>Past the §14 target of 300 s.</strong>' : ''}</p>
 <p>${webhookRow} ${webhook.unprocessed ?? 0} event(s) stored and not yet processed; the oldest has been waiting ${webhook.backlogOldestSeconds}s. ${escapeHtml(webhook.note)}</p>
 <h2>Build</h2>
 <p class="meta">Verifiable Intent commit <code>${escapeHtml(report.viLibCommit)}</code> · APP_ENV <code>${escapeHtml(String(report.environment.appEnv))}</code> · PayPal environment <code>${escapeHtml(String(report.environment.paypalEnv))}</code>${report.environment.paypalEnvRejected ? ' — <strong>not sandbox; boot should have refused (§6, EC-ENV-1)</strong>' : report.environment.sandboxOnly ? '' : ' — PayPal is not configured on this deployment'}</p>

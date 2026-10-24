@@ -87,9 +87,12 @@ export function webhookHealth(input: WebhookHealthInput): WebhookHealth {
   const state: WebhookHealthState =
     lag >= RECONCILER_STALLED_SEC ? 'stalled' : lag > RECONCILER_LAG_SLO_SEC ? 'lagging' : 'ok'
 
+  // `null` means "we did not read it", which is different from "nothing has ever been processed".
+  // Claiming the latter when the caller simply did not supply the value is how a status page starts
+  // reporting things it never measured, so the clause is omitted rather than guessed.
   const since =
     lastProcessedAtSec === null
-      ? 'never processed anything'
+      ? null
       : `last processed ${Math.max(0, nowSec - lastProcessedAtSec)}s ago`
 
   return {
@@ -97,7 +100,7 @@ export function webhookHealth(input: WebhookHealthInput): WebhookHealth {
     lastWebhookAtSec: lastReceivedAtSec,
     reconcilerLagSec: lag,
     sloBreached: lag > RECONCILER_LAG_SLO_SEC,
-    detail: `${pendingCount} unprocessed, oldest ${lag}s old (§14 target ${RECONCILER_LAG_SLO_SEC}s); ${since}.`,
+    detail: `${pendingCount} unprocessed, oldest ${lag}s old (§14 target ${RECONCILER_LAG_SLO_SEC}s)${since === null ? '.' : `; ${since}.`}`,
   }
 }
 

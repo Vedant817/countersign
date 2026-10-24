@@ -311,6 +311,20 @@ describe('the /status reconciler numbers', () => {
     expect(health.state).toBe('stalled')
   })
 
+  it('does not claim "never processed anything" when the caller simply did not read that value', () => {
+    // The status route does not query `processed_at`, and an earlier draft of this function turned
+    // that absence into an assertion about the system. A page must not report what it did not measure.
+    const health = webhookHealth({
+      lastReceivedAtSec: NOW - 10,
+      lastProcessedAtSec: null,
+      pendingCount: 5,
+      oldestPendingReceivedAtSec: NOW - 600,
+      nowSec: NOW,
+    })
+    expect(health.detail).not.toContain('never processed')
+    expect(health.detail).toContain('5 unprocessed')
+  })
+
   it('keeps "unconfigured" and "down" apart, because only one of them is an incident', () => {
     const deps = (ok: boolean | null, configured = true): DependencyStatus[] => [
       { name: 'database', configured, ok, detail: '' },

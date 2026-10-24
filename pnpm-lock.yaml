@@ -235,6 +235,9 @@ importers:
       '@countersign/paypal':
         specifier: workspace:*
         version: link:../../packages/paypal
+      '@countersign/privacy':
+        specifier: workspace:*
+        version: link:../../packages/privacy
       '@countersign/verifier':
         specifier: workspace:*
         version: link:../../packages/verifier
