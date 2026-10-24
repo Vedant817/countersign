@@ -52,6 +52,11 @@ jobs:
       - name: gitleaks (full history)
         uses: gitleaks/gitleaks-action@v2
         env:
+          # The action refuses to scan a pull request without it ("GITHUB_TOKEN is now required to
+          # scan pull requests"), which is why the first PR-triggered run of this workflow failed on
+          # this step alone while every push-triggered run passed. Supplying the automatic token is
+          # the action's documented setup; nothing about what is scanned changes.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
       - name: assert .env files are ignored except .env.example
         run: |
