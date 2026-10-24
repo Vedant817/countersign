@@ -1,6 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { generateKeyPairSync, randomBytes } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -28,12 +30,53 @@ function portFromEnv(name, fallback) {
   return value
 }
 
+/**
+ * Read `.env.local`, because Next will not.
+ *
+ * `next dev` loads `.env*` from the **app directory** (`apps/web`), not from the working directory —
+ * and the launcher runs from the repo root. So every variable in the root `.env.local` was silently
+ * invisible to the app: `OPENAI_API_KEY` and `OPENAI_BASE_URL` among them, which is why the compiler
+ * answered `LLM_UNAVAILABLE ... unset` while the file plainly set them.
+ *
+ * Deliberately a twenty-line parser rather than `dotenv`: this script has no dependencies, and the
+ * subset it needs is `KEY=VALUE`, `#` comments and blank lines. Quotes are stripped; nothing else is
+ * interpreted, so a value containing `${…}` stays literal.
+ */
+function readEnvFile(path) {
+  const text = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  const out = {}
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const key = trimmed.slice(0, eq).trim()
+    let value = trimmed.slice(eq + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    out[key] = value
+  }
+  return out
+}
+
+const localEnv = readEnvFile(join(root, '.env.local'))
+
 const webPort = portFromEnv('COUNTERSIGN_WEB_PORT', 3000)
 const viPort = portFromEnv('COUNTERSIGN_VI_PORT', 8000)
 
 // Public local Compose configuration, bound to loopback. Never read or print real credentials.
+//
+// `.env.local` is the base so a developer's own OPENAI_*, PAYPAL_* and MERCHANT_* reach the app. The
+// literals below then override it for the values the launcher owns, because web and VI must agree on
+// the session token, the KEK and the signing key or the two halves of the lab cannot talk to each
+// other — a stale `.env.local` copy of one of those is a mismatch that reads as a broken service.
 const environment = {
   ...process.env,
+  ...localEnv,
   APP_ENV: 'local',
   DATABASE_URL: localDatabase.href,
   // The verifier page requires this (D-053). Without it `/v/<packetId>` renders "temporarily
