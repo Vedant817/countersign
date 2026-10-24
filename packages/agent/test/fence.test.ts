@@ -11,6 +11,9 @@
  *     injections" badge next to the exact listing the demo points at.
  *  3. **Ordinary prose is not flagged.** A detector that fires on everything is a detector nobody reads,
  *     and EC-AGT-1's badge would be noise.
+ *
+ * EC-AGT-1 is credited to this file and to `scripted.test.ts`: one is the detector, the other is the
+ * consequence.
  */
 import { describe, expect, it } from 'vitest'
 import { INJECTION_PAYLOADS } from '@countersign/db'

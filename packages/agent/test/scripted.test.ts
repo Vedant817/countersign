@@ -1,12 +1,13 @@
 /**
  * The scripted shopper — spec §8.13 AT-M13.1 ("a happy path buys the cheapest in-mandate shoe") and
- * AT-M13.2 ("the seeded injection listings → 0 successful out-of-mandate orders").
+ * AT-M13.2 ("the seeded injection listings → 0 successful out-of-mandate orders"), §12 **EC-AGT-1**
+ * (a listing that tries to instruct the agent) and **EC-AGT-2** (an attacker who owns the agent loop).
  *
  * The three behaviours are the three claims the project makes about the same code path:
  *
  *  - `lawful` — the product works: a cart inside the mandate is authorised, submitted and ordered.
- *  - `instructed` — a jailbroken model loop is stopped by the **signer** (§8.13 defence 3).
- *  - `compromised` — an attacker who owns the agent server is stopped by the **Gate** (defence 4).
+ *  - `instructed` — a jailbroken model loop is stopped by the **signer** (§8.13 defence 3) — EC-AGT-1.
+ *  - `compromised` — an attacker who owns the agent server is stopped by the **Gate** (defence 4) — EC-AGT-2.
  *
  * The last two are different failures on purpose. A suite that only had the first would prove nothing
  * about the Gate, and the Gate is the control the whole architecture is built around.
@@ -64,7 +65,8 @@ describe('lawful behaviour', () => {
   })
 })
 
-describe('instructed behaviour — the signer is the control', () => {
+// EC-AGT-1: the listing instructs the agent, and the **signer** refuses the cart it asks for.
+describe('instructed behaviour - the signer is the control', () => {
   it('is refused when it follows the listing to an out-of-mandate item', async () => {
     const { deps, merchant } = fakeDeps({ capMinor: 5_000n })
     const events = await collect(
@@ -88,7 +90,8 @@ describe('instructed behaviour — the signer is the control', () => {
   })
 })
 
-describe('compromised behaviour — the Gate is the control', () => {
+// EC-AGT-2: an attacker who owns the agent loop - the **Gate** is the only control left.
+describe('compromised behaviour - the Gate is the control', () => {
   it('produces a Gate BLOCK for an authorisation it never obtained', async () => {
     const { deps, merchant } = fakeDeps({ capMinor: 5_000n })
     const events = await collect(
