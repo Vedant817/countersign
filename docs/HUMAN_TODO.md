@@ -1,6 +1,6 @@
 # HUMAN TODO — things only Vedant can do
 
-_Last updated: 25 October 2026_
+_Last updated: 26 October 2026_
 
 Agents keep working on everything that is not blocked by one of these. **Newest request goes at the top.**
 When you complete an item, move it to `docs/DONE_BY_HUMAN.md` with the date.
@@ -11,6 +11,29 @@ The deadline is **Fri 13 Nov 2026, 1:30 AM IST**. Internal target: submitted by 
 it is "a well-engineered payments-security library with no product on top of it"
 (`docs/review/VERDICT.md`). Every item below is on the critical path out of that. Items 1–5 unblock
 roughly two thirds of the remaining P0 work; nothing else can proceed until they land.
+
+---
+
+## ★ 1a. A vaulted buyer, so the agent's purchase can end in a **capture**
+
+**Blocks:** P0-6's last inch. The shopping agent now runs the whole path — real mandate, real vi-signed
+chain, real Gate ALLOW, and a **real PayPal sandbox order** (`docs/verification/P0-6.md`,
+order `6KW70371X5666381D`). It stops there on purpose: capturing needs
+`payment_source.paypal.vault_id`, i.e. a **saved payment method**, and there are no buyer credentials in
+`.env.local` yet (`PAYPAL_BUYER_EMAIL`/`PASSWORD` are empty, and the sandbox REST app does not have
+**Vault / Save payment methods** enabled).
+
+What is needed, in one line each:
+
+1. Enable **Vault** on the `countersign-sandbox` REST app (developer.paypal.com → Apps & Credentials).
+2. Set `PAYPAL_BUYER_EMAIL` / `PAYPAL_BUYER_PASSWORD` for the default personal sandbox account.
+3. Set `PAYPAL_MERCHANT_ID` to the **PayPal** payer id of the Business account (`MERCHANT_ID` is ours,
+   `mrc_northwind`; PayPal rejects it as a payee with `INVALID_STRING_LENGTH` — see
+   `scripts/paypal-order-probe.mts`).
+
+Then `packages/orders.createOrderFromDecision` (P0-4) can send the vault id and the run can capture.
+Until then the agent demo reports `order_pending: true` and a sentence saying so, which is the honest
+state rather than a claim.
 
 ---
 
