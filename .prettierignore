@@ -33,6 +33,13 @@ apps/vi/tests/constraint_shapes.json
 # line number, and risk mangling a table that the whole project parses. It is also not our prose.
 docs/spec/countersign-blueprint.md
 
+# The judge panel's verdict, reproduced verbatim.
+#
+# Same reasoning as the spec, and one more: this is the document the work is being held to. Reformatting
+# the reviewer's own words so they match our style is a small thing that reads as editing the review.
+# Prettier also cannot settle on it — `--write` leaves it still failing `--check`.
+docs/review/VERDICT.md
+
 # Markdown tables in the decision log and the status table are hand-aligned for readability; Prettier
 # reflows them and the result is a whole-file diff on every one-line status change, which is the
 # opposite of what a log that gets read on every work package is for.
