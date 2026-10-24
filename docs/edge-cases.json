@@ -1472,8 +1472,8 @@
       "declaredTest": "U",
       "userFacing": "\"We'll erase on 2 Jun 2027 because a dispute needs this record\"",
       "specLine": 1507,
-      "status": "wip",
-      "notes": "Unbuilt. WP-19 owns packages/privacy. The PRIVACY_LEGAL_HOLD code already exists in the registry (packages/core/src/errors.ts) and the schema has privacy_requests.legal_hold_reason (packages/db), but no behaviour and therefore no test yet."
+      "status": "done",
+      "notes": "packages/privacy planErasure (WP-19). An open dispute holds erasure and names itself; resolution releases the dispute hold but NOT the 540-day evidence window, so the request stays held with a final, arithmetic date; the request proceeds only once both are clear, subject to the 48-hour notice floor. The date is marked provisional when a dispute is open, because the case can outlive the window. Tests: packages/privacy/test/retention.test.ts (AT-M19.1 / EC-PRIV-1)."
     },
     {
       "id": "EC-PRIV-2",
@@ -1487,8 +1487,8 @@
       "declaredTest": "E",
       "userFacing": "Download link",
       "specLine": 1508,
-      "status": "wip",
-      "notes": "The redaction a data export depends on is proven on the rendered output rather than the inputs: the extracted-PDF test greps the decoded text for an email, a full card number, an over-long payer_id and any NEVER_SERIALISE key. The export route is WP-19."
+      "status": "done",
+      "notes": "packages/privacy buildExport (WP-19) assembles every section the spec lists, keyed by subject, and re-scrubs free text so another person in a dispute note or webhook payload cannot ride along; credential-shaped fields are redacted and an unknown subject fails closed. Delivery as bytes/zip is the delivery layer. Tests: packages/privacy/test/privacy.test.ts."
     },
     {
       "id": "EC-PRIV-3",
@@ -1517,7 +1517,8 @@
       "declaredTest": "U (prompt redaction test)",
       "userFacing": "Privacy page statement",
       "specLine": 1510,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/privacy assertPromptIsClean (WP-19) enforces a prompt allow-list of product and instruction fields and rejects PII values hiding inside an allowed field, so a merchant name that is an email address fails rather than shipping. The compiler (WP-08) already sends only the intent text; wiring the check into the shopping agent is WP-13. Tests: packages/privacy/test/privacy.test.ts."
     },
     {
       "id": "EC-PRIV-5",
@@ -1531,7 +1532,8 @@
       "declaredTest": "U",
       "userFacing": "Email preview",
       "specLine": 1511,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/privacy renderPreErasureNotice (WP-19) renders the 48-hour notice with the purge date, the hold reason and a cancel path, and schedules itself 48 h before the purge. Delivery (email) is a stub by design. Tests: packages/privacy/test/privacy.test.ts."
     },
     {
       "id": "EC-PRIV-6",
@@ -1545,7 +1547,8 @@
       "declaredTest": "n/a",
       "userFacing": "Notice text",
       "specLine": 1512,
-      "status": "todo"
+      "status": "done",
+      "notes": "packages/privacy CROSS_BORDER and renderPrivacyStatement (WP-19) disclose the deployment region and the basis for an India-to-Singapore transfer. DEPLOYMENT_REGION matches render.yaml, which sets region: singapore for the database, web and vi services, so the page cannot drift from the deployment. Tests: packages/privacy/test/privacy.test.ts."
     },
     {
       "id": "EC-LLM-1",

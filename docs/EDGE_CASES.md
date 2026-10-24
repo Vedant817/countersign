@@ -6,15 +6,15 @@
      tree by scripts/ec-coverage.mjs. Edit `status`, `blockedReason` and `notes` in
      docs/edge-cases.json, then run `pnpm test:ec`. -->
 
-_Generated 2026-10-24 08:17Z._
+_Generated 2026-10-24 08:36Z._
 
 | Metric | Value |
 |---|---|
 | Edge cases in spec §12 | **109** |
-| Cases with at least one referencing test | **87** |
-| Cases fully `done` (test present + status done) | **48** |
+| Cases with at least one referencing test | **90** |
+| Cases fully `done` (test present + status done) | **53** |
 | Cases `blocked` (needs live sandbox / human step) | **1** |
-| Total test references | **557** |
+| Total test references | **562** |
 
 A test claims a case by naming it in the test title or in a comment on the line above,
 e.g. `it('EC-CAP-1 …')` or `// EC-WH-4 forged webhook`.
@@ -292,15 +292,18 @@ Owning work package(s): `WP-19` · module: `M19 privacy` · spec line 1507
 
 | ID | Scenario | Handling | Declared | Test(s) | Status |
 |---|---|---|---|---|---|
-| **EC-PRIV-1** | Erasure request with an open dispute | PRIVACY_LEGAL_HOLD; scheduled for after resolution + window; the user is told the date | U | `apps/vi/tests/test_l1.py:78` | wip — 1 test |
-| | _note:_ Unbuilt. WP-19 owns packages/privacy. The PRIVACY_LEGAL_HOLD code already exists in the registry (packages/core/src/errors.ts) and the schema has privacy_requests.legal_hold_reason (packages/db), but no behaviour and therefore no test yet. | | | | |
-| **EC-PRIV-2** | Export request | JSON zip of all rows + tokens + PDFs within 24 h (immediate in the demo) | E | `packages/defender/test/evidence-doc.test.ts:515` — uses uncompressed object streams, because a zlib build would change the bytes<br>`packages/defender/test/evidence-doc.test.ts:638` — EC-PRIV-2: the packet names rows, not row contents, so an export can serve the contents itself | wip — 2 tests |
-| | _note:_ The redaction a data export depends on is proven on the rendered output rather than the inputs: the extracted-PDF test greps the decoded text for an email, a full card number, an over-long payer_id and any NEVER_SERIALISE key. The export route is WP-19. | | | | |
+| **EC-PRIV-1** | Erasure request with an open dispute | PRIVACY_LEGAL_HOLD; scheduled for after resolution + window; the user is told the date | U | `apps/vi/tests/test_l1.py:78`<br>`packages/privacy/test/retention.test.ts:50` — holds while a dispute is open, naming it and promising no date it cannot keep | done |
+| | _note:_ packages/privacy planErasure (WP-19). An open dispute holds erasure and names itself; resolution releases the dispute hold but NOT the 540-day evidence window, so the request stays held with a final, arithmetic date; the request proceeds only once both are clear, subject to the 48-hour notice floor. The date is marked provisional when a dispute is open, because the case can outlive the window. Tests: packages/privacy/test/retention.test.ts (AT-M19.1 / EC-PRIV-1). | | | | |
+| **EC-PRIV-2** | Export request | JSON zip of all rows + tokens + PDFs within 24 h (immediate in the demo) | E | `packages/defender/test/evidence-doc.test.ts:515` — uses uncompressed object streams, because a zlib build would change the bytes<br>`packages/defender/test/evidence-doc.test.ts:638` — EC-PRIV-2: the packet names rows, not row contents, so an export can serve the contents itself<br>`packages/privacy/test/privacy.test.ts:130` — ignores values too short to be identifying, which would otherwise shred the text | done |
+| | _note:_ packages/privacy buildExport (WP-19) assembles every section the spec lists, keyed by subject, and re-scrubs free text so another person in a dispute note or webhook payload cannot ride along; credential-shaped fields are redacted and an unknown subject fails closed. Delivery as bytes/zip is the delivery layer. Tests: packages/privacy/test/privacy.test.ts. | | | | |
 | **EC-PRIV-3** | Public verifier leaks PII | Redaction: email masked (a*@…), no street address; raw-token download includes selectively disclosed** fields only (SD-JWT) | U | `apps/web/app/status/status.test.ts:291` — EC-PRIV-3 no configured secret value appears anywhere in the probe report<br>`apps/web/app/status/status.test.ts:304` — EC-PRIV-3 a failing probe’s message does not echo the credential it failed with<br>`apps/web/app/status/status.test.ts:315` — EC-PRIV-3 the HTML rendering is escaped, so a probe message cannot become markup<br>`packages/defender/test/evidence-doc.test.ts:515` — uses uncompressed object streams, because a zlib build would change the bytes<br>`packages/defender/test/evidence-doc.test.ts:519` — EC-PRIV-3: no email address survives, only a mask a reader can recognise as their own<br>`packages/defender/test/evidence-doc.test.ts:524` — EC-PRIV-3: no email address survives, only a mask a reader can recognise as their own<br>`packages/defender/test/evidence-doc.test.ts:528` — EC-PRIV-3: no full card number survives, only the last four<br>`packages/defender/test/evidence-doc.test.ts:535` — EC-PRIV-3: the payer id is masked to the permitted length<br>`packages/defender/test/evidence-doc.test.ts:609` — masks a payer id that a merchant pasted into prose, which is the leak this file found<br>`packages/verifier/test/bundle.test.ts:266` — keeps the packet-only members out of the preimage, so a tenth member cannot change custom_id<br>`packages/verifier/test/redact.test.ts:147` — names the street members it drops, so the module states what it is discarding<br>`packages/verifier/test/redact.test.ts:224` — carries the buyer email, because the L1 discloses it and EC-PRIV-3 permits that<br>`packages/verifier/test/redact.test.ts:387` — lists every category of withheld value, including the two EC-PRIV-3 names explicitly | done |
 | | _note:_ Handled in packages/core (WP-01): three-filter logger redaction + redacted public verifier payload (S-18) | | | | |
-| **EC-PRIV-4** | LLM provider data | OpenAI API data-usage settings documented; no PII sent to the compiler beyond the intent text; product data only to the agent | U | — | todo — no test |
-| **EC-PRIV-5** | Pre-erasure notice | 48 h email (stub) before the retention purge, per DPDP Rule 8(2) good practice [B17] | U | — | todo — no test |
-| **EC-PRIV-6** | Cross-border transfer (India user, US hosting) | Disclosed in the notice; Render region chosen = Singapore [U: confirm Render region list in WP-00] | — | — | todo — no test |
+| **EC-PRIV-4** | LLM provider data | OpenAI API data-usage settings documented; no PII sent to the compiler beyond the intent text; product data only to the agent | U | `packages/privacy/test/privacy.test.ts:336` — humanises a remaining retention window | done |
+| | _note:_ packages/privacy assertPromptIsClean (WP-19) enforces a prompt allow-list of product and instruction fields and rejects PII values hiding inside an allowed field, so a merchant name that is an email address fails rather than shipping. The compiler (WP-08) already sends only the intent text; wiring the check into the shopping agent is WP-13. Tests: packages/privacy/test/privacy.test.ts. | | | | |
+| **EC-PRIV-5** | Pre-erasure notice | 48 h email (stub) before the retention purge, per DPDP Rule 8(2) good practice [B17] | U | `packages/privacy/test/privacy.test.ts:216` — builds a filename with no user-supplied text in it | done |
+| | _note:_ packages/privacy renderPreErasureNotice (WP-19) renders the 48-hour notice with the purge date, the hold reason and a cancel path, and schedules itself 48 h before the purge. Delivery (email) is a stub by design. Tests: packages/privacy/test/privacy.test.ts. | | | | |
+| **EC-PRIV-6** | Cross-border transfer (India user, US hosting) | Disclosed in the notice; Render region chosen = Singapore [U: confirm Render region list in WP-00] | — | `packages/privacy/test/privacy.test.ts:336` — humanises a remaining retention window | done |
+| | _note:_ packages/privacy CROSS_BORDER and renderPrivacyStatement (WP-19) disclose the deployment region and the basis for an India-to-Singapore transfer. DEPLOYMENT_REGION matches render.yaml, which sets region: singapore for the database, web and vi services, so the page cannot drift from the deployment. Tests: packages/privacy/test/privacy.test.ts. | | | | |
 
 ## §12.14 LLM failures
 
