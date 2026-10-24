@@ -1,8 +1,10 @@
 /**
  * Merchant MCP transport - spec section 8.14, WP-14.
- * Catalog and price-lock tools use the shop ports. Payment submission and order status explicitly
- * refuse until a persisted, tenant-bound Gate/order runtime is composed. A test world's seeded
- * principals, budgets and unsigned decisions must never become authority on this reachable endpoint.
+ *
+ * Catalog and price-lock tools use the shop ports. Payment submission runs the composed Gate runtime
+ * (lib/mcp-checkout) and records the decision; it does NOT create a PayPal order, because an ALLOW is a
+ * permission and the order path needs a vaulted buyer this deployment does not have yet. Order status
+ * reads the persisted orders table.
  */
 import type { AuthInfo, CallToolResult } from '@modelcontextprotocol/server'
 import { createMcpHandler, withMcpAuth } from 'mcp-handler'
@@ -12,9 +14,15 @@ import { csError, systemClock, type CsError, type Result } from '@countersign/co
 import { createCheckout, getProduct, searchProducts } from '@countersign/gate'
 
 import { merchantIdentity } from '@/lib/merchant'
+import { readOrderStatus, submitCheckout as submitCheckoutThroughGate } from '@/lib/mcp-checkout'
 import { shopCatalog } from '../../../shop/catalog'
 import { shopCheckout } from '../../../shop/checkout-store'
-import { MCP_READ_SCOPE, MCP_CHECKOUT_SCOPE, verifyAgentToken } from '@/lib/mcp-token'
+import {
+  MCP_READ_SCOPE,
+  MCP_CHECKOUT_SCOPE,
+  agentIdFromAuth,
+  verifyAgentToken,
+} from '@/lib/mcp-token'
 
 /* ------------------------------------------------------------------------------------------ */
 /* Wire helpers                                                                                  */
@@ -74,19 +82,8 @@ function scopeError(auth: AuthInfo | undefined, scope: string): CsError | undefi
   return undefined
 }
 
-function unavailablePaymentRuntime(): CallToolResult {
-  return toolError(
-    csError(
-      'CS_INTERNAL',
-      'Persisted merchant payment runtime is unavailable: Gate authority, budgets, replay protection and orders are not wired.',
-      undefined,
-      { userMessage: 'Purchases and order status are unavailable in this deployment.' },
-    ),
-  )
-}
-
 /* ------------------------------------------------------------------------------------------ */
-/* The MCP tools                                                                                 */
+/* The MCP tool input schemas                                                                     */
 /* ------------------------------------------------------------------------------------------ */
 
 const SKU_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,31}$/
@@ -207,10 +204,22 @@ function registerMerchantTools(
         'Submit a signed checkout against a mandate. The merchant Gate decides; it is not negotiable.',
       inputSchema: submitCheckoutInput,
     },
-    async (_input, ctx) => {
+    async ({ checkout_id, mandate_id, l3a, l3b }, ctx) => {
       const denied = scopeError(ctx.http?.authInfo, MCP_CHECKOUT_SCOPE)
       if (denied !== undefined) return toolError(denied)
-      return unavailablePaymentRuntime()
+      const agentId = agentIdFromAuth(ctx.http?.authInfo)
+      if (agentId === null)
+        return toolError(csError('CS_UNAUTHENTICATED', 'An agent bearer is required.'))
+
+      return fromResult(
+        await submitCheckoutThroughGate({
+          checkoutId: checkout_id,
+          mandateId: mandate_id,
+          agentId,
+          l3a,
+          l3b,
+        }),
+      )
     },
   )
 
@@ -221,10 +230,10 @@ function registerMerchantTools(
       description: 'The state of one order.',
       inputSchema: getOrderStatusInput,
     },
-    async (_input, ctx) => {
+    async ({ order_id }, ctx) => {
       const denied = scopeError(ctx.http?.authInfo, MCP_READ_SCOPE)
       if (denied !== undefined) return toolError(denied)
-      return unavailablePaymentRuntime()
+      return fromResult(await readOrderStatus(order_id))
     },
   )
 }

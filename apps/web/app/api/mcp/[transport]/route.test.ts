@@ -1,8 +1,17 @@
 /**
  * MCP transport regression coverage — spec §8.14, AT-M14.
- * Five tools remain discoverable; catalog calls work, grants constrain execution, and purchase
- * submission reports unavailable persisted authority without inventing a Gate decision or order.
- * A full purchase round-trip remains an external integration requirement.
+ *
+ * Five tools remain discoverable; catalog calls work; grants constrain execution. Two payment-path
+ * properties are pinned, and they are the interesting ones:
+ *
+ *  1. **Submission fails closed when the Gate is not configured.** A deployment without
+ *     `GATE_SIGNING_KEY` / `VI_SERVICE_*` answers `CS_INTERNAL` with a sentence, and makes **no**
+ *     outbound call — no vi, no PayPal, nothing that could become authority.
+ *  2. **Order status reads the merchant's own table.** An unknown order is `CS_NOT_FOUND`; a database
+ *     failure is reported as a failure, never as "no such order".
+ *
+ * The full purchase round-trip (a real chain through a running vi-service and database) is exercised by
+ * `scripts/agent-acceptance.mts` against the live stack; see `docs/verification/P0-6.md`.
  */
 import { randomBytes } from 'node:crypto'
 import { SignJWT } from 'jose'
@@ -37,6 +46,25 @@ vi.mock('@countersign/db', async (importOriginal) => {
     findProductBySku: async (sku: string) => ({
       ok: true as const,
       value: rows.find((row) => row.sku === sku),
+    }),
+    findOrderById: async (orderId: string) => ({
+      ok: true as const,
+      value:
+        orderId === 'ord_00000000000000000000000001'
+          ? {
+              id: 'ord_00000000000000000000000001',
+              attempt_id: 'att_00000000000000000000000001',
+              paypal_order_id: '5O190127TN364715T',
+              intent: 'AUTHORIZE' as const,
+              custom_id: 'cs1:abc',
+              invoice_id: 'inv_1',
+              status: 'ORDER_CREATED' as const,
+              amount_minor: 5000n,
+              currency: 'USD' as const,
+              created_at: new Date('2026-10-25T00:00:00Z'),
+              updated_at: new Date('2026-10-25T00:00:00Z'),
+            }
+          : undefined,
     }),
   }
 })
@@ -126,16 +154,32 @@ beforeAll(async () => {
 afterAll(() => vi.unstubAllEnvs())
 
 describe('the merchant MCP route', () => {
-  it('refuses unavailable order status without pretending the order is absent', async () => {
+  it('reads a persisted order from the merchant table', async () => {
     const body = await readRpc(
-      await POST(rpc(toolCall(30, 'get_order_status', { order_id: 'ord_example' }), token)),
+      await POST(
+        rpc(
+          toolCall(30, 'get_order_status', { order_id: 'ord_00000000000000000000000001' }),
+          token,
+        ),
+      ),
     )
-    expect(toolText(body)['error']).toMatchObject({ code: 'CS_INTERNAL' })
+    const parsed = toolText(body)
+    expect(parsed['paypal_order_id']).toBe('5O190127TN364715T')
+    expect(parsed['status']).toBe('ORDER_CREATED')
   })
 
-  it('does no external work on submission even with VI configured', async () => {
+  it('reports an unknown order as not found, never as a purchase', async () => {
+    const body = await readRpc(
+      await POST(rpc(toolCall(31, 'get_order_status', { order_id: 'ord_unknown' }), token)),
+    )
+    expect(toolText(body)['error']).toMatchObject({ code: 'CS_NOT_FOUND' })
+    expect((body['result'] as { isError?: boolean }).isError).toBe(true)
+  })
+
+  it('fails closed on submission when the Gate is not configured, with no outbound call', async () => {
     vi.stubEnv('VI_SERVICE_URL', 'https://vi.invalid')
     vi.stubEnv('VI_SERVICE_TOKEN', randomBytes(32).toString('hex'))
+    vi.stubEnv('GATE_SIGNING_KEY', undefined)
     const fetch = vi
       .spyOn(globalThis, 'fetch')
       .mockRejectedValue(new Error('Unexpected network call'))
@@ -143,7 +187,7 @@ describe('the merchant MCP route', () => {
       const body = await readRpc(
         await POST(
           rpc(
-            toolCall(31, 'submit_checkout', {
+            toolCall(32, 'submit_checkout', {
               checkout_id: 'chk_00000000000000000000000001',
               mandate_id: 'mdt_00000000000000000000000001',
               l3a: 'aaa.bbb.ccc',
@@ -308,14 +352,14 @@ describe('the merchant MCP route', () => {
     expect(toolText(await readRpc(response))['items']).toBeInstanceOf(Array)
   })
 
-  it('refuses payment evaluation without persisted authority, even for seeded identities', async () => {
+  it('refuses payment evaluation without a composed Gate, even for seeded identities', async () => {
     await POST(rpc(initialize(1), token))
     const response = await POST(
       rpc(
         toolCall(4, 'submit_checkout', {
           checkout_id: 'chk_00000000000000000000000001',
           mandate_id: 'mdt_00000000000000000000000001',
-          // Submission must refuse the absent runtime before evaluating any supplied chain.
+          // Submission must refuse the unconfigured runtime before evaluating any supplied chain.
           l3a: 'aaa.bbb.ccc',
           l3b: 'aaa.bbb.ccc',
         }),
