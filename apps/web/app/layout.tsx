@@ -40,6 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <nav aria-label="Main navigation" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               <Link href="/shop">Storefront</Link>
+              <Link href="/intent">Intent compiler</Link>
               <Link href="/lab/device-sign">Signing lab</Link>
               <Link href="/judge">Demo guide</Link>
               <Link href="/regions">Coverage</Link>
