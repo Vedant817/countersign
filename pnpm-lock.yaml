@@ -578,9 +578,15 @@ importers:
       '@countersign/core':
         specifier: workspace:*
         version: link:../core
+      '@countersign/db':
+        specifier: workspace:*
+        version: link:../db
       '@countersign/defender':
         specifier: workspace:*
         version: link:../defender
+      ai:
+        specifier: 7.0.127
+        version: 7.0.127(zod@4.6.5)
       zod:
         specifier: 4.6.5
         version: 4.6.5

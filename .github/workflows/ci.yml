@@ -204,6 +204,31 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------------------------
+  # P0-7: the compiler is deterministic, and this job is what makes that checkable rather than
+  # asserted. It runs the whole ≥150-case corpus (plus the five demo sentences and the injection
+  # sentence) in **recorded-response mode**: in-process, no network, no provider, fixed clock. A
+  # sentence whose output depends on a wall clock, an iteration order or a model sample fails here.
+  #
+  # Why its own job: this is the one gate a judge can reproduce with no credentials, so it should be
+  # legible on its own — and it must run even when the app cannot build.
+  # ---------------------------------------------------------------------------------------------
+  compiler-determinism:
+    name: compiler determinism (no model, no network)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: offline corpus (≥ 98% exact match, 0% injection success)
+        run: pnpm --filter @countersign/evals test
+      - name: 20 runs per case, byte-identical
+        run: node scripts/check-compiler-determinism.mjs --offline --runs 20
+
+  # ---------------------------------------------------------------------------------------------
   # Builds. `main` must always build (AGENTS.md rule 1).
   # ---------------------------------------------------------------------------------------------
   build:
@@ -318,7 +343,7 @@ jobs:
   all-gates-green:
     name: all gates green
     if: always()
-    needs: [secret-scan, static, test-node, test-python, build, db-migrations]
+    needs: [secret-scan, static, test-node, test-python, compiler-determinism, build, db-migrations]
     runs-on: ubuntu-latest
     steps:
       - name: fail if any job failed

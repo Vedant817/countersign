@@ -57,38 +57,42 @@ can be given, so it is next after the sandbox credentials land (`docs/HUMAN_TODO
 
 ## What works today
 
-| Area                                | State                                                                                    |
-| ----------------------------------- | ---------------------------------------------------------------------------------------- |
-| Intent compiler (`/intent`)         | Working. 56/60 on the golden set, non-deterministic — see the numbers below.             |
-| Gate (12 deterministic checks)      | Working as a library. 0/50 injection attack-success on the corpus. No real checkout yet. |
-| Mandate signing + verifier          | Working. Ed25519 / SD-JWT / JCS, with a standalone `verify.py` a third party can run.    |
-| Storefront (`/shop`)                | Working. 24 products from PostgreSQL, price-quote checkout.                              |
-| `/status`                           | Working. Probes every dependency for real and names the one that is short.               |
-| Vault onboarding                    | Not yet. Blocked on sandbox credentials.                                                 |
-| Shopping agent                      | Not yet. `packages/agent` is a stub.                                                     |
-| Judge Mode, merchant + disputes UIs | Not yet.                                                                                 |
+| Area                                | State                                                                                              |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Intent compiler (`/intent`)         | Working, and deterministic. A parser reads the sentence first; a model only fills gaps. See below. |
+| Gate (12 deterministic checks)      | Working as a library. 0/50 injection attack-success on the corpus. No real checkout yet.           |
+| Mandate signing + verifier          | Working. Ed25519 / SD-JWT / JCS, with a standalone `verify.py` a third party can run.              |
+| Storefront (`/shop`)                | Working. 24 products from PostgreSQL, price-quote checkout.                                        |
+| `/status`                           | Working. Probes every dependency for real and names the one that is short.                         |
+| Vault onboarding                    | Not yet. Blocked on sandbox credentials.                                                           |
+| Shopping agent                      | Not yet. `packages/agent` is a stub.                                                               |
+| Judge Mode, merchant + disputes UIs | Not yet.                                                                                           |
 
 ## The numbers, with their denominators
 
-| Report                               | Value             | Source                                  |
-| ------------------------------------ | ----------------- | --------------------------------------- |
-| Compiler exact match                 | **56/60 (93.3%)** | `packages/evals/corpus/compiler.jsonl`  |
-| Injection attack-success at the Gate | **0/50 (0.0%)**   | `packages/evals/corpus/injection.jsonl` |
-| Liability-router accuracy            | not measured      | corpus does not exist yet               |
-| Agent refusal rate                   | not measured      | `packages/agent` is not built yet       |
-| Gate p95 latency                     | not measured      | no load harness yet                     |
+| Report                               | Value                           | Source                                             |
+| ------------------------------------ | ------------------------------- | -------------------------------------------------- |
+| Compiler exact match                 | **167/167 (100%)**              | `packages/evals/corpus/compiler.jsonl`             |
+| Injection attack-success at the Gate | **0/50 (0.0%)**                 | `packages/evals/corpus/injection.jsonl`            |
+| Compiler determinism                 | **20/20 identical, every case** | `scripts/check-compiler-determinism.mjs --offline` |
+| Liability-router accuracy            | not measured                    | corpus does not exist yet                          |
+| Agent refusal rate                   | not measured                    | `packages/agent` is not built yet                  |
+| Gate p95 latency                     | not measured                    | no load harness yet                                |
 
 ```sh
-pnpm --filter @countersign/evals test        # 22 offline tests — no model, no network
-pnpm --filter @countersign/evals eval:live   # both corpora against a running app
+pnpm --filter @countersign/evals test                # the offline corpus — no model, no network
+node scripts/check-compiler-determinism.mjs --offline # 167 cases × 20 runs, byte-identical
+pnpm --filter @countersign/evals eval:live            # both corpora against a running app
 ```
 
-**§14's ≥ 95% target is not met** by 93.3%, and the runner names the four failing cases with their
-expected-versus-actual values. Ten runs of one sentence produced **9 signable and 1 question** — the model
-is not deterministic, and `docs/review/REVERIFY.md` (F8) records that measurement. The safety property held
-in all ten: the cap was never raised toward an injected figure.
+**The compiler is deterministic, and the number is the buyer's own words.** `packages/compiler/src/parser.ts`
+reads money ($50, `50 USD`, `₹3,000`, `3k`, "fifty dollars", ranges, floors), currency, cadence, merchants and
+items (a lexicon built from the catalog) and dates (from the injected clock) **before** any model is
+consulted. A model is asked only when the sentence states a limit but names no product the store sells, and
+it is never asked for an amount: the cap is the tightest number the buyer wrote, and a model figure can
+neither raise nor narrow it (`docs/DECISIONS.md`, D-049; `docs/verification/P0-7.md`).
 
-60 and 50 hand-written cases are smoke tests, not accuracy figures. Quote them with their denominators.
+167 and 50 hand-written cases are smoke tests, not accuracy figures. Quote them with their denominators.
 
 ## How it works
 
@@ -96,8 +100,11 @@ in all ten: the cap was never raised toward an injected figure.
 buyer's sentence
       │
       ▼
-  compiler ──► model proposes limits
-      │        deterministic code clamps every one to the buyer's own words
+  deterministic parser ──► money, currency, cadence, merchants, items, dates
+      │                     (a model is consulted only for an item gap, never for an amount)
+      ▼
+  proposal ──► deterministic localisation ──► every value checked against the buyer's own words
+      │
       ▼
  signed mandate (Ed25519 / SD-JWT, device-bound passkey)
       │

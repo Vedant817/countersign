@@ -19,9 +19,11 @@
   },
   "dependencies": {
     "@countersign/core": "workspace:*",
+    "@countersign/db": "workspace:*",
     "@countersign/defender": "workspace:*",
     "@countersign/compiler": "workspace:*",
     "@countersign/agent": "workspace:*",
+    "ai": "7.0.127",
     "zod": "4.6.5"
   },
   "devDependencies": {

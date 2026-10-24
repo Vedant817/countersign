@@ -107,8 +107,9 @@ if (!injectionOnly) {
   printFailures(failures)
   process.stdout.write(`\nCompiler exact match: ${formatRate(report)}\n`)
   process.stdout.write(
-    '  §14 target is ≥ 95%. Quote this with its denominator; 60 hand-written cases is a smoke test,\n' +
-      '  not a proof of accuracy on real buyer sentences.\n',
+    '  §14 target is ≥ 98% (P0-7). Quote this with its denominator; 167 hand-written cases is a smoke\n' +
+      '  test, not a proof of accuracy on real buyer sentences. The offline gate is\n' +
+      '  `pnpm --filter @countersign/evals test` plus `node scripts/check-compiler-determinism.mjs --offline`.\n',
   )
 }
 

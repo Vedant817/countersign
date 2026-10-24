@@ -1,29 +1,30 @@
 /**
- * Reading the user's **own bytes** — spec §8.8, WP-08.
+ * Reading the user's **own bytes** — spec §8.8, WP-08; parser-first since P0-7.
  *
  * Two questions are answered here, both deterministically and both before the model is ever called:
  *
  * 1. **Which currency did the user write?** EC-FX-1 is unforgiving: a limit the user signed in ₹ must
- *    never become a limit in $, because the exchange rate is not something they agreed to. So a
- *    currency *word in the text* beats an account default, and an account default only applies when the
- *    text says nothing. Nothing here converts between currencies, ever.
- * 2. **What is the largest amount the user literally typed?** This is the ceiling that makes AT-M8.5
- *    hold. A prompt injection in the intent ("ignore limits, max $1M") is only dangerous if the model
- *    can produce a number the user did not type; if every compiled cap must sit at or below the largest
- *    literal amount in the text, the model's authority is bounded by the user's words no matter what
- *    those words tell it to do.
+ *    never become a limit in $. So a currency *word in the text* beats an account default, and an account
+ *    default only applies when the text says nothing. Nothing here converts between currencies, ever.
+ * 2. **What is the largest amount the user literally typed (digits)?** This is one of the two inputs to
+ *    the AT-M8.5 ceiling. A prompt injection in the intent ("ignore limits, max $1M") is only dangerous if
+ *    a model can produce a number the user did not type; the ceiling bounds every value a model may
+ *    propose.
  *
- * Everything here is a pure function of a string and a currency. There is no model in this file, no
- * clock, and no I/O — which is what lets `compile` apply the ceiling to a proposal it does not trust.
+ * ## The ceiling is the *outer* bound, not the cap (P0-7)
+ *
+ * `packages/compiler/src/parser.ts` reads the **cap** — the tightest amount the buyer wrote, in any form
+ * including spelled-out words — and it does so before a model is consulted. This module's
+ * {@link literalCapIn} remains what it always was: the digits-only reading used as the outermost bound, so
+ * a number the parser chose not to interpret still cannot be exceeded. The two are combined by `max()` in
+ * the parser, which is why a sentence can have a $30 cap *and* a $1,000,000 ceiling.
  *
  * ## Honest limits
  *
- * - **Spelled-out numbers are not read.** "twenty dollars" yields no literal amount, so `literalCapIn`
- *   returns `null` and the ceiling does not bind. That gap is covered by the *other* half of §8.8's
- *   rule rather than by pretending to parse English: with no cap derivable from the text at all, the
- *   compiler must raise a blocking ambiguity instead of guessing (`ambiguity.ts`). A user who writes
- *   "twenty dollars" and is asked "did you mean $20.00?" gets a question, not a silent rounding.
- * - **"Two hundred dollars" also yields nothing**, for the same reason. Deliberate.
+ * - **Spelled-out numbers are not read *here*.** `"twenty dollars"` yields no literal amount from
+ *   {@link literalCapIn}; the parser reads it (`wordValues` in `parser.ts`) and the ceiling takes the
+ *   larger of the two. The old comment in this file said the buyer would be asked instead; that policy was
+ *   deliberately reversed in D-055, because a number word is not a guess — it is what the buyer typed.
  * - A **date** in the text (`2026-10-01`) and a **year** are excluded from the bare-number fallback, so
  *   "from 2026-10-01, under $130" is not read as a $20,260 cap.
  */
@@ -181,14 +182,20 @@ function toMinor(
  *
  * The digit group's leading lookbehind rejects a preceding `-` or `.`, so a *negative* amount ("under -50")
  * is not read as a positive cap. `$` immediately before the digits is fine and still matches.
+ *
+ * The trailing `(?![\w])` is not decoration: without it, the `m` of `"$138 maximum"` is read as a
+ * *magnitude*, and a $138 ceiling silently becomes $138,000,000. Found while building the deterministic
+ * parser (`parser.ts`), which reads the same sentence as $138 — the two must not disagree about what the
+ * buyer typed.
  */
 const SYMBOL_AMOUNT_RE =
-  /([A-Za-z]{0,2})\s?([$€£₹¥])\s*(?<![\d.-])(\d[\d,]*(?:\.\d+)?)\s*([kmb])?/giu
+  /([A-Za-z]{0,2})\s?([$€£₹¥])\s*(?<![\d.-])(\d[\d,]*(?:\.\d+)?)\s*([kmb])?(?![\w])/giu
 
 /**
  * `130 dollars`, `1M USD`, `200 rupees` — a currency word immediately after the number.
  *
- * Same leading lookbehind as {@link SYMBOL_AMOUNT_RE}, for the same reason.
+ * Same leading lookbehind as {@link SYMBOL_AMOUNT_RE}, for the same reason, and the same trailing
+ * lookahead so `"1,000 but"` is $1,000 and not $1 trillion.
  */
 const NAMED_AMOUNT_RE =
   /(?<![\d.-])(\d[\d,]*(?:\.\d+)?)\s*([kmb])?\s*(usd|eur|gbp|inr|jpy|aud|cad|dollars?|euros?|pounds?|rupees?|yen)\b/giu
@@ -280,7 +287,17 @@ export function mentionsRecurrence(text: string): boolean {
 const FREQUENCY_WORDS: Readonly<Record<string, readonly RegExp[]>> = {
   INDA: [/\beach\s+time\b/iu, /\bper\s+purchase\b/iu, /\bevery\s+purchase\b/iu],
   DAIL: [/\bdaily\b/iu, /\bevery\s+day\b/iu, /\ba\s+day\b/iu, /\bper\s+day\b/iu],
-  WEEK: [/\bweekly\b/iu, /\bevery\s+week\b/iu, /\ba\s+week\b/iu, /\bper\s+week\b/iu],
+  /*
+   * The lookbehinds are load-bearing, not cosmetic.
+   *
+   * "biweekly" contains "weekly", "semi-annual" contains "annual", and "half-yearly" contains "yearly".
+   * Without `(?<!bi-)` and friends, `frequenciesInText("bill me biweekly")` returns **two** cadences, the
+   * multi-cadence rule in `proposal.ts` refuses the request as ambiguous, and a buyer who wrote an
+   * ordinary schedule is sent to the manual form. Found by the corpus (`rec-10`), which is exactly what
+   * the corpus is for: the module comment above claims the tables do not overlap, and this is them not
+   * overlapping.
+   */
+  WEEK: [/\b(?<!bi-)weekly\b/iu, /\bevery\s+week\b/iu, /\ba\s+week\b/iu, /\bper\s+week\b/iu],
   TWOK: [/\bfortnight/iu, /\bbi-?weekly\b/iu, /\bevery\s+(two|2)\s+weeks?\b/iu],
   TWMN: [/\bevery\s+(two|2)\s+months?\b/iu, /\bbi-?monthly\b/iu],
   MNTH: [/\bmonthly\b/iu, /\bevery\s+month\b/iu, /\ba\s+month\b/iu, /\bper\s+month\b/iu],
@@ -288,7 +305,13 @@ const FREQUENCY_WORDS: Readonly<Record<string, readonly RegExp[]>> = {
   QUTR: [/\bquarterly\b/iu, /\bevery\s+quarter\b/iu, /\ba\s+quarter\b/iu, /\bper\s+quarter\b/iu],
   FOMN: [/\bevery\s+(four|4)\s+months?\b/iu],
   SEMI: [/\bsemi-?annual/iu, /\bhalf-?yearly\b/iu, /\bevery\s+six\s+months\b/iu],
-  YEAR: [/\byearly\b/iu, /\bannually\b/iu, /\bannual\b/iu, /\bevery\s+year\b/iu, /\ba\s+year\b/iu],
+  YEAR: [
+    /\b(?<!half-)yearly\b/iu,
+    /\bannually\b/iu,
+    /\b(?<!semi-)(?<!bi-)annual\b/iu,
+    /\bevery\s+year\b/iu,
+    /\ba\s+year\b/iu,
+  ],
   TYEA: [/\bevery\s+(two|2)\s+years?\b/iu, /\bbi-?annual\b/iu],
 }
 

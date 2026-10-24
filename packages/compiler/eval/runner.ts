@@ -107,7 +107,7 @@ export function parseJsonl<T>(text: string, label: string): T[] {
 
 const evalDir = fileURLToPath(new URL('.', import.meta.url))
 
-/** The 60-case golden set. */
+/** The golden set. 61 cases since P0-7 (see `test/eval.golden.test.ts`). */
 export function loadGoldenSet(): GoldenCase[] {
   return parseJsonl<GoldenCase>(readFileSync(`${evalDir}golden.jsonl`, 'utf8'), 'golden.jsonl')
 }
