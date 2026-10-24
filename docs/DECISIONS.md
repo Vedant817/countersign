@@ -1554,3 +1554,29 @@ unconfigured demo.
 environment, every-absent case, blank-as-missing, variables-not-values, singular/plural phrasing),
 `apps/web/app/v/[packetId]/page.tsx` (shape check moved above configuration), and
 `apps/web/app/status/probe.ts` (`paypalEnvRejected` documented as distinct from `!sandboxOnly`).
+
+---
+
+## D-054 — The remediation brief takes precedence over the blueprint where they disagree
+
+**Date:** 2026-10-25
+**Decision:** `FIX_PROMPT.md` (committed at the repo root) governs where it conflicts with
+`docs/spec/countersign-blueprint.md`. The brief states this itself; recording it here because a reader
+finding two authoritative documents should not have to guess which one wins.
+**Reason:** The blueprint was written before the product existed and its §15 work plan is now partly
+overtaken. A judge-panel review (`docs/review/VERDICT.md`, 21/50) found the repository is "a
+well-engineered payments-security library with no product on top of it", and the brief is the response to
+that — it reorders work toward a runnable product and adds requirements the blueprint does not have.
+**Named conflicts, so "wins" is not a blank cheque:**
+
+- **Deterministic compiler.** The brief requires a deterministic parser *first*, the LLM filling only
+  fields the parser leaves empty, with a ≥150-case corpus and 20 identical runs per case. The blueprint
+  (§8.13, WP-08) treats the LLM as the primary compiler with a `literalCapIn` clamp. The brief wins.
+- **`PayPal-Request-Id`.** The brief asserts a 38-character limit; the blueprint does not mention one.
+  Our validator permits 55 (`packages/paypal/src/idempotency.ts`). Treated as a defect until PayPal
+  support answers H-10 — see `docs/HUMAN_TODO.md` §2.
+- **Work order.** The blueprint's §15 sequence is superseded by the brief's P0-1…P0-13, which front-loads
+  the sandbox flow, deployment and Judge Mode.
+
+**Evidence:** `FIX_PROMPT.md` §0 rule 8; `docs/review/VERDICT.md`; `docs/review/REVERIFY.md` (F8 measured
+non-determinism at 9/10 signable, 1/10 question, over ten runs of one sentence).
