@@ -78,9 +78,18 @@ hf_cache = modal.Volume.from_name("countersign-hf-cache", create_if_missing=True
 vllm_image = (
     # The official vLLM image, not a pip install. `pip install vllm==0.6.6` resolves to torch 2.5.1
     # plus ~2.5 GB of CUDA wheels and takes a five-minute solve every time the image is rebuilt;
-    # PayPal-speed iteration needs the image that already contains them. `.entrypoint([])` clears the
-    # image's own CMD so the `serve()` function below starts the server itself.
-    modal.Image.from_registry(f"vllm/vllm-openai:v{VLLM_VERSION}", add_python="3.12")
+    # this image already contains them.
+    #
+    # **Deliberately no `add_python=`.**
+    #
+    # Passing `add_python="3.12"` makes Modal install a *second* interpreter into `/usr/local`, which
+    # then shadows the image's own on `PATH`. The image's Python is the one with vLLM in its
+    # site-packages, so the server died with `ModuleNotFoundError: No module named 'vllm'` — a
+    # failure that reads like a missing dependency and is really a `PATH` collision. Leaving it unset
+    # makes Modal use the interpreter the image ships.
+    #
+    # `.entrypoint([])` clears the image's own CMD so `serve()` starts the server itself.
+    modal.Image.from_registry(f"vllm/vllm-openai:v{VLLM_VERSION}")
     .entrypoint([])
     .env(
         {
