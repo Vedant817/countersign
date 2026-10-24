@@ -16,19 +16,20 @@
     "eval": "vitest run --config vitest.eval.config.ts"
   },
   "dependencies": {
+    "@ai-sdk/mcp": "2.0.66",
+    "@ai-sdk/openai": "4.0.83",
     "@countersign/core": "workspace:*",
     "@countersign/db": "workspace:*",
     "@countersign/vi-client": "workspace:*",
     "ai": "7.0.127",
-    "@ai-sdk/openai": "4.0.83",
-    "@ai-sdk/mcp": "2.0.66",
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "4.0.21",
     "@types/node": "24.19.1",
-    "typescript": "5.9.3",
-    "vitest": "5.0.3",
+    "fast-check": "4.10.2",
     "tsx": "4.23.15",
-    "fast-check": "4.10.2"
+    "typescript": "5.9.3",
+    "vitest": "5.0.3"
   }
 }
