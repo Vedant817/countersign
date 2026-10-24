@@ -197,8 +197,22 @@ export const envSchema = z
      * instead of as an opaque `fetch` error the first time a judge compiles an intent.
      */
     OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
-    LLM_MAIN_MODEL: z.string().min(1).default('gpt-6.1-sol'),
-    LLM_CHEAP_MODEL: z.string().min(1).default('gpt-6-luna'),
+    /*
+     * No default, deliberately.
+     *
+     * These used to default to `gpt-6.1-sol` and `gpt-6-luna`, which are the spec's *illustrative* model
+     * names from AT-M8.1 — transcribed into a runtime default. A default model id is wrong in principle,
+     * not merely wrong in value: `OPENAI_BASE_URL` above can point at OpenAI, Groq, OpenRouter, Together,
+     * a local Ollama or a Modal endpoint, and every one of them uses different model ids. Any literal
+     * here is a guess that is wrong for most deployments, and it fails as an opaque provider 4xx rather
+     * than as "you have not chosen a model".
+     *
+     * Optional rather than required, following D-053 ("missing configuration is a state, not an
+     * exception"): the deterministic paths work with no model at all, and `missingLlmConfig` in
+     * `apps/web/lib/llm.ts` reports the absence on `/status` instead of refusing to boot.
+     */
+    LLM_MAIN_MODEL: z.string().min(1).optional(),
+    LLM_CHEAP_MODEL: z.string().min(1).optional(),
 
     VI_SERVICE_URL: z.string().url(),
     VI_SERVICE_TOKEN: z.string().min(16),
