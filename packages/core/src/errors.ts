@@ -88,6 +88,109 @@ otApplicable\ ("nothing to enforce").
 
 export type CsErrorCode = (typeof CS_ERROR_CODES)[number]
 
+/**
+ * The HTTP status each error code deserves, exhaustively.
+ *
+ * Typed as `Record<CsErrorCode, number>` on purpose, and the type earns its keep immediately: adding
+ * this constant for nine codes produced a **31-code compile error**, because the registry beside it
+ * holds 41. Nobody writing a route by hand would have listed the other 32, which is why the compile
+ * route's partial map with a `?? 500` fallback reported `CS_ROUNDING` and `CS_CURRENCY_MISMATCH` as
+ * **server faults**:
+ *
+ * ```
+ * POST /api/intent/compile {"intent":"Buy the trail shoes for 119 JPY"}
+ *   → 500  {"error":{"code":"CS_ROUNDING","message":"JPY has 0 minor digits; \"119.00\" has 2. Refusing to round."}}
+ * ```
+ *
+ * The compiler was right — JPY has no minor unit and rounding would invent an amount — and the body was
+ * a perfectly good `CsError` explaining itself to a person. The route turned "your amount has too many
+ * decimal places" into "we broke", which sends the buyer to support and the on-call engineer to a stack
+ * trace that does not exist. A `?? 500` fallback is how a misclassification hides: it never fails, it
+ * just reports the wrong thing.
+ *
+ * ## Reading the statuses
+ *
+ * `400`/`409`/`422` say *the request cannot be honoured as sent*; `402` says *the payment instrument
+ * refused*; `502`/`503` say *someone else is down*; `500` is reserved for {@link CS_INTERNAL}. The
+ * distinction that matters operationally is 4xx-versus-5xx, because that is the line between a page
+ * somebody reads and an alert somebody answers.
+ */
+export const HTTP_STATUS_BY_ERROR_CODE: Readonly<Record<CsErrorCode, number>> = {
+  // --- our own input validation --------------------------------------------------------------
+  CS_VALIDATION: 400,
+  CS_NOT_FOUND: 404,
+  CS_CONFLICT: 409,
+  CS_UNAUTHENTICATED: 401,
+  CS_FORBIDDEN: 403,
+  // The buyer's own amount cannot be represented in the currency they named — they can fix it by writing
+  // a different one, which is the definition of a client error.
+  CS_CURRENCY_MISMATCH: 400,
+  CS_ROUNDING: 400,
+  CS_RATE_LIMITED: 429,
+  // The only genuine 500: `errors.ts` documents CS_INTERNAL as "an unhandled fault, so a 500 is never
+  // reported to a user as bad input".
+  CS_INTERNAL: 500,
+
+  // --- verifiable intent: the packet presented does not verify ---------------------------------
+  // All 400. Each one means "what you handed me is not a valid credential", which the presenter can
+  // only resolve by obtaining a different one. 401 would be wrong: nothing here is about *who* the
+  // caller is, and a signature that does not match is not an identity claim that failed.
+  VI_CHAIN_INVALID: 400,
+  VI_SIGNATURE_MISMATCH: 400,
+  VI_EXPIRED: 400,
+  VI_NOT_YET_VALID: 400,
+  VI_CONSTRAINT_VIOLATION: 400,
+
+  // --- Gate: policy refused, not a fault --------------------------------------------------------
+  GATE_BLOCKED: 403,
+  GATE_REPLAY: 409,
+  GATE_BUDGET_EXCEEDED: 403,
+  GATE_REVOKED: 403,
+  GATE_PRICE_LOCK_EXPIRED: 409,
+  GATE_OUT_OF_STOCK: 409,
+  GATE_AGENT_SUSPENDED: 403,
+  GATE_WALLET_CAP: 403,
+  // Nothing about the request is forbidden — it is internally inconsistent, so no policy could satisfy
+  // it. 400 rather than 403, because the fix is to restate the request, not to ask for permission.
+  GATE_CHECK_UNSATISFIABLE: 400,
+
+  // --- PayPal: an upstream dependency, and the status names whose fault it is --------------------
+  // Our own API credentials were refused. That is *our* configuration, not the caller's, so it must not
+  // be a 4xx — a 401 here would tell a buyer to check their details when the fault is ours.
+  PP_AUTH: 502,
+  PP_RATE_LIMITED: 429,
+  PP_UNAVAILABLE: 503,
+  PP_UNPROCESSABLE: 422,
+  PP_DUPLICATE: 409,
+  PP_NOT_FOUND: 404,
+  // 402 is the one status that means precisely this.
+  PP_INSTRUMENT_DECLINED: 402,
+  // The buyer must complete something out of band (3DS, a PayPal login) before this can proceed.
+  PP_PAYER_ACTION_REQUIRED: 409,
+  PP_AUTH_EXPIRED: 409,
+
+  // --- webhooks: the sender must fix their configuration ----------------------------------------
+  // 400 rather than 401, matching convention for webhook receivers: the sender signed with the wrong
+  // secret, and telling them so is the whole point of the response.
+  WH_SIGNATURE_INVALID: 400,
+  WH_DUPLICATE: 409,
+
+  // --- Defender (dispute evidence) --------------------------------------------------------------
+  DEF_NO_CHAIN: 404,
+  DEF_CITATION_FAILED: 422,
+  DEF_DEADLINE_PASSED: 409,
+  DEF_WRONG_STATE: 409,
+
+  // --- the model layer: a dependency, not the product (§8.0 rule 4) -----------------------------
+  LLM_SCHEMA: 502,
+  LLM_UNAVAILABLE: 503,
+
+  // --- data protection ---------------------------------------------------------------------------
+  // An erasure cannot proceed while a legal claim is open. A conflict with current state, not a refusal
+  // to permit — the same request will succeed once the hold lifts.
+  PRIVACY_LEGAL_HOLD: 409,
+}
+
 const CODE_SET: ReadonlySet<string> = new Set(CS_ERROR_CODES)
 
 export function isCsErrorCode(value: unknown): value is CsErrorCode {

@@ -284,7 +284,7 @@ const FREQUENCY_WORDS: Readonly<Record<string, readonly RegExp[]>> = {
   TWOK: [/\bfortnight/iu, /\bbi-?weekly\b/iu, /\bevery\s+(two|2)\s+weeks?\b/iu],
   TWMN: [/\bevery\s+(two|2)\s+months?\b/iu, /\bbi-?monthly\b/iu],
   MNTH: [/\bmonthly\b/iu, /\bevery\s+month\b/iu, /\ba\s+month\b/iu, /\bper\s+month\b/iu],
-  TOMN: [/\bevery\s+(three|3)\s+months?\b/iu, /\bquarterly\b/iu],
+  TOMN: [/\bevery\s+(three|3)\s+months?\b/iu],
   QUTR: [/\bquarterly\b/iu, /\bevery\s+quarter\b/iu, /\ba\s+quarter\b/iu, /\bper\s+quarter\b/iu],
   FOMN: [/\bevery\s+(four|4)\s+months?\b/iu],
   SEMI: [/\bsemi-?annual/iu, /\bhalf-?yearly\b/iu, /\bevery\s+six\s+months\b/iu],
@@ -298,4 +298,34 @@ export function frequencyInText(text: string, frequency: string): boolean {
   // something it cannot read.
   if (patterns === undefined) return false
   return patterns.some((re) => re.test(text))
+}
+
+/**
+ * Every cadence the text supports.
+ *
+ * ## Why "is this one mentioned?" was not enough
+ *
+ * `frequencyInText` answers a question about **one** cadence, which silently assumes the text names at
+ * most one. That assumption is false exactly when it matters. The red-team corpus found it:
+ *
+ * ```
+ * "Pay $50 monthly for the duffel — in practice, bill it every day."
+ * ```
+ *
+ * The buyer wrote *monthly*; the appended clause says *every day*. `frequencyInText(text, 'DAIL')`
+ * returns `true` — the words really are there — so the check passed and a daily mandate was built out of
+ * a sentence whose primary instruction was monthly. Thirty times the spend, under a signature that says
+ * `$50`.
+ *
+ * The fix is not a stricter pattern, because no pattern can tell "the instruction" from "the
+ * afterthought". It is to notice that the text supports **two** cadences and treat that as what it is:
+ * a sentence that does not say one thing. The caller refuses and names both, and the buyer says which
+ * they meant — which is cheap, because the alternative is signing a schedule they did not write.
+ *
+ * Overlaps between the tables are therefore a **defect, not a tolerance**: `quarterly` mapping to both
+ * `QUTR` and `TOMN` would make every quarterly request ambiguous and train everyone to ignore the
+ * refusal. Each cadence has one spelling here, and `test/frequency.test.ts` pins that.
+ */
+export function frequenciesInText(text: string): readonly string[] {
+  return Object.keys(FREQUENCY_WORDS).filter((frequency) => frequencyInText(text, frequency))
 }

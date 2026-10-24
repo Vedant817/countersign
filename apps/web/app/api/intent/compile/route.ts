@@ -17,7 +17,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { csError, toBody, type UserId } from '@countersign/core'
+import { csError, HTTP_STATUS_BY_ERROR_CODE, toBody, type UserId } from '@countersign/core'
 import { readBack } from '@countersign/compiler'
 
 import { compileIntent } from '@/lib/intent-compiler'
@@ -34,19 +34,21 @@ const requestSchema = z
   })
   .strict()
 
-/** The status a `CsError` code deserves. Anything unmapped is a 500, never a success. */
+/**
+ * The status a `CsError` code deserves. Anything unmapped is a 500, never a success.
+ *
+ * The registry's own map supplies every `CsErrorCode`, so this only has to name the two codes the LLM
+ * layer adds on top. It previously listed codes by hand with a `?? 500` fallback, which meant
+ * `CS_ROUNDING` and `CS_CURRENCY_MISMATCH` reported as **server faults** — the compiler correctly
+ * refusing to round a JPY amount reached the buyer as "we broke". See
+ * `HTTP_STATUS_BY_ERROR_CODE` in `@countersign/core` for the full account.
+ */
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
-  CS_VALIDATION: 400,
-  CS_NOT_FOUND: 404,
-  CS_CONFLICT: 409,
-  CS_FORBIDDEN: 403,
-  CS_UNAUTHENTICATED: 401,
-  CS_RATE_LIMITED: 429,
+  ...HTTP_STATUS_BY_ERROR_CODE,
   // The model is a dependency, not the product: unreachable is 503, and EC-LLM-1's fallback is the
   // manual form rather than a retry storm on the consent screen.
   LLM_UNAVAILABLE: 503,
   LLM_SCHEMA: 502,
-  CS_INTERNAL: 500,
 }
 
 export async function POST(request: Request): Promise<Response> {

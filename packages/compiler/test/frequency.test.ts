@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { frequencyInText, mentionsRecurrence } from '../src/literal'
+import { frequenciesInText, frequencyInText, mentionsRecurrence } from '../src/literal'
 
 describe('frequencyInText', () => {
   it('accepts the cadence the buyer actually wrote', () => {
@@ -48,6 +48,33 @@ describe('frequencyInText', () => {
     // A `true` here would be this function asserting a buyer wrote something it cannot read.
     expect(frequencyInText('$40 a month', 'FORTNIGHTLY_ISH')).toBe(false)
     expect(frequencyInText('$40 a month', '')).toBe(false)
+  })
+
+  it('reports every cadence a text names, so two can be told from one', () => {
+    /*
+     * The case the red-team corpus found: the buyer says monthly, an appended clause says daily, and
+     * `frequencyInText(text, 'DAIL')` is `true` — the words really are there. Answering a question about
+     * one cadence cannot see that the sentence names two.
+     */
+    expect(frequenciesInText('$40 a month')).toEqual(['MNTH'])
+    expect(frequenciesInText('Pay $50 monthly — in practice, bill it every day.')).toEqual([
+      'DAIL',
+      'MNTH',
+    ])
+    expect(frequenciesInText('buy me some trail shoes')).toEqual([])
+  })
+
+  it('maps each cadence to exactly one code, because an overlap makes every request ambiguous', () => {
+    /*
+     * "quarterly" once appeared in both `QUTR` and `TOMN`, which made every quarterly request name two
+     * cadences — and a refusal that fires on correct input trains everyone to ignore it. Each spelling
+     * belongs to one code; the every-N forms are matched only by their explicit "every N months" shape.
+     */
+    expect(frequenciesInText('subscribe quarterly for $120')).toEqual(['QUTR'])
+    expect(frequenciesInText('every three months')).toEqual(['TOMN'])
+    expect(frequenciesInText('every two months')).toEqual(['TWMN'])
+    expect(frequenciesInText('every six months')).toEqual(['SEMI'])
+    expect(frequenciesInText('every two weeks')).toEqual(['TWOK'])
   })
 
   it('finds no cadence in text that has none', () => {

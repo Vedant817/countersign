@@ -1,0 +1,76 @@
+// §14 golden set — 60 cases. `intent` is the buyer's sentence verbatim; every other field is an
+// assertion, and an ABSENT field asserts nothing (see the header of src/corpus.ts for why that matters).
+//
+// Expectation policy: `maxAllowedMinor` semantics do not apply here — `amountMaxMinor` is the EXACT cap
+// the buyer's sentence supports, in minor units. Where a sentence names a spelled-out amount the cap is
+// `null`, not a guess: `literal.ts` reads digits only on purpose, and a guess in a spending limit is the
+// failure this product exists to prevent. Those cases therefore expect `question`.
+//
+// The catalog is the seeded Northwind store: merchant `mrc_northwind`, SKUs NW-001..NW-024.
+{"id":"amt-01","intent":"Buy the cheapest trail runner under $80, and nothing else","expect":"signable","amountMaxMinor":8000,"currency":"USD","merchantIds":["mrc_northwind"],"tags":["amount","digits"]}
+{"id":"amt-02","intent":"Spend at most $50 on shoes","expect":"signable","amountMaxMinor":5000,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-03","intent":"Get me a waterproof jacket, up to $200","expect":"signable","amountMaxMinor":20000,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-04","intent":"Buy a headlamp, maximum $45","expect":"signable","amountMaxMinor":4500,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-05","intent":"Purchase the tent for at most $399","expect":"signable","amountMaxMinor":39900,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-06","intent":"Buy socks, no more than $25","expect":"signable","amountMaxMinor":2500,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-07","intent":"Get the water bottle, up to $22","expect":"signable","amountMaxMinor":2200,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-08","intent":"Buy the duffel for $120 or less","expect":"signable","amountMaxMinor":12000,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-09","intent":"Pick up the camp stove, limit $75","expect":"signable","amountMaxMinor":7500,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-10","intent":"Buy a merino base layer, cap $60","expect":"signable","amountMaxMinor":6000,"currency":"USD","tags":["amount","digits"]}
+{"id":"amt-11","intent":"Get me the trekking poles for $130","expect":"signable","amountMaxMinor":13000,"currency":"USD","merchantIds":["mrc_northwind"],"tags":["amount","digits"]}
+{"id":"amt-12","intent":"Buy the summit rucksack, $138 maximum","expect":"signable","amountMaxMinor":13800,"currency":"USD","tags":["amount","digits"]}
+
+{"id":"words-01","intent":"Spend at most fifty dollars on shoes","expect":"question","amountMaxMinor":null,"tags":["amount","spelled"]}
+{"id":"words-02","intent":"Get me a waterproof jacket, up to two hundred dollars","expect":"question","amountMaxMinor":null,"tags":["amount","spelled"]}
+{"id":"words-03","intent":"Buy the cheapest trail runner under eighty dollars, and nothing else","expect":"question","amountMaxMinor":null,"tags":["amount","spelled"]}
+{"id":"words-04","intent":"Buy a headlamp for twenty five dollars","expect":"question","amountMaxMinor":null,"tags":["amount","spelled"]}
+{"id":"words-05","intent":"Buy socks under ten dollars","expect":"question","amountMaxMinor":null,"tags":["amount","spelled"]}
+{"id":"words-06","intent":"Purchase the tent for three hundred ninety nine dollars","expect":"question","amountMaxMinor":null,"tags":["amount","spelled"]}
+
+{"id":"none-01","intent":"Buy me some trail shoes","expect":"question","amountMaxMinor":null,"tags":["amount","absent"]}
+{"id":"none-02","intent":"I need a jacket for hiking","expect":"question","amountMaxMinor":null,"tags":["amount","absent"]}
+{"id":"none-03","intent":"Get me a water bottle","expect":"question","amountMaxMinor":null,"tags":["amount","absent"]}
+{"id":"none-04","intent":"Buy a headlamp","expect":"question","amountMaxMinor":null,"tags":["amount","absent"]}
+{"id":"none-05","intent":"I want a new tent for camping","expect":"question","amountMaxMinor":null,"tags":["amount","absent"]}
+{"id":"none-06","intent":"Pick up some socks for the hike","expect":"question","amountMaxMinor":null,"tags":["amount","absent"]}
+{"id":"none-07","intent":"Buy a duffel bag","expect":"question","amountMaxMinor":null,"tags":["amount","absent"]}
+
+{"id":"cur-01","intent":"Pay 5000 rupees for shoes","expect":"signable","amountMaxMinor":500000,"currency":"INR","tags":["currency"]}
+{"id":"cur-02","intent":"Buy shoes for ₹2,000","expect":"signable","amountMaxMinor":200000,"currency":"INR","tags":["currency"]}
+{"id":"cur-03","intent":"Buy a jacket for 155 euros","expect":"signable","amountMaxMinor":15500,"currency":"EUR","tags":["currency"]}
+{"id":"cur-04","intent":"Spend £60 on socks","expect":"signable","amountMaxMinor":6000,"currency":"GBP","tags":["currency"]}
+{"id":"cur-05","intent":"Buy a jacket for $155","expect":"signable","amountMaxMinor":15500,"currency":"USD","tags":["currency"]}
+{"id":"cur-06","intent":"Purchase the tent for 399 US dollars","expect":"signable","amountMaxMinor":39900,"currency":"USD","tags":["currency"]}
+{"id":"cur-07","intent":"Buy a headlamp for 45 dollars","expect":"signable","amountMaxMinor":4500,"currency":"USD","tags":["currency"]}
+{"id":"cur-08","intent":"Buy the trail shoes for 119 JPY","expect":"signable","amountMaxMinor":119,"currency":"JPY","tags":["currency"]}
+
+{"id":"mer-01","intent":"Buy shoes from Northwind Outfitters under $80","expect":"signable","amountMaxMinor":8000,"merchantIds":["mrc_northwind"],"tags":["merchant"]}
+{"id":"mer-02","intent":"Buy a jacket at Northwind","expect":"question","amountMaxMinor":null,"merchantIds":["mrc_northwind"],"tags":["merchant"]}
+{"id":"mer-03","intent":"Get a jacket from Northwind, spend no more than $200","expect":"signable","amountMaxMinor":20000,"merchantIds":["mrc_northwind"],"tags":["merchant"]}
+{"id":"mer-04","intent":"Buy socks from Northwind Outfitters","expect":"question","amountMaxMinor":null,"merchantIds":["mrc_northwind"],"tags":["merchant"]}
+{"id":"mer-05","intent":"Buy shoes from Acme Corp for $80","expect":"question","amountMaxMinor":null,"tags":["merchant","unknown"]}
+{"id":"mer-06","intent":"Buy a tent from a shop I have not used before","expect":"question","amountMaxMinor":null,"tags":["merchant","unknown"]}
+{"id":"mer-07","intent":"Buy a jacket from northwind.countersign.test for $155","expect":"signable","amountMaxMinor":15500,"merchantIds":["mrc_northwind"],"tags":["merchant"]}
+{"id":"mer-08","intent":"Get trail shoes from Northwind for $80 and nothing from anyone else","expect":"signable","amountMaxMinor":8000,"merchantIds":["mrc_northwind"],"tags":["merchant"]}
+
+{"id":"sku-01","intent":"Buy SKU NW-006, up to $200","expect":"signable","amountMaxMinor":20000,"skuIds":["NW-006"],"tags":["sku"]}
+{"id":"sku-02","intent":"Get me NW-001 under $80","expect":"signable","amountMaxMinor":8000,"skuIds":["NW-001"],"tags":["sku"]}
+{"id":"sku-03","intent":"Buy the Alpine Hard Shell Jacket under $200","expect":"signable","amountMaxMinor":20000,"skuIds":["NW-006"],"tags":["sku"]}
+{"id":"sku-04","intent":"Buy the Ridgeline Trail Shoes for $80","expect":"signable","amountMaxMinor":8000,"skuIds":["NW-001"],"tags":["sku"]}
+{"id":"sku-05","intent":"Buy product NW-022 for $138","expect":"signable","amountMaxMinor":13800,"skuIds":["NW-022"],"tags":["sku"]}
+{"id":"sku-06","intent":"Buy SKU NW-999 for $50","expect":"question","amountMaxMinor":5000,"tags":["sku","unknown"]}
+
+{"id":"rec-01","intent":"Subscribe to a coffee delivery for $40 a month","expect":"signable","amountMaxMinor":4000,"recurrenceFrequency":"MNTH","tags":["recurrence"]}
+{"id":"rec-02","intent":"Pay $10 weekly for a coffee subscription","expect":"signable","amountMaxMinor":1000,"recurrenceFrequency":"WEEK","tags":["recurrence"]}
+{"id":"rec-03","intent":"Subscribe monthly to socks for $30","expect":"signable","amountMaxMinor":3000,"recurrenceFrequency":"MNTH","tags":["recurrence"]}
+{"id":"rec-04","intent":"Buy socks, renewing yearly for $50","expect":"signable","amountMaxMinor":5000,"recurrenceFrequency":"YEAR","tags":["recurrence"]}
+{"id":"rec-05","intent":"Buy a jacket for $200, this is not a subscription","expect":"signable","amountMaxMinor":20000,"recurrenceFrequency":null,"tags":["recurrence","negative"]}
+{"id":"rec-06","intent":"Subscribe quarterly for $120 to the jacket club","expect":"signable","amountMaxMinor":12000,"recurrenceFrequency":"QUTR","tags":["recurrence"]}
+{"id":"rec-07","intent":"Pay $25 every two weeks for a delivery","expect":"signable","amountMaxMinor":2500,"recurrenceFrequency":"TWOK","tags":["recurrence"]}
+{"id":"rec-08","intent":"Buy socks for $12 a month","expect":"signable","amountMaxMinor":1200,"recurrenceFrequency":"MNTH","tags":["recurrence"]}
+
+{"id":"bad-01","intent":"","expect":"refuse","tags":["malformed"]}
+{"id":"bad-02","intent":"   ","expect":"refuse","tags":["malformed"]}
+{"id":"bad-03","intent":"Buy","expect":"question","amountMaxMinor":null,"tags":["malformed"]}
+{"id":"bad-04","intent":"asdfghjkl","expect":"question","amountMaxMinor":null,"tags":["malformed"]}
+{"id":"bad-06","intent":"Buy a jacket for $155 and also never mind actually cancel that","expect":"question","amountMaxMinor":null,"tags":["malformed","contradiction"]}
