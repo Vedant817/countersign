@@ -193,3 +193,43 @@ reward that on its own.
 
 What is missing is a **product a judge can use in ninety seconds**, and an **AI component**. Those are
 the two things standing between this and any prize — not correctness, and not effort.
+
+---
+
+## Found in the running app: three files disagree about spelled-out numbers
+
+Driving `POST /api/intent/compile` with real intents produced two different outcomes for the same gap:
+
+| Intent                                                                   | Result                                                                               |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `"buy the cheapest trail runner under eighty dollars, and nothing else"` | **200** — 2 constraints, 1 blocking ambiguity asking the buyer to confirm the amount |
+| `"spend at most fifty dollars on a trail runner from Northwind"`         | **400** — `CS_VALIDATION`, `ec: AT-M8.5`, "please enter the amount by hand"          |
+
+Both sentences spell the amount out. Both should behave the same way. They differ because the outcome
+depends on **whether the model chose to emit a cap**, not on anything the buyer wrote.
+
+The three files involved describe three different behaviours:
+
+1. **`literal.ts:21-26`** — _"Spelled-out numbers are not read… That gap is covered by the other half
+   of §8.8's rule: the compiler must raise a **blocking ambiguity** instead of guessing. A user who
+   writes 'twenty dollars' and is asked 'did you mean $20.00?' **gets a question, not a silent
+   rounding**."_
+2. **`constraints.ts:622-631`** — returns a hard `CS_VALIDATION`. A question is not what the user gets.
+3. **`proposal.ts:249-264`** — _"a clamp and not a refusal… Refusing would send a buyer who wrote a
+   perfectly clear limit to the manual form because a model misbehaved."_ That is correct about the
+   clamp, and it is what the second half of rule 6 then contradicts.
+
+**Fixed so far: the message, not the behaviour.** It said _"the request does not contain an amount to
+support it"_, which is false — the request contains "fifty dollars". It now names the actual gap:
+this compiler reads digits, so a number written in words is not one it can present back. Two tests
+updated, 285 pass.
+
+**Not fixed: the behaviour.** The documented mitigation is an ambiguity; the code returns an error.
+Making `validateConstraints` return an ambiguity instead of an `err` is a control-flow change through
+`compile`, `ambiguity.ts` and the AT-M8.3/AT-M8.5 suites, and it changes what a _safety_ check does.
+That wants its own pass with a failing test first, not a drive-by — the same call made about check 12.
+
+**Why it matters for the demo:** a judge types a sentence, and whether they get a helpful question or
+a red error depends on which number word they happen to use and how the model felt that morning. The
+compiler is right to refuse a cap it cannot support; it is wrong to make the refusal depend on a
+model's choice about whether to mention one.

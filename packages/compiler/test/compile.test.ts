@@ -214,7 +214,7 @@ describe('AT-M8.3 "Buy shoes" with no amount → an ambiguity, not a guess', () 
     if (result.ok) return
     expect(result.error.code).toBe('CS_VALIDATION')
     expect(result.error.details?.['ec']).toBe('AT-M8.5')
-    expect(result.error.message).toContain('does not contain an amount to support it')
+    expect(result.error.message).toContain('written out in words')
   })
 
   it('a model-supplied ambiguity does not displace the required one', async () => {
@@ -406,7 +406,7 @@ describe('AT-M8.5 injection in the intent', () => {
     })
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.error.message).toContain('does not contain an amount')
+    expect(result.error.message).toContain('written out in words')
   })
 })
 

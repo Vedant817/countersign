@@ -622,9 +622,13 @@ export function validateConstraints(
     if (ctx.literalCap === null) {
       return err(
         defect(
-          `A spending limit of ${cap.toString()} minor units was proposed, but the request does not contain ` +
-            'an amount to support it. A limit that is not in your words cannot be presented to you as yours, ' +
-            'so please enter the amount by hand.',
+          // The previous copy said "the request does not contain an amount to support it", which is
+          // false: the request usually does contain one, written in words. `literal.ts` reads digits
+          // only and documents that gap as deliberate, so the honest sentence names the gap rather
+          // than denying the buyer's own text back to them.
+          `A spending limit of ${cap.toString()} minor units was proposed. This compiler reads ` +
+            'amounts written as digits, so a number written out in words is not one it can put in ' +
+            'front of you as yours. Please enter the amount as a number, or set the limits by hand.',
           { path: `constraints.${c.type}.max`, proposed: cap.toString(), ec: 'AT-M8.5' },
           ctx,
         ),
