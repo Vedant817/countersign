@@ -6,6 +6,7 @@
  * verifies nothing rather than everything.
  */
 import { randomBytes } from 'node:crypto'
+import { SignJWT, type JWTPayload } from 'jose'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -24,6 +25,21 @@ const SECRET = randomBytes(32).toString('hex')
 const AGENT = 'agt_01J00000000000000000000001'
 
 const originalSecret = process.env.SESSION_SECRET
+
+async function signedClaims(overrides: JWTPayload = {}, alg = 'HS256'): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
+  return new SignJWT({
+    sub: AGENT,
+    iss: MCP_TOKEN_ISSUER,
+    aud: MCP_TOKEN_AUDIENCE,
+    iat: now,
+    exp: now + 900,
+    scope: `${MCP_READ_SCOPE} ${MCP_CHECKOUT_SCOPE}`,
+    ...overrides,
+  })
+    .setProtectedHeader({ alg, typ: 'JWT' })
+    .sign(new TextEncoder().encode(SECRET))
+}
 
 async function mintAgentToken(
   options: Parameters<typeof mintAgentTokenResult>[0],
@@ -46,6 +62,24 @@ afterEach(() => {
 })
 
 describe('mintAgentToken', () => {
+  it.each(['agt_', 'agt_has spaces', `agt_${'x'.repeat(125)}`])(
+    'rejects unbounded or malformed subjects: %s',
+    async (agentId) => {
+      const result = await mintAgentTokenResult({ agentId })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('CS_VALIDATION')
+    },
+  )
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER])(
+    'rejects invalid issuance time: %s',
+    async (nowSec) => {
+      const result = await mintAgentTokenResult({ agentId: AGENT, nowSec })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('CS_VALIDATION')
+    },
+  )
+
   it('mints a token that verifies as the same agt_ subject', async () => {
     const token = await mintAgentToken({ agentId: AGENT })
     const auth = await verifyAgentToken(token)
@@ -100,6 +134,55 @@ describe('mintAgentToken', () => {
 })
 
 describe('verifyAgentToken', () => {
+  it.each([
+    { iat: undefined },
+    { iat: Math.floor(Date.now() / 1000) + 60 },
+    { iat: Math.floor(Date.now() / 1000) - 3600 },
+    { exp: Math.floor(Date.now() / 1000) + 3600 },
+    { iat: Math.floor(Date.now() / 1000) + 0.5 },
+    { exp: Math.floor(Date.now() / 1000) + 900.5 },
+    { iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) },
+    { scope: undefined },
+    { scope: '' },
+    { scope: ['merchant:read'] },
+    { scope: 'merchant:admin' },
+    { sub: 'agt_has spaces' },
+    { sub: `agt_${'x'.repeat(125)}` },
+  ])('rejects signed claims outside the session contract: %j', async (claims) => {
+    expect(await verifyAgentToken(await signedClaims(claims))).toBeUndefined()
+  })
+
+  it('preserves a read-only grant without adding checkout authority', async () => {
+    const auth = await verifyAgentToken(await signedClaims({ scope: MCP_READ_SCOPE }))
+    expect(auth?.scopes).toEqual([MCP_READ_SCOPE])
+  })
+
+  it('accepts a shorter session and five seconds of issuance clock skew', async () => {
+    const now = Math.floor(Date.now() / 1000)
+    expect(
+      await verifyAgentToken(await signedClaims({ iat: now + 5, exp: now + 65 })),
+    ).toBeDefined()
+  })
+
+  it('refuses an oversized bearer', async () => {
+    const oversized = await signedClaims({ metadata: 'x'.repeat(8192) })
+    expect(oversized.length).toBeGreaterThan(8192)
+    expect(await verifyAgentToken(oversized)).toBeUndefined()
+  })
+
+  it.each([
+    { aud: 'another-service' },
+    { iss: 'another-issuer' },
+    { sub: 'usr_not_an_agent' },
+    { sub: 'agt_' },
+  ])('rejects fresh otherwise-valid identity claims: %j', async (claims) => {
+    expect(await verifyAgentToken(await signedClaims(claims))).toBeUndefined()
+  })
+
+  it('rejects a fresh HS384 token with otherwise-valid claims', async () => {
+    expect(await verifyAgentToken(await signedClaims({}, 'HS384'))).toBeUndefined()
+  })
+
   it('rejects a token signed with a different secret', async () => {
     const token = await mintAgentToken({ agentId: AGENT })
     process.env.SESSION_SECRET = randomBytes(32).toString('hex')

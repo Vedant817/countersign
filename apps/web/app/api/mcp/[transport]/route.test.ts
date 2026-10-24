@@ -1,19 +1,11 @@
 /**
- * The merchant MCP route — spec §8.14, **AT-M14**.
- *
- * The three acceptance points are exercised at the transport boundary, not by calling the M9 functions
- * again:
- *
- * 1. `tools/list` returns the five tools §8.9 defines;
- * 2. a call without a bearer is `401`, and a forged bearer is refused;
- * 3. `submit_checkout` round-trips through the real `evaluate` and returns a decision with reasons.
- *
- * §8.14's third point says "round-trip", not "happy path": the happy path needs a signed chain, a
- * mandate row and PayPal, none of which a unit test should fabricate. What is proven here is that the
- * tool reaches the Gate, the Gate runs all twelve checks, and the tool returns the answer rather than a
- * transport error.
+ * MCP transport regression coverage — spec §8.14, AT-M14.
+ * Five tools remain discoverable; catalog calls work, grants constrain execution, and purchase
+ * submission reports unavailable persisted authority without inventing a Gate decision or order.
+ * A full purchase round-trip remains an external integration requirement.
  */
 import { randomBytes } from 'node:crypto'
+import { SignJWT } from 'jose'
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
@@ -22,8 +14,7 @@ import { mintAgentToken as mintAgentTokenResult } from '@/lib/mcp-token'
 import { POST } from './route'
 
 const ENDPOINT = 'http://localhost/api/mcp/http'
-// The in-memory world's default agent, so checks 2 and 3 get past their lookup and the decision is
-// about the chain rather than about an unknown principal.
+// The former fixture principal must not acquire payment authority from its identifier.
 const AGENT = 'agt_00000000000000000000000001'
 const SECRET = randomBytes(32).toString('hex')
 
@@ -106,6 +97,113 @@ beforeAll(async () => {
 afterAll(() => vi.unstubAllEnvs())
 
 describe('the merchant MCP route', () => {
+  it('refuses unavailable order status without pretending the order is absent', async () => {
+    const body = await readRpc(
+      await POST(rpc(toolCall(30, 'get_order_status', { order_id: 'ord_example' }), token)),
+    )
+    expect(toolText(body)['error']).toMatchObject({ code: 'CS_INTERNAL' })
+  })
+
+  it('does no external work on submission even with VI configured', async () => {
+    vi.stubEnv('VI_SERVICE_URL', 'https://vi.invalid')
+    vi.stubEnv('VI_SERVICE_TOKEN', randomBytes(32).toString('hex'))
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('Unexpected network call'))
+    try {
+      const body = await readRpc(
+        await POST(
+          rpc(
+            toolCall(31, 'submit_checkout', {
+              checkout_id: 'chk_00000000000000000000000001',
+              mandate_id: 'mdt_00000000000000000000000001',
+              l3a: 'aaa.bbb.ccc',
+              l3b: 'aaa.bbb.ccc',
+            }),
+            token,
+          ),
+        ),
+      )
+      expect(toolText(body)['error']).toMatchObject({ code: 'CS_INTERNAL' })
+      expect(fetch).not.toHaveBeenCalled()
+    } finally {
+      fetch.mockRestore()
+      vi.stubEnv('VI_SERVICE_URL', undefined)
+      vi.stubEnv('VI_SERVICE_TOKEN', undefined)
+    }
+  })
+
+  it.each([
+    [{ aud: 'other-service' }, 'HS256'],
+    [{ sub: 'usr_not_an_agent' }, 'HS256'],
+    [{}, 'HS384'],
+    [{ iat: Math.floor(Date.now() / 1000) - 3600 }, 'HS256'],
+    [{ scope: '' }, 'HS256'],
+  ])('rejects fresh signed invalid claims over HTTP: %j %s', async (claims, alg) => {
+    const now = Math.floor(Date.now() / 1000)
+    const bearer = await new SignJWT({
+      sub: AGENT,
+      iss: 'countersign',
+      aud: 'countersign-merchant-mcp',
+      iat: now,
+      exp: now + 900,
+      scope: 'merchant:read merchant:checkout',
+      ...claims,
+    })
+      .setProtectedHeader({ alg })
+      .sign(new TextEncoder().encode(SECRET))
+    expect((await POST(rpc(initialize(1), bearer))).status).toBe(401)
+  })
+
+  it.each(['create_checkout', 'submit_checkout'])(
+    'refuses %s to a read-only agent before work',
+    async (name) => {
+      const now = Math.floor(Date.now() / 1000)
+      const readOnly = await new SignJWT({ scope: 'merchant:read' })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject(AGENT)
+        .setIssuer('countersign')
+        .setAudience('countersign-merchant-mcp')
+        .setIssuedAt(now)
+        .setExpirationTime(now + 900)
+        .sign(new TextEncoder().encode(SECRET))
+      const args =
+        name === 'create_checkout'
+          ? { lines: [{ sku: 'NW-001', qty: 1 }], ship_to_country: 'US' }
+          : {
+              checkout_id: 'chk_seed',
+              mandate_id: 'mdt_seed',
+              l3a: 'aaa.bbb.ccc',
+              l3b: 'aaa.bbb.ccc',
+            }
+      const body = await readRpc(await POST(rpc(toolCall(20, name, args), readOnly)))
+      expect(toolText(body)['error']).toMatchObject({ code: 'CS_FORBIDDEN' })
+      const catalog = toolText(
+        await readRpc(await POST(rpc(toolCall(22, 'get_product', { sku: 'NW-001' }), readOnly))),
+      )
+      expect(catalog['error']).toBeUndefined()
+      expect(catalog['sku']).toBe('NW-001')
+    },
+  )
+
+  it.each([
+    ['search_products', { query: 'x'.repeat(201) }],
+    ['search_products', { max_price_minor: Number.MAX_SAFE_INTEGER + 1 }],
+    ['get_product', { sku: '../secret' }],
+    ['create_checkout', { lines: [{ sku: 'NW-001', qty: 0 }], ship_to_country: 'US' }],
+    [
+      'submit_checkout',
+      { checkout_id: 'chk_seed', mandate_id: 'mdt_seed', l3a: 'x'.repeat(65537), l3b: 'x' },
+    ],
+  ])('rejects invalid tool input for %s', async (name, args) => {
+    const body = await readRpc(
+      await POST(rpc(toolCall(21, name as string, args as Record<string, unknown>), token)),
+    )
+    const result = body['result'] as { isError?: boolean; content?: unknown } | undefined
+    expect(body['error'] !== undefined || result?.isError === true).toBe(true)
+    expect(JSON.stringify(body)).not.toContain('CS_INTERNAL')
+  })
+
   it('lists the five §8.9 tools', async () => {
     const initialized = await POST(rpc(initialize(1), token))
     expect(initialized.status).toBe(200)
@@ -174,15 +272,21 @@ describe('the merchant MCP route', () => {
     expect(items.some((item) => item.sku === 'NW-001')).toBe(true)
   })
 
-  it('round-trips submit_checkout through the real Gate', async () => {
+  it('keeps the sse mount authenticated and the catalog usable', async () => {
+    const request = rpc(toolCall(25, 'search_products', { query: 'trail' }), token)
+    const response = await POST(new Request('http://localhost/api/mcp/sse', request))
+    expect(response.status).toBe(200)
+    expect(toolText(await readRpc(response))['items']).toBeInstanceOf(Array)
+  })
+
+  it('refuses payment evaluation without persisted authority, even for seeded identities', async () => {
     await POST(rpc(initialize(1), token))
     const response = await POST(
       rpc(
         toolCall(4, 'submit_checkout', {
           checkout_id: 'chk_00000000000000000000000001',
           mandate_id: 'mdt_00000000000000000000000001',
-          // A structurally valid compact JWS, not a signature the Gate accepts. Check 4 refuses it,
-          // which is the point: the tool still returns the Gate's decision instead of throwing.
+          // Submission must refuse the absent runtime before evaluating any supplied chain.
           l3a: 'aaa.bbb.ccc',
           l3b: 'aaa.bbb.ccc',
         }),
@@ -193,11 +297,8 @@ describe('the merchant MCP route', () => {
 
     const body = await readRpc(response)
     const parsed = toolText(body)
-    expect(parsed['status']).toBe('BLOCKED')
-    const reasons = parsed['reasons'] as readonly { code: string; userMessage?: string }[]
-    expect(reasons.length).toBeGreaterThan(0)
-    expect(reasons.every((reason) => typeof reason.code === 'string')).toBe(true)
-    // The decision is the Gate's, not the transport's: a missing checkout session is check 5.
-    expect(reasons.map((reason) => reason.code)).toContain('VI_CHAIN_INVALID')
+    expect(parsed['status']).toBeUndefined()
+    expect(parsed['error']).toMatchObject({ code: 'CS_INTERNAL' })
+    expect((body['result'] as { isError?: boolean }).isError).toBe(true)
   })
 })
