@@ -845,6 +845,54 @@ describe('buildDisputeContext composes the chain from four tables and one audit 
     expect(ctx.siblingCaptures?.[0]?.id).toBe('cap_00000000000000000000000002')
   })
 
+  it('EC-SPLIT-3: a dispute on one shipment reaches the router with that capture, never the order total', async () => {
+    /**
+     * The spec's row: *"Dispute on only one shipment's items → the router evaluates only the disputed
+     * capture/lines"*, detected by *"dispute amount < order total"*.
+     *
+     * The world below is that shape: two shipments, two captures ($129.99 first, $70.00 second), and a
+     * chargeback that names the first capture only. The assertions are that the context carries the
+     * **disputed** figures — so the second shipment's money is not treated as part of the claim — and
+     * that nothing in the decision mistakes the remainder for an over-claim or a duplicate.
+     */
+    const secondCapture = 'cap_00000000000000000000000002' as never
+    const secondShipment = 'shp_00000000000000000000000002' as never
+    const { ctx } = await contextOf(
+      baseSeed({
+        orders: [orderRow({ amount_minor: 19_999n })],
+        checkoutSessions: [sessionRow({ total_minor: 19_999n })],
+        captures: [
+          captureRow(),
+          captureRow({
+            id: secondCapture,
+            paypal_capture_id: '5C679366HH908993Z',
+            amount_minor: 7_000n,
+            shipment_id: secondShipment,
+          }),
+        ],
+        shipments: [
+          shipmentRow(),
+          shipmentRow({ id: secondShipment, tracking_number: 'JD0002000032' }),
+        ],
+      }),
+    )
+
+    // The order is $199.99; the dispute is $129.99 and is decided on the capture it names.
+    expect(ctx.order?.amount).toEqual({ minor: 19_999n, currency: 'USD' })
+    expect(ctx.dispute.amount).toEqual({ minor: 12_999n, currency: 'USD' })
+    expect(ctx.capture?.id).toBe(CAPTURE_ID)
+    expect(ctx.capture?.amount).toEqual({ minor: 12_999n, currency: 'USD' })
+
+    // The second shipment is a sibling — visible to R-AMT-2 — and is not the disputed capture.
+    expect(ctx.siblingCaptures?.map((c) => c.id)).toEqual([secondCapture])
+
+    // The case is contested on its own merits: no amount rule fires off the order total.
+    const decided = route(ctx)
+    expect(decided.ruleId).toBe('R-UNAUTH-1')
+    expect(decided.ruleId).not.toBe('R-AMT-1')
+    expect(decided.ruleId).not.toBe('R-AMT-2')
+  })
+
   it('EC-MER-2: the signed checkout lines are read from the session cart, and nothing re-derives them', async () => {
     const { ctx } = await contextOf()
     expect(ctx.checkoutLines).toEqual([{ sku: 'SKU-TRAIL-42', qty: 1 }])
