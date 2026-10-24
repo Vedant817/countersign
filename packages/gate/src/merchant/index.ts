@@ -22,8 +22,9 @@
  * §8.9: "Tax is 0 in the demo (stated in the README)" and "Shipping is a flat fee per destination
  * country". Both are exported constants rather than literals scattered through the arithmetic, so a
  * future real tax rate is one edit, and so the README's claim and the code's behaviour cannot drift
- * apart. Shipping is looked up **by ISO-3166 country code** — an unknown country is `CS_NOT_FOUND`
+ * apart. Physical shipping is looked up **by ISO-3166 country code** — an unknown country is `CS_NOT_FOUND`
  * rather than a silent zero, because free shipping to a country we have no rate for is a mispricing bug.
+ * Exclusively digital carts need no physical delivery and have zero shipping in the cart's currency.
  *
  * ## Descriptions come back wrapped, and the wrapper is structural
  *
@@ -111,7 +112,7 @@ export const FLAT_SHIPPING_MINOR: Readonly<Record<string, bigint>> = Object.free
  * and that wrong total was signed into the price lock. The catalog ships a JPY SKU, so the path was live.
  *
  * Naming it also makes the remaining gap explicit instead of silent: this demo store quotes shipping in
- * USD, so a non-USD cart has no shipping rate and is **refused** (EC-FX-1 — never convert) rather than
+ * USD, so a non-USD cart needing physical delivery is **refused** (EC-FX-1 — never convert) rather than
  * priced with a number from another currency.
  */
 export const SHIPPING_CURRENCY = 'USD' as const
@@ -551,6 +552,7 @@ export async function createCheckout(
   //
   const lines: Array<{ sku: string; title: string; qty: number; unitMinor: bigint }> = []
   let currency: Currency | null = null
+  let requiresShipping = false
   for (const line of input.lines) {
     if (!Number.isInteger(line.qty) || line.qty < 1) {
       return err(
@@ -601,6 +603,7 @@ export async function createCheckout(
         ),
       )
     }
+    if (found.value.digital !== true) requiresShipping = true
     lines.push({
       sku: line.sku,
       title: found.value.title,
@@ -614,9 +617,11 @@ export async function createCheckout(
   }
   const cartCurrency = parseCurrency(currency)
 
-  // Now that the cart's currency is known, price shipping in it. `shippingFor` refuses a currency this
-  // store does not quote in rather than handing back a rate from another one.
-  const shipping = shippingFor(input.shipToCountry, cartCurrency)
+  // Digital delivery has no country rate to look up. Any physical line requires one validated rate
+  // for the whole cart; `shippingFor` refuses unsupported countries/currencies without converting.
+  const shipping = requiresShipping
+    ? shippingFor(input.shipToCountry, cartCurrency)
+    : ok(money(0n, cartCurrency))
   if (!shipping.ok) return shipping
   const shippingMoney: Money = shipping.value
 

@@ -544,6 +544,105 @@ describe('AT-M9.1 — the checkout JWT verifies with the merchant JWKS', () => {
 })
 
 describe('create_checkout — the arithmetic', () => {
+  it.each(['US', 'FJ'])(
+    'charges zero shipping for NW-024 digital delivery to %s',
+    async (country) => {
+      const world = await merchantWorld({
+        products: [item('NW-024', 1_000n, { digital: true, shipsInDays: 0 })],
+      })
+      const made = await checkoutOk(world, {
+        lines: [{ sku: 'NW-024', qty: 2 }],
+        shipToCountry: country,
+      })
+
+      expect(made.shipping).toEqual(money(0n, 'USD'))
+      expect(made.subtotal).toEqual(money(2_000n, 'USD'))
+      expect(made.totalMinor).toBe(2_000n)
+      expect(world.jwtRequests[0]).toMatchObject({ shipping_minor: 0n, currency: 'USD' })
+      expect(world.catalog.sessions.get(made.checkoutId)).toMatchObject({
+        shipping_minor: 0n,
+        total_minor: 2_000n,
+        currency: 'USD',
+      })
+    },
+  )
+
+  it('quotes a digital-only JPY cart in JPY without a physical shipping rate (EC-FX-1)', async () => {
+    const world = await merchantWorld({
+      products: [
+        item('NW-JPY-DIGITAL', 500n, {
+          digital: true,
+          price: money(500n, 'JPY'),
+          currency: 'JPY',
+        }),
+      ],
+    })
+    const made = await checkoutOk(world, {
+      lines: [{ sku: 'NW-JPY-DIGITAL', qty: 3 }],
+      shipToCountry: 'FJ',
+    })
+
+    expect(made.currency).toBe('JPY')
+    expect(made.shipping).toEqual(money(0n, 'JPY'))
+    expect(made.totalMinor).toBe(1_500n)
+    expect(world.jwtRequests[0]).toMatchObject({ shipping_minor: 0n, currency: 'JPY' })
+    expect(world.catalog.sessions.get(made.checkoutId)).toMatchObject({
+      shipping_minor: 0n,
+      total_minor: 1_500n,
+      currency: 'JPY',
+    })
+  })
+
+  it.each([false, true])(
+    'charges one country rate for a mixed cart (digital first: %s)',
+    async (digitalFirst) => {
+      const world = await merchantWorld({
+        products: [item('NW-024', 1_000n, { digital: true }), item(SKU, 3_000n)],
+      })
+      const lines = [
+        { sku: SKU, qty: 2 },
+        { sku: 'NW-024', qty: 3 },
+      ]
+      const made = await checkoutOk(world, { lines: digitalFirst ? lines.toReversed() : lines })
+
+      expect(made.shipping).toEqual(money(500n, 'USD'))
+      expect(made.totalMinor).toBe(9_500n)
+      expect(world.jwtRequests[0]).toMatchObject({ shipping_minor: 500n, currency: 'USD' })
+      expect(world.catalog.sessions.get(made.checkoutId)).toMatchObject({
+        shipping_minor: 500n,
+        total_minor: 9_500n,
+      })
+    },
+  )
+
+  it.each(['country', 'currency'])(
+    'still refuses mixed carts without a shipping %s rate',
+    async (missing) => {
+      const currency = missing === 'currency' ? 'JPY' : 'USD'
+      const world = await merchantWorld({
+        products: [
+          item('NW-024', 500n, { digital: true, price: money(500n, currency), currency }),
+          item(SKU, 500n, { price: money(500n, currency), currency }),
+        ],
+      })
+      expectCode(
+        await createCheckout(
+          world.deps,
+          cartInput({
+            lines: [
+              { sku: 'NW-024', qty: 1 },
+              { sku: SKU, qty: 1 },
+            ],
+            shipToCountry: missing === 'country' ? 'FJ' : 'JP',
+          }),
+        ),
+        'CS_NOT_FOUND',
+      )
+      expect(world.jwtRequests).toHaveLength(0)
+      expect(world.catalog.sessions.size).toBe(0)
+    },
+  )
+
   it('is total = Σ(unit × qty) + tax(0) + shipping(flat, by country)', async () => {
     const world = await merchantWorld({ products: [item('NW-A', 1_000n), item('NW-B', 250n)] })
     const made = await checkoutOk(world, {
