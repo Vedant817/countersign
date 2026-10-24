@@ -294,7 +294,7 @@ function renderHtml(report: StatusReport): string {
     .join('')
 
   const headline = report.ok
-    ? '<h1>All required dependencies are up.</h1><p>This instance can gate a purchase, verify a chain and move money on PayPal.</p>'
+    ? '<h1>All required dependencies are up.</h1><p>This instance can gate a purchase and verify a chain. It <strong>cannot</strong> move money: order creation and capture are not wired, and the README forbids this page from implying otherwise.</p>'
     : '<h1>One or more required dependencies are down.</h1><p>Render will take this instance out of rotation. The failing rows are named below.</p>'
 
   const webhook = report.webhook
