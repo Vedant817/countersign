@@ -13,7 +13,7 @@ the actual risk. My own assessment follows each group.
 The strongest objection, and the one I think is correct.
 
 **A1. Intent is not the disputed fact in the disputes that cost merchants money.** SNAD ("not as
-described") and INR ("item not received") turn on *delivery and item condition*. A signed mandate is
+described") and INR ("item not received") turn on _delivery and item condition_. A signed mandate is
 silent about both. The one case where intent genuinely decides — `UNAUTHORISED` — is adjudicated by
 the issuer or PayPal, not by the merchant. So "provable intent" addresses the minority of claims and
 cannot move the majority.
@@ -43,7 +43,7 @@ available and narrower: **Countersign does not decide liability, it produces a t
 that a decider can use, and it refuses to assert what it cannot prove.** That is defensible. "We route
 liability deterministically" is not, and the pitch says the latter.
 
-The fix is mostly *positioning plus one real feature*: state plainly that SNAD/INR are out of scope
+The fix is mostly _positioning plus one real feature_: state plainly that SNAD/INR are out of scope
 because we do not know delivery truth, and make the `UNAUTHORISED` case excellent — because there, a
 signed on-device approval genuinely is evidence no merchant currently has.
 
@@ -65,7 +65,7 @@ and the benefit is an unproven win-rate.
 
 **My read:** B1 is fair and cheap to improve (publish the verification recipe so a sceptic can check a
 record without our server — `verify.py` already exists for this). B2 is not answerable by code and
-should be *acknowledged* rather than argued with; the honest line is "this is what we would build
+should be _acknowledged_ rather than argued with; the honest line is "this is what we would build
 inside PayPal", which is also a stronger pitch to a PayPal judge than pretending to compete with them.
 
 ## Group C — real defects worth fixing now
@@ -74,7 +74,7 @@ inside PayPal", which is also a stronger pitch to a PayPal judge than pretending
 Any listing or catalogue can knock a user's agent offline by repeatedly presenting one out-of-mandate
 cart. **This is a genuine security defect**, not a product objection, and it is fixable.
 
-**C2. The threat model confuses key *export* with key *use*.** Non-extractability stops exfiltration;
+**C2. The threat model confuses key _export_ with key _use_.** Non-extractability stops exfiltration;
 it does not stop script on the wallet origin driving passkey-backed signing. The design then contests
 the user it just failed to protect. §13 concedes this but the pitch does not.
 
@@ -94,6 +94,64 @@ was placed. Criterion 2 (a coherent product) is failed at the terminal action.
 `apps/**` imports `ai` or `@ai-sdk/openai`. The event requires AI. **This is the single largest gap.**
 
 **D5. The repo is private and nothing is deployed.** Deferred by Vedant, both required at submission.
+
+## Confirmed: check 12 is reachable by a third party (C1, verified in source)
+
+Read `packages/gate/src/velocity.ts` end to end. The mechanic:
+
+```ts
+const states = await input.deps.recentAttemptStates(mandateId, VELOCITY.MAX_CONSECUTIVE_BLOCKS + 1)
+const blocks = consecutiveBlocks(states.value)          // counts BLOCK states, most recent first
+const tooManyBlocks = blocks > VELOCITY.MAX_CONSECUTIVE_BLOCKS   // > 3, so the fourth trips
+if (trips) → suspendMandate(mandateId, `velocity guard: ${detail}`)
+```
+
+So four consecutive BLOCKed **attempts** move the mandate to `SUSPENDED`. Nothing in the run has to
+be the agent's fault.
+
+### Why a third party can forge the signal
+
+An attempt is BLOCKed when the Gate refuses the cart. The cart is chosen by **the merchant**. Three
+carts priced above the mandate cap produce three BLOCKs, and the fourth suspends the buyer's mandate.
+The merchant — or a listing carrying injected instructions that make an agent retry — controls the
+input and the buyer wears the consequence. It is a denial-of-service on the buyer's spending
+authority, triggered by someone who is not the buyer.
+
+The comment above the check already anticipates the shape of the problem and gets the _direction_ of
+the error right:
+
+> Suspending rather than revoking is the conservative choice — a burst of BLOCKs is much more often a
+> confused agent or an injection than a compromised key, and an irreversible action taken on a signal
+> that can fire on a legitimate user is the worse error.
+
+That reasoning is correct and it stops one step short. `SUSPENDED` is reversible, but it is still
+_reachable by an attacker_, and "reversible" is not the same as "not an attack".
+
+### The fix (not yet implemented)
+
+The control exists to catch a **runaway agent**, and a runaway agent is characterised by BLOCKs that
+are _its own_ fault. So the streak should count only attempts whose BLOCK is attributable to the
+agent's behaviour, not to the cart it was handed. Concretely:
+
+1. `AttemptState` gains the failing check's code (it is already persisted on the decision row, so this
+   is a read, not a schema change).
+2. `consecutiveBlocks` counts only BLOCKs whose first failing check is _agent-attributable_ —
+   `GATE_REPLAY`, `GATE_CHAIN_INVALID`, `GATE_VELOCITY`, `MANDATE_*`. A BLOCK from a cart that simply
+   exceeded the mandate (`GATE_PRICE_LOCK`, `GATE_LINE_ITEMS`) does **not** accrue: the buyer's agent
+   was told "no" and stopped, which is the control _working_, not failing.
+3. The negative case stays: a genuinely runaway agent produces replay/chain failures, and still gets
+   suspended on the fourth.
+
+Two properties make this the right fix rather than a patch: the input an attacker controls (the cart)
+no longer moves the buyer's state, and the signal that remains is one only the agent can produce.
+
+**Why not simply raise the threshold or rate-limit the suspension:** both keep the vulnerability and
+add latency. An attacker who can produce three BLOCKs can produce thirty; a rate limit changes how
+often the denial happens, not whether it can.
+
+**Status: analysis complete, implementation not started.** It is a change to a security control, so it
+wants a failing test first (one hostile merchant, four over-cap carts, assert the mandate is still
+`ACTIVE`) and it touches `packages/gate`'s 162 tests.
 
 ## What I would do, in order
 
