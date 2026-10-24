@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 
@@ -45,6 +45,9 @@ const environment = {
   VI_MERCHANT_KID: 'local-merchant',
   SESSION_SECRET: randomBytes(32).toString('hex'),
   SIGNING_LAB_ENABLED: 'true',
+  // Filled in `main()` once per run; declared here so the key list stays in one place.
+  GATE_SIGNING_KEY: process.env['GATE_SIGNING_KEY'] ?? generateGateSigningKey(),
+  GATE_KID: process.env['GATE_KID'] ?? 'local-gate',
   PAYPAL_CLIENT_ID: '',
   PAYPAL_CLIENT_SECRET: '',
   PAYPAL_ENV: 'sandbox',
@@ -52,6 +55,22 @@ const environment = {
 }
 const children = []
 let stopping = false
+
+/**
+ * The Gate's decision-signing key, generated per run.
+ *
+ * **Ed25519**, matching `signDecisionRecord`'s `alg: 'EdDSA'`. An ES256 key imports cleanly and then
+ * fails at the first signature, so the algorithm is part of the contract rather than an implementation
+ * detail — `apps/web/lib/gate-runtime.ts` checks `kty`/`crv` before importing for exactly that reason.
+ *
+ * Ephemeral for the same reason VI's issuer key is: this is a local lab, and a checked-in private key
+ * would be a real one the day someone copies the file. `GATE_SIGNING_KEY` is required by the runtime
+ * rather than defaulted, so without this the Gate refuses — which is the behaviour under test.
+ */
+function generateGateSigningKey() {
+  const { privateKey } = generateKeyPairSync('ed25519')
+  return JSON.stringify(privateKey.export({ format: 'jwk' }))
+}
 
 function launch(command, args) {
   // Windows package-manager shims require a shell. All commands and arguments below are constants.
