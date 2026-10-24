@@ -5,17 +5,18 @@ missing production piece, the file:line where the obligation is written, and wha
 in the meantime. WP-11 owns `packages/orchestrator/src/deps.ts` only; adapters belong to the
 package that declares the port.
 
-| #   | Gap                                                                        | Effect                                                            | Who fixes it         |
-| --- | -------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------- |
-| 1   | No production `DefenderStore` adapter; defender exports only in-memory     | `defenderDepsFromRepos` cannot be built from `@countersign/db`    | defender / db owner  |
-| 2   | No production `Notifier`; only `nullNotifier`                              | `OrdersDeps.notify` is legal but silent in production             | orders owner         |
-| 3   | Four `OrderRepoHandles` members have no repository                         | `orderStoreFromRepos` cannot be called in production today        | orders / db owner    |
-| 4   | No production `MerchantCatalogStore`                                       | `OrdersDeps.stock` stays undefined; void does not restore stock   | gate owner           |
-| 5   | `walletCapPeriod` has no database reader                                   | `ok(undefined)` is contract-legal but disables wallet-period caps | gate / db owner      |
-| 6   | `setAuthorizationStatus` cannot restamp `expiration_time`                  | reauthorize reports `expiryRestamped: false`                      | orders owner         |
-| 7   | `findRefundById` is repo-less but outside the four-handle enumeration      | refund-by-id paths cannot be wired from repositories              | orders / db owner    |
-| 8   | `@countersign/vi-client` missing from `packages/orchestrator/package.json` | binder must accept an injected `vi` until the dependency lands    | WP-01 / orchestrator |
-| 9   | Orchestrator README cross-references the wrong defender export surface     | implementer follows a README sentence that tsc contradicts        | docs owner           |
+| #   | Gap                                                                                                                                          | Effect                                                            | Who fixes it                               |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
+| 1   | No production `DefenderStore` adapter; defender exports only in-memory                                                                       | `defenderDepsFromRepos` cannot be built from `@countersign/db`    | defender / db owner                        |
+| 2   | No production `Notifier`; only `nullNotifier`                                                                                                | `OrdersDeps.notify` is legal but silent in production             | orders owner                               |
+| 3   | Four `OrderRepoHandles` members have no repository                                                                                           | `orderStoreFromRepos` cannot be called in production today        | orders / db owner                          |
+| 4   | No production `MerchantCatalogStore`                                                                                                         | `OrdersDeps.stock` stays undefined; void does not restore stock   | gate owner                                 |
+| 5   | `walletCapPeriod` has no database reader                                                                                                     | `ok(undefined)` is contract-legal but disables wallet-period caps | gate / db owner                            |
+| 6   | `setAuthorizationStatus` cannot restamp `expiration_time`                                                                                    | reauthorize reports `expiryRestamped: false`                      | orders owner                               |
+| 7   | `findRefundById` is repo-less but outside the four-handle enumeration                                                                        | refund-by-id paths cannot be wired from repositories              | orders / db owner                          |
+| 8   | `@countersign/vi-client` missing from `packages/orchestrator/package.json`                                                                   | binder must accept an injected `vi` until the dependency lands    | WP-01 / orchestrator                       |
+| 9   | Orchestrator README cross-references the wrong defender export surface                                                                       | implementer follows a README sentence that tsc contradicts        | docs owner                                 |
+| 10  | Spec EC-AGT-4 says old mandates survive a key rotation; the Gate refuses a REVOKED agent, and `rotateAgentKey` marks the predecessor REVOKED | rotation silently un-spends every mandate bound to the old key    | gate / db owner (needs a product decision) |
 
 ## 1. `DefenderStore` has no production adapter
 
@@ -120,3 +121,21 @@ for disputed captures" sentence is superseded by `defenderRefundsFromOrders`
 plus the `packages/db` JS `Date` binding note (drizzle-orm 0.45.3) are project-wide idiosyncrasies
 that belong in the db README, not the orchestrator's. Code follows the packages; the README sentences
 are corrected separately so the next implementer does not chase them.
+
+## 10. EC-AGT-4's rotation semantics contradict the Gate
+
+The spec's §12.9 row says a key rotation leaves existing mandates usable: _"New key → user re-signs
+new L2s … old mandates keep the old key until expiry"_. `rotateAgentKey`
+(`packages/db/src/repos/agents.ts:136`) instead marks the predecessor `REVOKED`; the Gate's check 2
+(`packages/gate/src/checks.ts:501-534`) resolves the agent by the mandate's `agent_id` and refuses any
+row whose status is not `ACTIVE` (`GATE_AGENT_SUSPENDED`). So a rotation today stops every mandate
+still bound to the old key, which is the opposite of the row's sentence.
+
+Retention itself is deliberate and correct — the old row must stay for past L3s to verify — so the
+question is only whether the predecessor should be `REVOKED` (rotation also revokes) or stay `ACTIVE`
+until the last mandate expires (rotation only issues). That is a product/security decision, not a
+code-style one, so no work around is stubbed here.
+
+**Evidence:** `packages/db/test/repos.edge-cases.live.test.ts` executes the rotation against a real
+Postgres and asserts the retention/`rotated_from` half; it deliberately does not assert either reading
+of the spec sentence.

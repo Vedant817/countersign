@@ -452,7 +452,9 @@ export async function sumCapturedForAuthorization(
         .select({ total: sql<bigint>`coalesce(sum(${captures.amount_minor}), 0)` })
         .from(captures)
         .where(eq(captures.authorization_id, authorizationId))
-      return rows[0]?.total ?? 0n
+      // `BigInt(...)`: postgres-js returns the aggregate as a string, and a caller doing
+      // `alreadyCaptured + request.minor` would otherwise mix a string with a BigInt.
+      return rows[0] === undefined ? 0n : BigInt(rows[0].total)
     },
     { table: 'captures', authorizationId, op: 'sum' },
   )

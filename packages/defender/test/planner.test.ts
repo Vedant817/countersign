@@ -413,7 +413,7 @@ describe('the notes', () => {
     expect(note).toContain('re-verify it against our public URL')
   })
 
-  it('a details note mentions the passkey only when one was recorded', () => {
+  it('EC-FAM-2: a details note mentions the passkey only when one was recorded', () => {
     const withPasskey = ctx({ dispute: { ...baseCtx().dispute, reason: 'UNAUTHORISED' } })
     expect(
       planEvidence(withPasskey, route(withPasskey)).items.find(

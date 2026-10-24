@@ -353,3 +353,5 @@ WP-06s and everything needing live sandbox is not started.
   with no API key reproduce the AI part (`docs/verification/P0-7.md`). Decision record: **D-055**.
   Still open on this item: nothing — but the corpus is hand-written and is a smoke test, not an accuracy
   figure, and 22/167 sentences still hand `lineItems` to a model when one is configured.
+
+

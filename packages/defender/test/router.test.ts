@@ -203,6 +203,42 @@ describe('route: the chain check is first, and it is not a fallback', () => {
     expect(d.ruleId).toBe('R-NOCHAIN-1')
     expect(d.posture).toBe('ACCEPT_CLAIM')
   })
+
+  it('EC-BUY-2: true fraud on a payment we never signed is never contested, and the merchant is told why', () => {
+    /**
+     * Someone used a stolen PayPal account for a transaction Countersign never saw: there is **no
+     * mandate**, no order row and no capture, so there is no signed artefact that could support a
+     * defence. The spec's row is "ACCEPT/manual — Countersign proves nothing it didn't sign", and the
+     * load-bearing assertion is the negative one: no threshold can turn this into a CONTEST.
+     *
+     * `verifyAtCaptureChainValid` is deliberately *absent* rather than `false`: `false` is a broken
+     * chain, which is R-CHAIN-BAD's row. "No mandate" and "a mandate that failed to verify" are
+     * different sentences and the router must not confuse them (see `ruleNoChain`).
+     */
+    const noMandate = ctx({
+      dispute: { ...baseCtx().dispute, reason: 'UNAUTHORISED' },
+      order: undefined,
+      capture: undefined,
+      chain: { mandatePresent: false },
+    })
+
+    const reviewed = route(noMandate)
+    expect(reviewed.ruleId).toBe('R-NOCHAIN-1')
+    expect(reviewed.liability).toBe('UNPROVABLE')
+    // No auto-accept threshold configured: a person decides, and the sentence says so.
+    expect(reviewed.posture).toBe('REVIEW')
+    expect(reviewed.evidenceRequired).toEqual([])
+    expect(reviewed.rationale).toContain(NO_MANDATE_LINE)
+
+    // A merchant who configured a limit the claim falls under gets an ACCEPT — never a contest, and
+    // never a filing. `12_999n` is the exact boundary, and `autoAccepts` is inclusive.
+    for (const threshold of [12_999n, 13_000n, 10_000_000n]) {
+      const decided = route({ ...noMandate, policy: { autoAcceptThresholdMinor: threshold } })
+      expect(decided.posture, `threshold ${threshold}`).toBe('ACCEPT_CLAIM')
+      expect(decided.ruleId).toBe('R-NOCHAIN-1')
+      expect(decided.evidenceRequired, `threshold ${threshold}`).toEqual([])
+    }
+  })
 })
 
 describe('route: the ordering fixes that change a real answer', () => {

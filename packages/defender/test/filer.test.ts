@@ -35,7 +35,8 @@
  */
 
 import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { createInMemoryOrderWorld } from '../../orders/src/deps'
 import {
@@ -1028,12 +1029,42 @@ describe('the posture gate: the compile-time half', () => {
  * `citation-check.ts` has, for the same reason: a lint rule only runs for whoever runs lint.
  */
 describe('the posture gate: the source-scan half', () => {
-  const SRC = new URL('../src/', import.meta.url).pathname.replace(/^\//, '')
+  /**
+   * `src/`, resolved from this file's URL.
+   *
+   * This used to be `new URL('../src/', import.meta.url).pathname.replace(/^\//, '')`. On Windows the
+   * pathname is `/C:/…`, so stripping the leading slash produced a valid absolute path and the scan
+   * worked. On Linux the pathname is `/home/runner/…`, so the same strip produced the *relative* path
+   * `home/runner/…` — a directory that does not exist, and every scan in this block died with
+   * `ENOENT: no such file or directory, scandir 'home/runner/…'` on `ubuntu-latest` while passing here.
+   * `fileURLToPath` is the conversion that is correct on both platforms; nothing about the assertions
+   * changes with it.
+   */
+  const SRC = fileURLToPath(new URL('../src/', import.meta.url))
 
+  /**
+   * Every `.ts` file under `src/`, found by an explicit recursive walk.
+   *
+   * Explicit rather than a glob (or a single `readdirSync`) so the file set is identical on every
+   * platform, and recursive so a file added inside a subdirectory cannot escape the scan — the failure
+   * mode of a source-scan gate is that it silently looks at nothing.
+   */
   function sourceFiles(): { name: string; text: string }[] {
-    return readdirSync(SRC)
-      .filter((e) => e.endsWith('.ts'))
-      .map((e) => ({ name: e, text: readFileSync(join(SRC, e), 'utf8') }))
+    const out: { name: string; text: string }[] = []
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.isFile() && entry.name.endsWith('.ts')) {
+          out.push({
+            name: relative(SRC, full).split(sep).join('/'),
+            text: readFileSync(full, 'utf8'),
+          })
+        }
+      }
+    }
+    walk(SRC)
+    return out.sort((a, b) => a.name.localeCompare(b.name))
   }
 
   function code(name: string): string {

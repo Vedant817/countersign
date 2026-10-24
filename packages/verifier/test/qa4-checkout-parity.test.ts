@@ -27,6 +27,15 @@ const REPO_ROOT = resolve(import.meta.dirname, '..', '..', '..')
 const VI_PROJECT = join(REPO_ROOT, 'apps', 'vi')
 const BASE_URL = 'https://countersign.example'
 
+/**
+ * Run the generated script with `uv run --project apps/vi python`.
+ *
+ * The `-1`/empty-stdout pair this used to return for a missing interpreter is the reason it now
+ * distinguishes the two failure kinds. `execFileSync` throws `ENOENT` when the executable cannot be
+ * spawned — no status, no stdout — and `e.status ?? -1` turned that into "verify.py exited -1", which
+ * reads like a verdict from the script rather than "the interpreter is not installed". It cost a CI
+ * investigation (docs/CI-FAILURES.md); it must not cost another.
+ */
 function runPython(script: string, doc: unknown): { code: number; stdout: string } {
   const dir = mkdtempSync(join(tmpdir(), 'cs-parity-'))
   writeFileSync(join(dir, 'verify.py'), script, 'utf8')
@@ -43,8 +52,24 @@ function runPython(script: string, doc: unknown): { code: number; stdout: string
     )
     return { code: 0, stdout }
   } catch (error) {
-    const e = error as { status?: number; stdout?: string }
-    return { code: e.status ?? -1, stdout: `${e.stdout ?? ''}` }
+    const e = error as {
+      status?: number | null
+      stdout?: string
+      stderr?: string
+      message?: string
+      code?: string
+    }
+    if (e.code === 'ENOENT') {
+      throw new Error(
+        'cannot run verify.py: `uv` is not on PATH, so this §12 acceptance test did not run. ' +
+          'Install uv and let it sync the project (`uv run --project apps/vi python --version`). ' +
+          `Spawn error: ${e.message ?? String(error)}`,
+      )
+    }
+    // Keep the interpreter's own stderr attached: a sync failure would otherwise be another empty
+    // string that looks like a clean run with a strange exit code.
+    const stderr = e.stderr === undefined || e.stderr === '' ? '' : `\n[stderr]\n${e.stderr}`
+    return { code: e.status ?? -1, stdout: `${e.stdout ?? ''}${stderr}` }
   }
 }
 

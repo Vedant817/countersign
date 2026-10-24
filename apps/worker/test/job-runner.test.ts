@@ -196,6 +196,32 @@ describe('createJobRunner — every job name is wired', () => {
     expect(h.calls).toContain('listDisputes')
   })
 
+  it('EC-PP-4: the dispute sweep needs no PayPal MCP server — it reads disputes over REST', async () => {
+    /**
+     * The spec's handling for "PayPal MCP server down" is *"the Defender switches to direct REST for
+     * the same operations (`getDispute`, `listDisputes`)"*. There is no switch to test, because the
+     * Defender never used the MCP server: its dispute reads are `PayPalClient` REST calls, and
+     * `PAYPAL_MCP_URL` is configuration for the agent tooling and the `/status` probe only.
+     *
+     * So the property to pin is that the **sweep is unaffected by the MCP endpoint**. The URL is set
+     * to an address nothing can answer (`127.0.0.1:9`, discard); if a future edit routes the sweep
+     * through an MCP client, this test fails on the connect rather than in production on a dead tool
+     * server. The `/status` side — an unreachable MCP reported as down without failing the check —
+     * is asserted in `apps/web/app/status/status.test.ts`.
+     */
+    const previous = process.env['PAYPAL_MCP_URL']
+    process.env['PAYPAL_MCP_URL'] = 'http://127.0.0.1:9/mcp'
+    try {
+      const h = workerHarness()
+      const runner = createJobRunner({ webhooks: h.deps })
+      await runner[JOB_DISPUTES](undefined)
+      expect(h.calls).toContain('listDisputes')
+    } finally {
+      if (previous === undefined) delete process.env['PAYPAL_MCP_URL']
+      else process.env['PAYPAL_MCP_URL'] = previous
+    }
+  })
+
   it('QUEUE-2 EC-TIME-5 the expiry sweep queries authorizations', async () => {
     const h = workerHarness()
     const runner = createJobRunner({ webhooks: h.deps })

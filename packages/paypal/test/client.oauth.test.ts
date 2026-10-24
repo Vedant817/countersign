@@ -345,7 +345,7 @@ describe('EC-PP-3: a 401 refreshes the token once', () => {
     purchase_units: [{ amount: { currency_code: 'USD' as const, value: '48.00' } }],
   }
 
-  it('refreshes once and replays the request', async () => {
+  it('EC-PP-3: refreshes once and replays the request', async () => {
     const fetchImpl = fakeFetch((call) => {
       if (call.url.endsWith('/v1/oauth2/token')) return tokenResponse()
       return orderCalls(fetchImpl.calls).length === 1 ? unauthorizedResponse() : orderResponse()
