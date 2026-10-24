@@ -42,6 +42,8 @@ interface HarnessOptions {
   readonly missing?: 'database' | 'vi' | 'paypal' | 'openai' | 'mcp'
   /** Make a configured dependency fail its call. */
   readonly dead?: 'database' | 'vi' | 'paypal' | 'openai' | 'mcp'
+  /** Force the MCP probe onto a specific HTTP status; 404 and 401 must not be conflated. */
+  readonly mcpStatus?: number
   /** Answer slowly, past the probe budget. */
   readonly hang?: 'vi' | 'openai'
 }
@@ -118,7 +120,13 @@ function harness(options: HarnessOptions = {}) {
     if (url.includes('mcp.sandbox.paypal.com')) {
       record('mcp')
       if (options.dead === 'mcp') throw new Error('ECONNREFUSED')
-      // 405 is the honest answer to a bare GET on an MCP endpoint, and it proves the host is talking.
+      // `mcpStatus` lets a test choose the answer. The default is 405 — the honest reply to a bare GET on
+      // an MCP endpoint, and proof the host is talking. 404 and 401 are the two that must be told apart.
+      if (options.mcpStatus !== undefined) {
+        return new Response(options.mcpStatus === 404 ? '404 Not Found' : 'unauthorized', {
+          status: options.mcpStatus,
+        })
+      }
       return new Response('method not allowed', { status: 405 })
     }
 
@@ -408,6 +416,33 @@ describe('the probes actually probe', () => {
     expect(byId(probes).get('mcp')?.status).toBe('down')
     expect(byId(probes).get('mcp')?.required).toBe(false)
     expect(httpStatus(probes)).toBe(200)
+  })
+
+  it('an MCP URL that 404s is down, not "reachable"', async () => {
+    /*
+     * The bug this pins, measured 25 Oct 2026: the configured `https://mcp.sandbox.paypal.com/http`
+     * answers **404** to every method, and `/status` reported it **up** — a green tick on a URL that
+     * serves nothing. The probe accepted any HTTP status on the reasoning that "401 and 405 both prove
+     * the host is there", which is true of those two and false of 404: 404 means the path does not exist,
+     * and for a URL we configure ourselves that is exactly what the probe is for.
+     *
+     * A 404 here is the same shape as the `capOf()` that matched no values and the CI gate that failed
+     * unconditionally — a check reporting on something it never tested.
+     */
+    const probes = await probeAll(harness({ mcpStatus: 404 }).deps)
+    expect(byId(probes).get('mcp')?.status).toBe('down')
+    expect(byId(probes).get('mcp')?.detail).toMatch(/404/)
+    // Still not fatal: the agent degrades, the instance stays in rotation.
+    expect(httpStatus(probes)).toBe(200)
+  })
+
+  it('an MCP URL that answers 401 stays up, because that path exists', async () => {
+    // The distinction the fix turns on. `https://mcp.sandbox.paypal.com/sse` answers 401 with
+    // `realm="OAuth"`, which proves the path is real and merely unauthorised — the opposite conclusion
+    // from a 404, and the reason one number cannot be treated as another.
+    const probes = await probeAll(harness({ mcpStatus: 401 }).deps)
+    expect(byId(probes).get('mcp')?.status).toBe('up')
+    expect(byId(probes).get('mcp')?.detail).toMatch(/401/)
   })
 
   it('a dependency that accepts the socket and then hangs is reported down within the budget', async () => {

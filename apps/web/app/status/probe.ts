@@ -370,15 +370,39 @@ async function probePaypalOAuth(deps: ProbeDeps): Promise<DependencyProbe> {
 /* ------------------------------------------------------------------------------------------ */
 
 /**
- * The PayPal MCP endpoint (§8.14, D7) — a bare reachability check.
+ * The PayPal MCP endpoint (§8.14, D7) — a reachability check that can actually fail.
  *
- * **Not required.** It is only the agent's shopping tools (§8.13), and §11's check C3 may still be deciding
- * between the hosted server and a local `npx @paypal/mcp`. A down MCP degrades the agent chat and nothing
- * else, so it is reported and the report still says 200.
+ * **Not required.** It is only the agent's shopping tools (§8.13). A down MCP degrades the agent chat and
+ * nothing else, so it is reported and the report still says 200.
  *
  * The probe is deliberately **not** an MCP handshake: a full `initialize` needs a protocol version this
- * process has no opinion about, and §11 check C3 is still the authority on how to talk to it. A reachability
- * answer is what "is the endpoint there" means, and it is labelled as exactly that.
+ * process has no opinion about. A reachability answer is what "is the endpoint there" means.
+ *
+ * ## Why 404 is `down` and not "reachable"
+ *
+ * This used to accept **any** HTTP status, on the reasoning that "401 and 405 both prove the host is
+ * there". That is true of 401, 403 and 405 — each means the path exists and the request was refused. It
+ * is **false of 404**, which means the path does not exist, and for a URL we configure ourselves that is
+ * precisely the signal the probe exists to give.
+ *
+ * Measured on 25 Oct 2026 against the configured `https://mcp.sandbox.paypal.com/http`:
+ *
+ * ```
+ * POST /http  → 404  (Cloudflare, text/plain "404 Not Found")   ← the configured URL
+ * POST /sse   → 401  www-authenticate: Bearer realm="OAuth",
+ *                    resource_metadata="…/.well-known/oauth-protected-resource/sse"
+ * ```
+ *
+ * The path in `.env.local` was wrong, and `/status` reported it **up** — a green tick on a URL that
+ * answers nothing. This is the same shape as the `capOf()` that matched no values and the CI gate that
+ * failed unconditionally: a check reporting on something it never tested.
+ *
+ * ## What the 401 also tells us
+ *
+ * The challenge carries `realm="OAuth"` and a `resource_metadata` pointer, so the server wants an
+ * **interactive PayPal login** (PayPal's own quickstart: *"The MCP client sends you to the PayPal login
+ * page"*) rather than the client-credentials bearer this repository can mint. That is why the answer to
+ * "can we drive it headlessly" is no, and why the agent work (P0-6) cannot lean on it.
  */
 async function probeMcp(deps: ProbeDeps): Promise<DependencyProbe> {
   const base = { id: 'mcp' as const, name: 'PayPal MCP', required: false }
@@ -392,8 +416,17 @@ async function probeMcp(deps: ProbeDeps): Promise<DependencyProbe> {
   }
   const outcome = await timed(deps, async () => {
     const response = await deps.fetchImpl(deps.mcpUrl, { method: 'GET' })
-    // Any HTTP answer counts: 401 and 405 both prove the host is there and talking. Only a transport failure
-    // is "down".
+    /*
+     * A 404 is a configuration error, not reachability. Everything else that answers — 2xx, 401, 403,
+     * 405 — proves the host is there and talking, and is reported as such with the status quoted so the
+     * reader can tell authorisation from method-mismatch.
+     */
+    if (response.status === 404) {
+      throw new Error(
+        `the path does not exist (HTTP 404) — PAYPAL_MCP_URL is probably wrong. ` +
+          'The documented streamable-HTTP path is /http and the SSE path is /sse; on 25 Oct 2026 /http answered 404 and /sse answered 401 with an OAuth challenge',
+      )
+    }
     if (response.status === 0) throw new Error('no HTTP status')
     return {
       detail: `reachable; answered ${response.status} to a bare GET (a handshake is not attempted).`,
