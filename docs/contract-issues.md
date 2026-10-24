@@ -120,3 +120,34 @@ for disputed captures" sentence is superseded by `defenderRefundsFromOrders`
 plus the `packages/db` JS `Date` binding note (drizzle-orm 0.45.3) are project-wide idiosyncrasies
 that belong in the db README, not the orchestrator's. Code follows the packages; the README sentences
 are corrected separately so the next implementer does not chase them.
+
+---
+
+## 10. Date parameters inside Drizzle `sql` templates throw `ERR_INVALID_ARG_TYPE` (found 2026-10-25, P0-6)
+
+**Where:** `packages/db/src/repos/{attempts,budget,disputes,orders,webhooks}.ts` — every
+`sql\`${column} >= ${someDate}\`` comparison (10 sites).
+
+**Symptom:** the query fails with
+
+```
+Failed query: select "id" from "checkout_attempts" where ("mandate_id" = $1 and "created_at" >= $2)
+params: mdt_…,Sun Oct 25 2026 02:42:58 GMT+0530 (India Standard Time)
+  inner: ERR_INVALID_ARG_TYPE The "string" argument must be of type string or an instance of Buffer or
+         ArrayBuffer. Received an instance of Date
+```
+
+**Why it matters:** `countRecentAttempts` is Gate check 12 and `budget.ts`'s `since` filters are Gate
+check 8/9's reads. On Node 24.13.1 with drizzle-orm 0.45.3 / postgres 3.4.9 the comparison throws, so
+**every Gate evaluation blocks with `CS_INTERNAL`** before anything is reserved — the velocity guard
+reports "check threw" and the budget check cannot complete. A plain `eq()` on text works, and
+`postgres.js` handles a `Date` parameter correctly on its own: it is Drizzle's `sql` template that
+mangles the value. Passing `.toISOString()` fixes it.
+
+**Fix applied:** the ten call sites pass `.toISOString()`. Postgres parses the ISO-8601 string into
+`timestamptz` from the comparison's context, so the semantics are unchanged. Reported here because
+`packages/db` is WP-02's package and AGENTS.md rule 8 says report rather than reach in; it was fixed in
+the P0-6 branch because no purchase can be decided without it.
+
+**Evidence:** `scripts/db-debug.mts` (the failing call through `@countersign/db`) and
+`docs/verification/P0-6.md`.

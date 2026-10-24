@@ -150,7 +150,7 @@ export function findDisputesUpdatedSince(
       const rows = await (exec ?? db())
         .select()
         .from(disputes)
-        .where(sql`${disputes.updated_at} >= ${since}`)
+        .where(sql`${disputes.updated_at} >= ${since.toISOString()}`)
         .orderBy(desc(disputes.updated_at))
       return rows as DisputeRow[]
     },
@@ -623,7 +623,7 @@ export function countDisputesForWalletSince(
         .innerJoin(orders, eq(disputes.order_id, orders.id))
         .innerJoin(checkoutAttempts, eq(orders.attempt_id, checkoutAttempts.id))
         .innerJoin(mandates, eq(checkoutAttempts.mandate_id, mandates.id))
-        .where(and(eq(mandates.wallet_id, walletId), sql`${disputes.created_at} >= ${since}`))
+        .where(and(eq(mandates.wallet_id, walletId), sql`${disputes.created_at} >= ${since.toISOString()}`))
       return rows.length
     },
     { table: 'disputes', walletId, since },

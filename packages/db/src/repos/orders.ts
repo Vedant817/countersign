@@ -24,6 +24,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import type { CsError, Currency, Money, OrderId, Result, ShipmentId } from '@countersign/core'
 
 import { db, type Exec } from '../client'
+import { sumToBigInt } from './budget'
 import {
   authorizations,
   captures,
@@ -223,7 +224,7 @@ export function findOrdersForReconcile(
         .from(orders)
         .where(
           and(
-            sql`${orders.updated_at} >= ${updatedSince}`,
+            sql`${orders.updated_at} >= ${updatedSince.toISOString()}`,
             sql`${orders.status} not in ('CAPTURED','VOIDED','CANCELLED','PAYMENT_FAILED','AUTH_EXPIRED','DECLINED')`,
           ),
         )
@@ -308,7 +309,7 @@ export function findAuthorizationsExpiring(
         .where(
           and(
             eq(authorizations.status, status),
-            sql`${authorizations.expiration_time} <= ${before}`,
+            sql`${authorizations.expiration_time} <= ${before.toISOString()}`,
           ),
         )
         .orderBy(authorizations.expiration_time)
@@ -452,7 +453,8 @@ export async function sumCapturedForAuthorization(
         .select({ total: sql<bigint>`coalesce(sum(${captures.amount_minor}), 0)` })
         .from(captures)
         .where(eq(captures.authorization_id, authorizationId))
-      return rows[0]?.total ?? 0n
+      // `sum()` is `numeric` on the wire and postgres.js returns it as a string — see `sumToBigInt`.
+      return rows[0] === undefined ? 0n : sumToBigInt(rows[0].total)
     },
     { table: 'captures', authorizationId, op: 'sum' },
   )

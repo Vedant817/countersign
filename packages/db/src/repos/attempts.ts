@@ -222,7 +222,11 @@ export function countRecentAttempts(
         .where(
           and(
             eq(checkoutAttempts.mandate_id, mandateId),
-            sql`${checkoutAttempts.created_at} >= ${since}`,
+            // `.toISOString()` is not decoration: drizzle's `sql` template cannot serialise a `Date`
+            // parameter (it throws `ERR_INVALID_ARG_TYPE` from `Buffer.from`), and Postgres parses the
+            // ISO-8601 string into `timestamptz` from the comparison's context. See
+            // docs/contract-issues.md #10.
+            sql`${checkoutAttempts.created_at} >= ${since.toISOString()}`,
           ),
         )
       return rows.length
@@ -286,7 +290,7 @@ export function findStaleAttempts(
         .from(checkoutAttempts)
         .where(
           and(
-            sql`${checkoutAttempts.created_at} < ${olderThan}`,
+            sql`${checkoutAttempts.created_at} < ${olderThan.toISOString()}`,
             sql`${checkoutAttempts.state} in ('GATED_ALLOW','CREATED')`,
           ),
         )

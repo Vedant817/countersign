@@ -245,7 +245,7 @@ export function deleteWebhookEventsOlderThan(
     async () => {
       const rows = await (exec ?? db())
         .delete(webhookEvents)
-        .where(sql`${webhookEvents.received_at} < ${cutoff}`)
+        .where(sql`${webhookEvents.received_at} < ${cutoff.toISOString()}`)
         .returning({ id: webhookEvents.id })
       return rows.length
     },
@@ -278,7 +278,7 @@ export function countFailedSince(since: Date, exec?: Exec): Promise<Result<numbe
         .select({ id: webhookEvents.id })
         .from(webhookEvents)
         .where(
-          and(eq(webhookEvents.verified, 'FAILED'), sql`${webhookEvents.received_at} >= ${since}`),
+          and(eq(webhookEvents.verified, 'FAILED'), sql`${webhookEvents.received_at} >= ${since.toISOString()}`),
         )
       return rows.length
     },
