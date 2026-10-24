@@ -36,6 +36,11 @@ const environment = {
   ...process.env,
   APP_ENV: 'local',
   DATABASE_URL: localDatabase.href,
+  // The verifier page requires this (D-053). Without it `/v/<packetId>` renders "temporarily
+  // unavailable" for every well-formed id — including unknown ones, which then answer 200 instead of
+  // the 404 EC-DSP-9 asks for. A launcher that starts a page it knows cannot serve is worse than one
+  // that refuses.
+  PUBLIC_BASE_URL: `http://localhost:${webPort}`,
   VI_SERVICE_URL: `http://127.0.0.1:${viPort}`,
   VI_SERVICE_TOKEN: randomBytes(32).toString('hex'),
   VI_KEK: randomBytes(32).toString('base64'),
