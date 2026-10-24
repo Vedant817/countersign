@@ -6,8 +6,12 @@ import { compileIntent } from '@/lib/intent-compiler'
 import { missingLlmConfig } from '@/lib/llm'
 import { merchantIdentity } from '@/lib/merchant'
 
+import { ReadBackText } from './read-back-text'
+
 export const metadata: Metadata = {
-  title: 'Intent compiler · Countersign',
+  // No `· Countersign` here: the root layout's template appends it, so naming it twice produced
+  // "Intent compiler · Countersign · Countersign" in the tab and in every shared link preview.
+  title: 'Intent compiler',
   description:
     'Turn a sentence into a spending mandate. The model proposes; deterministic code decides what may be signed.',
 }
@@ -176,9 +180,7 @@ async function Compiled({ intent }: { intent: string }) {
 
       <article className="rounded-card border border-rule bg-paper-raised p-5">
         <h2 className="text-sm font-medium uppercase tracking-wide text-ink-faint">Read-back</h2>
-        <pre className="mt-3 whitespace-pre-wrap font-sans text-sm leading-relaxed">
-          {readBackText}
-        </pre>
+        <ReadBackText text={readBackText} />
       </article>
 
       {mandate.ambiguities.length > 0 ? (
