@@ -302,6 +302,14 @@ jobs:
         run: pnpm db:seed
       - name: seed again (AT-M2.2 — must be idempotent)
         run: pnpm db:seed
+      - name: package tests against the seeded database
+        # `packages/db`'s live suites (`repos.live.test.ts`, `repos.edge-cases.live.test.ts`) skip
+        # without `DATABASE_URL`, so they never ran anywhere. This is the job with a database, so it is
+        # the job that executes them — which is what those files' own headers say should happen. They
+        # cover repository statements the Gate depends on: the wallet-cap period, the recurrence count,
+        # the two dispute readers, and agent-key rotation. Reviewing them found four Date-in-`sql`
+        # runtime failures and a string/BigInt mismatch that no unit test could have shown.
+        run: pnpm --filter @countersign/db exec vitest run
       - name: assert no money column is a float
         # The structural money rule. A `numeric` or `doublePrecision` money column would pass every
         # unit test in the repo and still lose a cent in production, so it is asserted against the
