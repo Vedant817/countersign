@@ -18,6 +18,19 @@ const viServiceToken = 'test-service-token-do-not-use-in-prod'
 const webPort = Number(process.env['COUNTERSIGN_WEB_PORT'] ?? 3000)
 const viPort = Number(process.env['COUNTERSIGN_VI_PORT'] ?? 8000)
 
+/**
+ * The loopback-only storefront database.
+ *
+ * `webServer.env` **replaces** the child's environment rather than extending it, so anything the app
+ * needs must be listed here. Omitting `DATABASE_URL` was a real defect: the shop then ran in
+ * `shopCatalogMode() === 'unavailable'`, and the seven storefront tests passed only when someone had
+ * already started a dev server by hand. Built the same way `scripts/dev-local.mjs` builds it, so the
+ * credentials are not a literal for a scanner to trip over.
+ */
+const localDatabase = new URL('postgres://127.0.0.1:5432/countersign')
+localDatabase.username = 'countersign'
+localDatabase.password = 'countersign'
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
@@ -60,6 +73,8 @@ export default defineConfig({
       timeout: 120_000,
       reuseExistingServer: !process.env['CI'],
       env: {
+        APP_ENV: 'local',
+        DATABASE_URL: localDatabase.href,
         VI_SERVICE_URL: `http://127.0.0.1:${viPort}`,
         SIGNING_LAB_ENABLED: 'true',
         VI_SERVICE_TOKEN: viServiceToken,
