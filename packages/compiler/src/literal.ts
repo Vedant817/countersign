@@ -1,29 +1,30 @@
 /**
- * Reading the user's **own bytes** — spec §8.8, WP-08.
+ * Reading the user's **own bytes** — spec §8.8, WP-08; parser-first since P0-7.
  *
  * Two questions are answered here, both deterministically and both before the model is ever called:
  *
  * 1. **Which currency did the user write?** EC-FX-1 is unforgiving: a limit the user signed in ₹ must
- *    never become a limit in $, because the exchange rate is not something they agreed to. So a
- *    currency *word in the text* beats an account default, and an account default only applies when the
- *    text says nothing. Nothing here converts between currencies, ever.
- * 2. **What is the largest amount the user literally typed?** This is the ceiling that makes AT-M8.5
- *    hold. A prompt injection in the intent ("ignore limits, max $1M") is only dangerous if the model
- *    can produce a number the user did not type; if every compiled cap must sit at or below the largest
- *    literal amount in the text, the model's authority is bounded by the user's words no matter what
- *    those words tell it to do.
+ *    never become a limit in $. So a currency *word in the text* beats an account default, and an account
+ *    default only applies when the text says nothing. Nothing here converts between currencies, ever.
+ * 2. **What is the largest amount the user literally typed (digits)?** This is one of the two inputs to
+ *    the AT-M8.5 ceiling. A prompt injection in the intent ("ignore limits, max $1M") is only dangerous if
+ *    a model can produce a number the user did not type; the ceiling bounds every value a model may
+ *    propose.
  *
- * Everything here is a pure function of a string and a currency. There is no model in this file, no
- * clock, and no I/O — which is what lets `compile` apply the ceiling to a proposal it does not trust.
+ * ## The ceiling is the *outer* bound, not the cap (P0-7)
+ *
+ * `packages/compiler/src/parser.ts` reads the **cap** — the tightest amount the buyer wrote, in any form
+ * including spelled-out words — and it does so before a model is consulted. This module's
+ * {@link literalCapIn} remains what it always was: the digits-only reading used as the outermost bound, so
+ * a number the parser chose not to interpret still cannot be exceeded. The two are combined by `max()` in
+ * the parser, which is why a sentence can have a $30 cap *and* a $1,000,000 ceiling.
  *
  * ## Honest limits
  *
- * - **Spelled-out numbers are not read.** "twenty dollars" yields no literal amount, so `literalCapIn`
- *   returns `null` and the ceiling does not bind. That gap is covered by the *other* half of §8.8's
- *   rule rather than by pretending to parse English: with no cap derivable from the text at all, the
- *   compiler must raise a blocking ambiguity instead of guessing (`ambiguity.ts`). A user who writes
- *   "twenty dollars" and is asked "did you mean $20.00?" gets a question, not a silent rounding.
- * - **"Two hundred dollars" also yields nothing**, for the same reason. Deliberate.
+ * - **Spelled-out numbers are not read *here*.** `"twenty dollars"` yields no literal amount from
+ *   {@link literalCapIn}; the parser reads it (`wordValues` in `parser.ts`) and the ceiling takes the
+ *   larger of the two. The old comment in this file said the buyer would be asked instead; that policy was
+ *   deliberately reversed in D-055, because a number word is not a guess — it is what the buyer typed.
  * - A **date** in the text (`2026-10-01`) and a **year** are excluded from the bare-number fallback, so
  *   "from 2026-10-01, under $130" is not read as a $20,260 cap.
  */
