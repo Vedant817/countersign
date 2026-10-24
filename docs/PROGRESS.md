@@ -36,8 +36,8 @@ buildable now.
 | WP-10 | `packages/gate` + budget ledger | B | 02, 04, 09 | done | `27f3e12` | AT-M10 ✅ 162 |
 | WP-11 | `packages/orders` — order orchestrator | C | 06, 10 | wip | | AT-M11 (H-01 for live) · binder `e0fb068` |
 | WP-12 | `packages/webhooks` + reconciler + worker | C | 06, 02 | done | `beb5f3d` | AT-M12 ✅ 154 · worker 116 |
-| WP-13 | `packages/agent` — shopping agent + injection defences | D | 09, 14, 04 | todo | | AT-M13 |
-| WP-14 | Merchant MCP server | D | 09 | review | `cbdce9e` | Merged `ea2124d`; boundary hardened `0fc383a`+`e446fbb` (D-048): 5 tools, per-tool signed scopes, 401 on missing/forged/expired/wrong-audience/read-only-for-checkout bearers, payment submission refused until a persisted runtime exists. AT-M14 purchase round-trip deliberately incomplete |
+| WP-13 | `packages/agent` - shopping agent + injection defences | D | 09, 14, 04 | review | `P0-6` | AT-M13: 69 package tests + live acceptance (Gate ALLOW, Gate BLOCK, real PayPal order) in `docs/verification/P0-6.md`; refusal 30/30 both behaviours |
+| WP-14 | Merchant MCP server | D | 09 | review | `cbdce9e` | Merged `ea2124d`; boundary hardened `0fc383a`+`e446fbb` (D-048): 5 tools, per-tool signed scopes, 401 on missing/forged/expired/wrong-audience/read-only-for-checkout bearers. `P0-6`: `submit_checkout` now runs the composed Gate and records the decision (`apps/web/lib/mcp-checkout.ts`), `get_order_status` reads the orders table, and the tools speak §8.9's snake_case wire shapes. Order creation is still P0-4's |
 | WP-15a | Liability router (pure) | E | 01, 02 | done | `7b95e71` | AT-M15.1 ✅ 40/40 |
 | WP-15b | Evidence planner (reason → evidence enum) | E | 15a | done | `7b95e71` | plan tests per reason ✅ |
 | WP-15c | Drafter + citation checker | E | 15b | done | `1d465bc` | AT-M15.2 ✅ forged number fails |
@@ -45,7 +45,7 @@ buildable now.
 | WP-15e | Filer + dispute ingest + Defender agent | E | 06, 12, 15c, 15d | wip | `bdc0356` | AT-M15.5/.6 ✅ · AT-M15.4 needs H-01 |
 | WP-16 | Strategist + dispute lifecycle actions | E | 15e | wip | `bdc0356` | AT-M16.1/.2 ✅ · AT-M16.3 needs H-01 |
 | WP-17a | Wallet UI (S-02…S-09) | D | 05, 07, 08 | todo | | E2E + axe |
-| WP-17b | Agent chat UI (S-10) | D | 13 | todo | | E2E |
+| WP-17b | Agent chat UI (S-10) | D | 13 | review | `P0-6` | S-10 renders transcript, tool stream, mandate chip, inline Gate results and injection badges; BLOCK copy is "Your limits held. Here is what it tried." Playwright E2E not yet written |
 | WP-17c | Shop UI (S-11…S-13) | D | 09 | done | `66d78bc` | E2E ✅ 3 |
 | WP-17d | Merchant UI (S-14…S-16, S-19) | E | 11, 10 | todo | | E2E |
 | WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | todo | | E2E + table fallback |

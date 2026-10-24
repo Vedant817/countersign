@@ -139,3 +139,51 @@ code-style one, so no work around is stubbed here.
 **Evidence:** `packages/db/test/repos.edge-cases.live.test.ts` executes the rotation against a real
 Postgres and asserts the retention/`rotated_from` half; it deliberately does not assert either reading
 of the spec sentence.
+
+---
+
+## 11. Date parameters inside Drizzle `sql` templates throw `ERR_INVALID_ARG_TYPE` (found 2026-10-25, by P0-4 and P0-6; fixes converged)
+
+**Where:** `packages/db/src/repos/{attempts,budget,disputes,orders,webhooks}.ts` � every
+`sql\`${column} >= ${someDate}\`` comparison (10 sites).
+
+**Symptom:** the query fails with
+
+```
+Failed query: select "id" from "checkout_attempts" where ("mandate_id" = $1 and "created_at" >= $2)
+params: mdt_�,Sun Oct 25 2026 02:42:58 GMT+0530 (India Standard Time)
+  inner: ERR_INVALID_ARG_TYPE The "string" argument must be of type string or an instance of Buffer or
+         ArrayBuffer. Received an instance of Date
+```
+
+**Why it matters:** `countRecentAttempts` is Gate check 12 and `budget.ts`'s `since` filters are Gate
+check 8/9's reads. On Node 24.13.1 with drizzle-orm 0.45.3 / postgres 3.4.9 the comparison throws, so
+**every Gate evaluation blocks with `CS_INTERNAL`** before anything is reserved � the velocity guard
+reports "check threw" and the budget check cannot complete. A plain `eq()` on text works, and
+`postgres.js` handles a `Date` parameter correctly on its own: it is Drizzle's `sql` template that
+mangles the value. Passing `.toISOString()` fixes it.
+
+**Fix applied:** every comparison now uses Drizzle's own operator — `gte(column, date)` / `lt(column, date)`
+— which routes the value through the timestamp column's encoder. Two independent fixes landed for this
+fault (P0-4 on `budget`/`disputes`/`orders`, P0-6 on the rest); this entry records the convergence rather
+than the history, because two fixes for one fault is how a third one gets written.
+
+**Evidence:** `scripts/db-debug.mts` (the failing call through `@countersign/db`) and
+`docs/verification/P0-6.md`.
+
+---
+
+## 12. `sum(bigint)` arrives as a string, and the code typed it `bigint` (found 2026-10-25, by P0-4 and P0-6)
+
+**Where:** `packages/db/src/repos/{budget,orders}.ts` — every `sql<bigint>` that wraps `sum(...)`.
+
+**Why it matters:** Postgres `sum(bigint)` is `numeric`, and postgres.js returns a `numeric` as a **string**
+so a value past `Number.MAX_SAFE_INTEGER` is not silently rounded. `Record<BudgetEntryKind, bigint>` filled
+with `"13300"` makes `computeFromEntries` subtract strings, and Gate check 9's `claimed + amount.minor`
+throws _"Cannot mix BigInt and other types"_ — again, **every** purchase blocked with `CS_INTERNAL`, and
+again only a real database can show it, because every unit test injects a store that already returns
+BigInts.
+
+**Fix applied:** `BigInt(...)` at each aggregate boundary, with the reason written down beside it.
+
+**Evidence:** `docs/verification/P0-6.md`, and the acceptance run that turns `CS_INTERNAL` into `ALLOWED`.

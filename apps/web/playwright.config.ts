@@ -1,6 +1,20 @@
 import { defineConfig, devices } from '@playwright/test'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+/**
+ * The Gate's decision-signing key, generated per run.
+ *
+ * **Ed25519**, matching `signDecisionRecord`'s `alg: 'EdDSA'`; `apps/web/lib/gate-runtime.ts` checks the
+ * `kty`/`crv` before importing and refuses anything else. Ephemeral for the same reason vi's issuer key
+ * is: a checked-in private key is a real one the day someone copies the file. Same construction as
+ * `scripts/dev-local.mjs`, which is where the running lab gets its key.
+ */
+function gateSigningKey(): string {
+  const { privateKey } = generateKeyPairSync('ed25519')
+  return JSON.stringify(privateKey.export({ format: 'jwk' }))
+}
 
 const webRoot = fileURLToPath(new URL('.', import.meta.url))
 const viRoot = resolve(webRoot, '..', 'vi')
@@ -82,6 +96,13 @@ export default defineConfig({
         SIGNING_LAB_ENABLED: 'true',
         VI_SERVICE_TOKEN: viServiceToken,
         VI_AGENT_ISS: 'https://agent.countersign.test',
+        // The agent demo (S-10) is opt-in everywhere, including here. `SESSION_SECRET` mints the MCP
+        // bearer and `GATE_SIGNING_KEY` signs the decision record; both are generated per run so no
+        // private key is ever a checked-in literal.
+        COUNTERSIGN_AGENT_DEMO: '1',
+        SESSION_SECRET: randomBytes(32).toString('hex'),
+        GATE_SIGNING_KEY: gateSigningKey(),
+        GATE_KID: 'local-gate',
       },
     },
   ],

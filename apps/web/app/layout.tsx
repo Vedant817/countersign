@@ -39,6 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               Countersign
             </Link>
             <nav aria-label="Main navigation" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <Link href="/agent">Agent chat</Link>
               <Link href="/shop">Storefront</Link>
               <Link href="/intent">Intent compiler</Link>
               <Link href="/lab/device-sign">Signing lab</Link>

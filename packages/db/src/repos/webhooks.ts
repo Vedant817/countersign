@@ -18,7 +18,7 @@
  * Nothing here reads a resource's state from `raw`. §8.12: "never trust payload state" — `raw` is kept
  * for the case file, and the reconciler re-fetches.
  */
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, isNull, lt, sql } from 'drizzle-orm'
 
 import type { CsError, Id, Result } from '@countersign/core'
 
@@ -245,7 +245,8 @@ export function deleteWebhookEventsOlderThan(
     async () => {
       const rows = await (exec ?? db())
         .delete(webhookEvents)
-        .where(sql`${webhookEvents.received_at} < ${cutoff}`)
+        // `lt`, not a raw `sql` fragment: postgres-js refuses a `Date` handed to it untouched.
+        .where(lt(webhookEvents.received_at, cutoff))
         .returning({ id: webhookEvents.id })
       return rows.length
     },
@@ -278,7 +279,11 @@ export function countFailedSince(since: Date, exec?: Exec): Promise<Result<numbe
         .select({ id: webhookEvents.id })
         .from(webhookEvents)
         .where(
-          and(eq(webhookEvents.verified, 'FAILED'), sql`${webhookEvents.received_at} >= ${since}`),
+          and(
+            eq(webhookEvents.verified, 'FAILED'),
+            // `gte`, not a raw `sql` fragment — postgres-js refuses a `Date` handed to it untouched.
+            gte(webhookEvents.received_at, since),
+          ),
         )
       return rows.length
     },

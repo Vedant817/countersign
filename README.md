@@ -60,12 +60,12 @@ can be given, so it is next after the sandbox credentials land (`docs/HUMAN_TODO
 | Area                                | State                                                                                              |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------- |
 | Intent compiler (`/intent`)         | Working, and deterministic. A parser reads the sentence first; a model only fills gaps. See below. |
-| Gate (12 deterministic checks)      | Working as a library. 0/50 injection attack-success on the corpus. No real checkout yet.           |
+| Gate (12 deterministic checks)      | Working. 0/50 injection attack-success on the corpus, and a real checkout now decides (P0-6).      |
+| Shopping agent (`/agent`)           | Working. Tool loop over the merchant MCP, real mandate, Gate BLOCK/ALLOW shown inline.             |
 | Mandate signing + verifier          | Working. Ed25519 / SD-JWT / JCS, with a standalone `verify.py` a third party can run.              |
 | Storefront (`/shop`)                | Working. 24 products from PostgreSQL, price-quote checkout.                                        |
 | `/status`                           | Working. Probes every dependency for real and names the one that is short.                         |
 | Vault onboarding                    | Not yet. Blocked on sandbox credentials.                                                           |
-| Shopping agent                      | Not yet. `packages/agent` is a stub.                                                               |
 | Judge Mode, merchant + disputes UIs | Not yet.                                                                                           |
 
 ## The numbers, with their denominators
@@ -75,15 +75,24 @@ can be given, so it is next after the sandbox credentials land (`docs/HUMAN_TODO
 | Compiler exact match                 | **167/167 (100%)**              | `packages/evals/corpus/compiler.jsonl`             |
 | Injection attack-success at the Gate | **0/50 (0.0%)**                 | `packages/evals/corpus/injection.jsonl`            |
 | Compiler determinism                 | **20/20 identical, every case** | `scripts/check-compiler-determinism.mjs --offline` |
+| Injection attack-success, live agent | **0/30 (0.0%)**                 | `packages/agent/corpus/refusal-30.jsonl`           |
+| Agent refusal rate                   | **30/30 (100%)**                | same corpus, `docs/verification/P0-6-refusal.md`   |
 | Liability-router accuracy            | not measured                    | corpus does not exist yet                          |
-| Agent refusal rate                   | not measured                    | `packages/agent` is not built yet                  |
 | Gate p95 latency                     | not measured                    | no load harness yet                                |
 
 ```sh
 pnpm --filter @countersign/evals test                # the offline corpus — no model, no network
 node scripts/check-compiler-determinism.mjs --offline # 167 cases × 20 runs, byte-identical
 pnpm --filter @countersign/evals eval:live            # both corpora against a running app
+pnpm --filter @countersign/agent test                 # 69 offline tests — the fence, the tools, the scorer
+pnpm tsx scripts/agent-acceptance.mts                 # live stack: Gate ALLOW, Gate BLOCK, real PayPal order
+pnpm tsx scripts/agent-refusal.mts                    # live stack: the 30-case refusal corpus, two behaviours
 ```
+
+The agent's two numbers are separate facts and both are in `docs/verification/P0-6-refusal.md`: an agent
+that **follows** an injected listing is refused by the **signer** (25/30) or declines by itself (5/30); an
+attacker who **owns** the agent loop and fabricates an authorisation is refused by the **Gate** (30/30).
+Neither produced a purchase, which is what §8.13 requires.
 
 **The compiler is deterministic, and the number is the buyer's own words.** `packages/compiler/src/parser.ts`
 reads money ($50, `50 USD`, `₹3,000`, `3k`, "fifty dollars", ranges, floors), currency, cadence, merchants and

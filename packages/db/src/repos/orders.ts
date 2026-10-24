@@ -223,7 +223,7 @@ export function findOrdersForReconcile(
         .from(orders)
         .where(
           and(
-            sql`${orders.updated_at} >= ${updatedSince}`,
+            sql`${orders.updated_at} >= ${updatedSince.toISOString()}`,
             sql`${orders.status} not in ('CAPTURED','VOIDED','CANCELLED','PAYMENT_FAILED','AUTH_EXPIRED','DECLINED')`,
           ),
         )
@@ -308,7 +308,7 @@ export function findAuthorizationsExpiring(
         .where(
           and(
             eq(authorizations.status, status),
-            sql`${authorizations.expiration_time} <= ${before}`,
+            sql`${authorizations.expiration_time} <= ${before.toISOString()}`,
           ),
         )
         .orderBy(authorizations.expiration_time)

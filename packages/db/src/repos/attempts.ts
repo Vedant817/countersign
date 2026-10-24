@@ -13,7 +13,7 @@
  * the SELECT and the INSERT in which two identical submissions both see "not present" — and that
  * window is exactly what an automated retrier is good at finding.
  */
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
 
 import type { AttemptId, CheckoutId, CsError, MandateId, Result } from '@countersign/core'
 
@@ -222,7 +222,10 @@ export function countRecentAttempts(
         .where(
           and(
             eq(checkoutAttempts.mandate_id, mandateId),
-            sql`${checkoutAttempts.created_at} >= ${since}`,
+            // `gte`, not a raw `sql` fragment: a `Date` embedded directly is handed to postgres-js
+            // untouched, and it refuses one ("The string argument must be of type string or an instance
+            // of Buffer or ArrayBuffer"). `gte` routes it through the timestamp column's encoder.
+            gte(checkoutAttempts.created_at, since),
           ),
         )
       return rows.length
@@ -286,7 +289,8 @@ export function findStaleAttempts(
         .from(checkoutAttempts)
         .where(
           and(
-            sql`${checkoutAttempts.created_at} < ${olderThan}`,
+            // `lt`, not a raw `sql` fragment — see `countRecentAttempts`.
+            lt(checkoutAttempts.created_at, olderThan),
             sql`${checkoutAttempts.state} in ('GATED_ALLOW','CREATED')`,
           ),
         )
