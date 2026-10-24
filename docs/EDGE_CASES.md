@@ -6,7 +6,7 @@
      tree by scripts/ec-coverage.mjs. Edit `status`, `blockedReason` and `notes` in
      docs/edge-cases.json, then run `pnpm test:ec`. -->
 
-_Generated 2026-10-24 21:58Z._
+_Generated 2026-10-24 22:11Z._
 
 | Metric | Value |
 |---|---|
