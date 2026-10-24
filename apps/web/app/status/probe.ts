@@ -79,6 +79,15 @@ export interface StatusReport {
     readonly nodeEnv: string | null
     readonly paypalEnv: string | null
     readonly sandboxOnly: boolean
+    /**
+     * `true` only when `PAYPAL_ENV` is **set to something other than `sandbox`** — the EC-ENV-1 case
+     * the boot check exists for.
+     *
+     * Kept apart from `!sandboxOnly`, which is also true when the variable is absent. An unset
+     * `PAYPAL_ENV` means PayPal is not configured, not that the process ignored a refusal, and a page
+     * that says "boot should have refused" about a running process teaches the reader to distrust it.
+     */
+    readonly paypalEnvRejected: boolean
   }
   readonly dependencies: readonly DependencyProbe[]
   readonly webhook: {
