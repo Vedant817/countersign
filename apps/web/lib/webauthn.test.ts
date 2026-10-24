@@ -128,9 +128,7 @@ describe('EC-FAM-1: signing a mandate demands a passkey user-verification, not j
     expect(options?.rpId).toBe('countersign.example')
     // The assertion names the credential the UI believes it holds, decoded from the stored id.
     const allow = options?.allowCredentials?.[0]?.id
-    expect(allow === undefined ? [] : toNumbers(allow)).toEqual([
-      ...base64UrlToBytes('cred-1'),
-    ])
+    expect(allow === undefined ? [] : toNumbers(allow)).toEqual([...base64UrlToBytes('cred-1')])
     // A 32-byte SHA-256 digest of the caller's string — the same string the server will verify against.
     const digest = new Uint8Array(
       await crypto.subtle.digest('SHA-256', new TextEncoder().encode('the L2 signing input')),
@@ -151,7 +149,9 @@ describe('EC-FAM-1: signing a mandate demands a passkey user-verification, not j
     const credentials = fakeCredentials()
     installBrowser(credentials)
     store.set(USER_ID, { userId: USER_ID, credentialId: 'cred-1' })
-    credentials.get.mockRejectedValue(new DOMException('user dismissed the ceremony', 'NotAllowedError'))
+    credentials.get.mockRejectedValue(
+      new DOMException('user dismissed the ceremony', 'NotAllowedError'),
+    )
 
     await expect(stepUp(USER_ID, 'the L2 signing input')).resolves.toBeNull()
   })

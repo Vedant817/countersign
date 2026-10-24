@@ -207,10 +207,12 @@ async function seedWorld(tx: Tx): Promise<void> {
       enc_private_key: Buffer.from('ciphertext'),
     },
   ])
-  await tx.insert(mandates).values([
-    mandateValues(MANDATE, '1', USER, DEVICE, AGENT, WALLET),
-    mandateValues(MANDATE_B, '2', USER_B, DEVICE_B, AGENT_B, WALLET_B),
-  ])
+  await tx
+    .insert(mandates)
+    .values([
+      mandateValues(MANDATE, '1', USER, DEVICE, AGENT, WALLET),
+      mandateValues(MANDATE_B, '2', USER_B, DEVICE_B, AGENT_B, WALLET_B),
+    ])
   await tx.insert(checkoutSessions).values({
     id: SESSION,
     merchant_id: 'mrc_e2e',
@@ -231,168 +233,174 @@ afterAll(async () => {
   await closeDb()
 })
 
-describe.skipIf(!hasDatabase)('EC-BUY-6: the serial-disputer count is per wallet and per window', () => {
-  it("EC-BUY-6: counts a wallet's disputes in the window, and only that wallet's", async () => {
-    const built = await inTx(async (tx) => {
-      await seedWorld(tx)
+describe.skipIf(!hasDatabase)(
+  'EC-BUY-6: the serial-disputer count is per wallet and per window',
+  () => {
+    it("EC-BUY-6: counts a wallet's disputes in the window, and only that wallet's", async () => {
+      const built = await inTx(async (tx) => {
+        await seedWorld(tx)
 
-      // Wallet A: three disputes — 10, 40 and 100 days old. Wallet B: one, 5 days old.
-      const history = [
-        { mandate: MANDATE, agent: AGENT, n: 1, at: daysAgo(10) },
-        { mandate: MANDATE, agent: AGENT, n: 2, at: daysAgo(40) },
-        { mandate: MANDATE, agent: AGENT, n: 3, at: daysAgo(100) },
-        { mandate: MANDATE_B, agent: AGENT_B, n: 4, at: daysAgo(5) },
-      ]
-      for (const h of history) {
-        const attempt = id('att', h.n)
-        const order = id('ord', h.n)
-        await tx.insert(checkoutAttempts).values({
-          id: attempt,
-          mandate_id: h.mandate,
-          agent_id: h.agent,
-          checkout_session_id: SESSION,
-          l3a: `l3a.e2e.${h.n}`,
-          l3b: `l3b.e2e.${h.n}`,
-          l3_jti: `jti-${P}${h.n}`,
-          idempotency_key: `idem-${P}${h.n}`,
-          amount_minor: 1_000n,
-          currency: 'USD',
-          payee: 'mrc_e2e',
-        })
-        await tx.insert(orders).values({
-          id: order,
-          attempt_id: attempt,
-          paypal_order_id: `PP-ORDER-${P}${h.n}`,
-          intent: 'CAPTURE',
-          custom_id: `cs1:${'A'.repeat(43)}`,
-          invoice_id: `INV-${P}${h.n}`,
-          status: 'CAPTURED',
-          amount_minor: 1_000n,
-          currency: 'USD',
-        })
-        await tx.insert(disputes).values({
-          id: id('dsp', h.n),
-          paypal_dispute_id: `PP-D-E2E-${h.n}`,
-          order_id: order,
-          reason: 'UNAUTHORISED',
-          stage: 'CHARGEBACK',
-          status: 'WAITING_FOR_SELLER_RESPONSE',
-          amount_minor: 1_000n,
-          currency: 'USD',
-          created_at: h.at,
-          updated_at: h.at,
-        })
-      }
+        // Wallet A: three disputes — 10, 40 and 100 days old. Wallet B: one, 5 days old.
+        const history = [
+          { mandate: MANDATE, agent: AGENT, n: 1, at: daysAgo(10) },
+          { mandate: MANDATE, agent: AGENT, n: 2, at: daysAgo(40) },
+          { mandate: MANDATE, agent: AGENT, n: 3, at: daysAgo(100) },
+          { mandate: MANDATE_B, agent: AGENT_B, n: 4, at: daysAgo(5) },
+        ]
+        for (const h of history) {
+          const attempt = id('att', h.n)
+          const order = id('ord', h.n)
+          await tx.insert(checkoutAttempts).values({
+            id: attempt,
+            mandate_id: h.mandate,
+            agent_id: h.agent,
+            checkout_session_id: SESSION,
+            l3a: `l3a.e2e.${h.n}`,
+            l3b: `l3b.e2e.${h.n}`,
+            l3_jti: `jti-${P}${h.n}`,
+            idempotency_key: `idem-${P}${h.n}`,
+            amount_minor: 1_000n,
+            currency: 'USD',
+            payee: 'mrc_e2e',
+          })
+          await tx.insert(orders).values({
+            id: order,
+            attempt_id: attempt,
+            paypal_order_id: `PP-ORDER-${P}${h.n}`,
+            intent: 'CAPTURE',
+            custom_id: `cs1:${'A'.repeat(43)}`,
+            invoice_id: `INV-${P}${h.n}`,
+            status: 'CAPTURED',
+            amount_minor: 1_000n,
+            currency: 'USD',
+          })
+          await tx.insert(disputes).values({
+            id: id('dsp', h.n),
+            paypal_dispute_id: `PP-D-E2E-${h.n}`,
+            order_id: order,
+            reason: 'UNAUTHORISED',
+            stage: 'CHARGEBACK',
+            status: 'WAITING_FOR_SELLER_RESPONSE',
+            amount_minor: 1_000n,
+            currency: 'USD',
+            created_at: h.at,
+            updated_at: h.at,
+          })
+        }
 
-      return {
-        wallet90: unwrap(
-          await countDisputesForWalletSince(WALLET, daysAgo(90), tx),
-          'count failed',
-        ),
-        wallet30: unwrap(
-          await countDisputesForWalletSince(WALLET, daysAgo(30), tx),
-          'count failed',
-        ),
-        walletAll: unwrap(
-          await countDisputesForWalletSince(WALLET, daysAgo(365), tx),
-          'count failed',
-        ),
-        otherWallet: unwrap(
-          await countDisputesForWalletSince(WALLET_B, daysAgo(90), tx),
-          'count failed',
-        ),
-        stranger: unwrap(
-          await countDisputesForWalletSince(id('wal', 99), daysAgo(90), tx),
-          'count failed',
-        ),
-      }
-    })
-
-    // The 90-day window drops the 100-day-old dispute: 2, not 3.
-    expect(built.wallet90).toBe(2)
-    // The 30-day window drops the 40-day one too: 1.
-    expect(built.wallet30).toBe(1)
-    // Everything inside a year: 3 — which is ≥3, the figure the S-17 flag reads.
-    expect(built.walletAll).toBe(3)
-    // **Per wallet, not global**: the other buyer's dispute is not counted here.
-    expect(built.otherWallet).toBe(1)
-    // A wallet with no disputes has no rows and therefore 0 — not an error, not a null.
-    expect(built.stranger).toBe(0)
-  })
-})
-
-describe.skipIf(!hasDatabase)('EC-AGT-4: rotation retains the old key row and records the chain', () => {
-  it('marks the predecessor REVOKED instead of deleting it, and links the new key to it', async () => {
-    const r = await inTx(async (tx) => {
-      await cleanup(tx)
-      await tx.insert(users).values({
-        id: USER,
-        persona: 'BUYER',
-        display_name: 'E2E buyer',
-        email: 'e2e-rotate@example.test',
-        country: 'US',
+        return {
+          wallet90: unwrap(
+            await countDisputesForWalletSince(WALLET, daysAgo(90), tx),
+            'count failed',
+          ),
+          wallet30: unwrap(
+            await countDisputesForWalletSince(WALLET, daysAgo(30), tx),
+            'count failed',
+          ),
+          walletAll: unwrap(
+            await countDisputesForWalletSince(WALLET, daysAgo(365), tx),
+            'count failed',
+          ),
+          otherWallet: unwrap(
+            await countDisputesForWalletSince(WALLET_B, daysAgo(90), tx),
+            'count failed',
+          ),
+          stranger: unwrap(
+            await countDisputesForWalletSince(id('wal', 99), daysAgo(90), tx),
+            'count failed',
+          ),
+        }
       })
 
-      const oldId = AGENT as AgentId
-      const newId = id('agt', 2) as AgentId
-      const created = unwrap(
-        await createAgent(
-          { id: oldId, user_id: USER, name: 'e2e agent', public_jwk: {}, kid: `kid-${P}old` },
-          Buffer.from('ciphertext-old'),
-          tx,
-        ),
-        'createAgent failed',
-      )
-      expect(created.status).toBe('ACTIVE')
-
-      const next = unwrap(
-        await rotateAgentKey(
-          oldId,
-          {
-            id: newId,
-            user_id: USER,
-            name: 'e2e agent (rotated)',
-            public_jwk: {},
-            kid: `kid-${P}new`,
-          },
-          Buffer.from('ciphertext-new'),
-          NOW,
-          tx,
-        ),
-        'rotateAgentKey failed',
-      )
-
-      return {
-        next,
-        predecessor: unwrap(await findAgentById(oldId, tx), 'findAgentById failed'),
-        byKid: unwrap(await findAgentByKid(`kid-${P}new`, tx), 'findAgentByKid failed'),
-      }
+      // The 90-day window drops the 100-day-old dispute: 2, not 3.
+      expect(built.wallet90).toBe(2)
+      // The 30-day window drops the 40-day one too: 1.
+      expect(built.wallet30).toBe(1)
+      // Everything inside a year: 3 — which is ≥3, the figure the S-17 flag reads.
+      expect(built.walletAll).toBe(3)
+      // **Per wallet, not global**: the other buyer's dispute is not counted here.
+      expect(built.otherWallet).toBe(1)
+      // A wallet with no disputes has no rows and therefore 0 — not an error, not a null.
+      expect(built.stranger).toBe(0)
     })
+  },
+)
 
-    // The new key is ACTIVE and names its predecessor, so the rotation chain can be walked.
-    expect(r.next.status).toBe('ACTIVE')
-    expect(r.next.rotated_from).toBe(AGENT)
-    expect(r.next.kid).toBe(`kid-${P}new`)
+describe.skipIf(!hasDatabase)(
+  'EC-AGT-4: rotation retains the old key row and records the chain',
+  () => {
+    it('marks the predecessor REVOKED instead of deleting it, and links the new key to it', async () => {
+      const r = await inTx(async (tx) => {
+        await cleanup(tx)
+        await tx.insert(users).values({
+          id: USER,
+          persona: 'BUYER',
+          display_name: 'E2E buyer',
+          email: 'e2e-rotate@example.test',
+          country: 'US',
+        })
 
-    // **The old row is retained, not deleted**, because past L3s signed by that `kid` must stay
-    // resolvable: an evidence packet whose agent row had vanished would be unverifiable, which is the
-    // opposite of what this project is for. It is REVOKED, so the old key cannot sign anything new.
-    expect(r.predecessor).toBeDefined()
-    expect(r.predecessor?.status).toBe('REVOKED')
-    expect(r.predecessor?.updated_at.getTime()).toBe(NOW.getTime())
+        const oldId = AGENT as AgentId
+        const newId = id('agt', 2) as AgentId
+        const created = unwrap(
+          await createAgent(
+            { id: oldId, user_id: USER, name: 'e2e agent', public_jwk: {}, kid: `kid-${P}old` },
+            Buffer.from('ciphertext-old'),
+            tx,
+          ),
+          'createAgent failed',
+        )
+        expect(created.status).toBe('ACTIVE')
 
-    // The Gate resolves an L3 by `kid`, and the new key is the one that answers.
-    expect(r.byKid?.id).toBe(id('agt', 2))
+        const next = unwrap(
+          await rotateAgentKey(
+            oldId,
+            {
+              id: newId,
+              user_id: USER,
+              name: 'e2e agent (rotated)',
+              public_jwk: {},
+              kid: `kid-${P}new`,
+            },
+            Buffer.from('ciphertext-new'),
+            NOW,
+            tx,
+          ),
+          'rotateAgentKey failed',
+        )
 
-    /**
-     * **Not asserted, deliberately:** the spec's row says *"old mandates keep the old key until
-     * expiry"*. Gate check 2 (`packages/gate/src/checks.ts:513`) refuses any agent whose status is not
-     * `ACTIVE`, and this function has just set the predecessor to `REVOKED` — so a mandate still bound
-     * to the old key cannot be spent. That conflict between the spec sentence and the implementation is
-     * recorded in `docs/contract-issues.md` rather than papered over with a test that guesses.
-     */
-  })
-})
+        return {
+          next,
+          predecessor: unwrap(await findAgentById(oldId, tx), 'findAgentById failed'),
+          byKid: unwrap(await findAgentByKid(`kid-${P}new`, tx), 'findAgentByKid failed'),
+        }
+      })
+
+      // The new key is ACTIVE and names its predecessor, so the rotation chain can be walked.
+      expect(r.next.status).toBe('ACTIVE')
+      expect(r.next.rotated_from).toBe(AGENT)
+      expect(r.next.kid).toBe(`kid-${P}new`)
+
+      // **The old row is retained, not deleted**, because past L3s signed by that `kid` must stay
+      // resolvable: an evidence packet whose agent row had vanished would be unverifiable, which is the
+      // opposite of what this project is for. It is REVOKED, so the old key cannot sign anything new.
+      expect(r.predecessor).toBeDefined()
+      expect(r.predecessor?.status).toBe('REVOKED')
+      expect(r.predecessor?.updated_at.getTime()).toBe(NOW.getTime())
+
+      // The Gate resolves an L3 by `kid`, and the new key is the one that answers.
+      expect(r.byKid?.id).toBe(id('agt', 2))
+
+      /**
+       * **Not asserted, deliberately:** the spec's row says *"old mandates keep the old key until
+       * expiry"*. Gate check 2 (`packages/gate/src/checks.ts:513`) refuses any agent whose status is not
+       * `ACTIVE`, and this function has just set the predecessor to `REVOKED` — so a mandate still bound
+       * to the old key cannot be spent. That conflict between the spec sentence and the implementation is
+       * recorded in `docs/contract-issues.md` rather than papered over with a test that guesses.
+       */
+    })
+  },
+)
 
 describe.skipIf(!hasDatabase)('the money readers execute and return BigInts', () => {
   it('sumEntriesByKind → computeFromEntries survives a real reservation, and the totals are BigInts', async () => {
