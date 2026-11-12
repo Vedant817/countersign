@@ -30,7 +30,15 @@ import {
   type VerifierStore,
 } from '@countersign/verifier'
 import type { DisputeRow, EvidencePacketRow } from '@countersign/db'
-import { logger, ok, systemClock, type Clock } from '@countersign/core'
+import {
+  currency,
+  formatMoney,
+  logger,
+  money,
+  ok,
+  systemClock,
+  type Clock,
+} from '@countersign/core'
 import {
   DEMO_PACKET_IDS,
   demoCaseForPacketId,
@@ -89,7 +97,9 @@ export default async function DemoVerifier({ packetId }: { packetId: string }) {
     store: demoStore(),
     vi: {
       publicVerify: () => {
-        throw new Error('the demo packet page performs no live verification — see the SIMULATED note')
+        throw new Error(
+          'the demo packet page performs no live verification — see the SIMULATED note',
+        )
       },
     },
     publicBaseUrl: base,
@@ -151,8 +161,8 @@ export default async function DemoVerifier({ packetId }: { packetId: string }) {
         <p className="mt-2">
           No “Verify now” button here: that button re-verifies the signed chain with the live
           verification service, and this fixture packet does not carry a signed chain. A real filing
-          would. Checks that only apply to a fully signed filing are omitted here rather than shown as
-          failures — the bundle integrity checks below are real and recomputed.
+          would. Checks that only apply to a fully signed filing are omitted here rather than shown
+          as failures — the bundle integrity checks below are real and recomputed.
         </p>
       </div>
 
@@ -170,13 +180,15 @@ export default async function DemoVerifier({ packetId }: { packetId: string }) {
         <div className="flex gap-2">
           <dt className="w-32 shrink-0 text-ink-soft">amount</dt>
           <dd className="font-mono">
-            ${(Number(report.amount.minor) / 100).toFixed(2)} {report.amount.currency}
+            ${formatMoney(money(report.amount.minor, currency(report.amount.currency)))}
           </dd>
         </div>
         <div className="flex gap-2">
           <dt className="w-32 shrink-0 text-ink-soft">filed at</dt>
           <dd className="font-mono">
-            {packet.filedAtSec === null ? 'not filed (demo)' : new Date(packet.filedAtSec * 1000).toISOString()}
+            {packet.filedAtSec === null
+              ? 'not filed (demo)'
+              : new Date(packet.filedAtSec * 1000).toISOString()}
           </dd>
         </div>
       </dl>
@@ -208,9 +220,8 @@ export default async function DemoVerifier({ packetId }: { packetId: string }) {
       </section>
 
       <p className="mt-8 text-xs text-ink-soft">
-        The published bundle digest is{' '}
-        <span className="font-mono">{redacted.bundle_hash}</span> (SHA-256 over the RFC 8785
-        canonical form). The QR on the PDF pointed here:{' '}
+        The published bundle digest is <span className="font-mono">{redacted.bundle_hash}</span>{' '}
+        (SHA-256 over the RFC 8785 canonical form). The QR on the PDF pointed here:{' '}
         <span className="font-mono">{publicPacketUrl(base, packetId)}</span>. Back to{' '}
         <Link href="/disputes" className="underline">
           the two cases

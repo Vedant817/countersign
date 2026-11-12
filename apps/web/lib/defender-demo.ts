@@ -32,7 +32,7 @@ import 'server-only'
  * attribute record the API would need — the same stand-in `test/router.test.ts` uses.
  */
 
-import { systemClock, type Clock } from '@countersign/core'
+import { formatMoney, money, systemClock, type Clock } from '@countersign/core'
 import {
   buildDisputeContext,
   checkCitations,
@@ -117,9 +117,7 @@ const BUNDLE: EvidenceBundle = {
     capture_ids: [PP_CAPTURE_ID],
     custom_id: CUSTOM_ID,
   },
-  shipments: [
-    { carrier: 'DHL', tracking: 'JD0002000031', lines: [{ sku: 'NW-001', qty: 1 }] },
-  ],
+  shipments: [{ carrier: 'DHL', tracking: 'JD0002000031', lines: [{ sku: 'NW-001', qty: 1 }] }],
 }
 
 const READBACK =
@@ -222,17 +220,16 @@ function caseWorld(id: DefenderCaseId, nowSec: number): CaseWorld {
     webauthn: { present: true, at: nowSec - 3 * 86_400 },
     paypal: { ...BUNDLE.paypal!, custom_id: '' },
   }
-  const customId = customIdForBundle(bundleCore as unknown as Readonly<Record<string, unknown>>) ?? CUSTOM_ID
+  const customId =
+    customIdForBundle(bundleCore as unknown as Readonly<Record<string, unknown>>) ?? CUSTOM_ID
   const bundle: EvidenceBundle = {
     ...bundleCore,
     paypal: { ...bundleCore.paypal!, custom_id: customId },
   }
   const at = (sec: number) => new Date(sec * 1000)
 
-  const paypalDisputeId =
-    id === 'unauthorised' ? 'PP-D-DEMO28701UNAUTH' : 'PP-D-DEMO28702SNAD'
-  const reason =
-    id === 'unauthorised' ? 'UNAUTHORISED' : 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED'
+  const paypalDisputeId = id === 'unauthorised' ? 'PP-D-DEMO28701UNAUTH' : 'PP-D-DEMO28702SNAD'
+  const reason = id === 'unauthorised' ? 'UNAUTHORISED' : 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED'
 
   const disputeRow = {
     id: derivedDisputeId(paypalDisputeId),
@@ -494,7 +491,9 @@ function packetFontBytes(): Uint8Array {
   ]
   for (const relative of candidates) {
     try {
-      return new Uint8Array(readFileSync(new URL(`file://${resolve(process.cwd(), relative).replaceAll('\\', '/')}`)))
+      return new Uint8Array(
+        readFileSync(new URL(`file://${resolve(process.cwd(), relative).replaceAll('\\', '/')}`)),
+      )
     } catch {
       // try the next candidate
     }
@@ -519,16 +518,18 @@ export async function renderDefenderCase(
   if (row === undefined) throw new Error(`demo dispute ${world.disputeId} is not in the world`)
 
   const ctxResult = await buildDisputeContext(row, undefined, deps)
-  if (!ctxResult.ok) throw new Error(`buildDisputeContext: ${ctxResult.error.code} ${ctxResult.error.message}`)
+  if (!ctxResult.ok)
+    throw new Error(`buildDisputeContext: ${ctxResult.error.code} ${ctxResult.error.message}`)
   const ctx = { ...ctxResult.value }
 
   // The agent-fault override: see this file's header. Everything else in the context is what the
   // real ingest produced from the fixture rows.
   if (id === 'agent-fault') {
-    ;(ctx as { disputedItem?: { sku: string; attributes: Record<string, string> } }).disputedItem = {
-      sku: 'NW-001',
-      attributes: { size: '9' },
-    }
+    ;(ctx as { disputedItem?: { sku: string; attributes: Record<string, string> } }).disputedItem =
+      {
+        sku: 'NW-001',
+        attributes: { size: '9' },
+      }
   }
 
   const decision: LiabilityDecision = route(ctx)
@@ -542,7 +543,7 @@ export async function renderDefenderCase(
       reason: row.reason,
       stage: row.stage,
       status: row.status,
-      amount: `$${(Number(AMOUNT_MINOR) / 100).toFixed(2)} ${CURRENCY}`,
+      amount: `$${formatMoney(money(AMOUNT_MINOR, CURRENCY))}`,
       opened: new Date(world.openedSec * 1000).toISOString(),
       responseDue: new Date(world.dueSec * 1000).toISOString(),
     },
@@ -609,7 +610,9 @@ export async function renderDefenderCase(
       )
     }
   } else {
-    console.warn('[defender-demo] no model provider configured — using the deterministic template (EC-LLM-1)')
+    console.warn(
+      '[defender-demo] no model provider configured — using the deterministic template (EC-LLM-1)',
+    )
   }
 
   let finalDraft: Draft
@@ -621,7 +624,9 @@ export async function renderDefenderCase(
     const template = templateNote(draftInput, claims, url)
     const verdict = checkCitations({ notes: template }, claims, { allowedUrl: url })
     if (!verdict.ok) {
-      throw new Error(`even the template failed the citation checker: ${JSON.stringify(verdict.problems?.[0] ?? {})}`)
+      throw new Error(
+        `even the template failed the citation checker: ${JSON.stringify(verdict.problems?.[0] ?? {})}`,
+      )
     }
     finalDraft = {
       notes: plainNotes(template),
@@ -670,7 +675,8 @@ export async function renderDefenderCase(
     clock: { nowSec: () => nowSec, nowMs: () => nowSec * 1000 },
     fontBytes: packetFontBytes(),
   })
-  if (!pdfResult.ok) throw new Error(`renderPacketPdf: ${pdfResult.error.code} ${pdfResult.error.message}`)
+  if (!pdfResult.ok)
+    throw new Error(`renderPacketPdf: ${pdfResult.error.code} ${pdfResult.error.message}`)
   const pdf: RenderedPacket = pdfResult.value
 
   const out: RenderedCase = {
@@ -718,7 +724,11 @@ export async function renderDefenderCase(
  */
 export async function demoVerifierRows(
   packetId: string,
-): Promise<{ packet: Record<string, unknown>; dispute: Record<string, unknown>; bundle: EvidenceBundle } | null> {
+): Promise<{
+  packet: Record<string, unknown>
+  dispute: Record<string, unknown>
+  bundle: EvidenceBundle
+} | null> {
   const caseId = demoCaseForPacketId(packetId)
   if (caseId === null) return null
   // Rendering is idempotent and cached; awaiting it here guarantees the rows exist even when a judge
@@ -763,7 +773,8 @@ function decisionView(decision: LiabilityDecision) {
 
 /** The one sentence the buyer reads (§8.17's S-18 uses the same composer). */
 function buyerSentence(decision: LiabilityDecision): string {
-  if (decision.posture === 'REFUND') return 'We will refund you — the records show the mistake was ours to fix.'
+  if (decision.posture === 'REFUND')
+    return 'We will refund you — the records show the mistake was ours to fix.'
   return decision.rationale
 }
 
