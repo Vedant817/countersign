@@ -12,10 +12,12 @@ import base64
 import pytest
 from conftest import MERCHANT, UNIT_MINOR, error_body
 
+from vi_service.config import get_settings
 from vi_service.keys import (
     b64u_decode,
     b64u_encode,
     decrypt_private_key,
+    derive_signing_key,
     encrypt_private_key,
     get_keystore,
     rfc7638_thumbprint,
@@ -79,6 +81,87 @@ def test_AT_M3_9_rotating_the_issuer_keeps_the_old_key_in_jwks(client, auth: dic
     assert by_kid[old_issuer["kid"]]["status"] == "RETIRED"
     assert by_kid[body["new_kid"]]["status"] == "ACTIVE"
     assert by_kid[old_issuer["kid"]]["retired_at"] > 0
+
+
+# --- the network keys survive a restart (P0) ------------------------------------------------------
+
+
+def _public_jwk_of(kid: str) -> dict[str, object]:
+    entry = get_keystore().get(kid)
+    assert entry is not None, f"JWKS must resolve {kid}"
+    return entry.public_jwk
+
+
+def test_P0_the_issuer_key_is_the_same_after_a_restart(client) -> None:
+    """A signature made before a restart verifies after it.
+
+    This is the P0 the audit found: `_boot` used to call `generate_es256_key()`, so a restarted
+    vi published a *different* public key under the *same* `kid` and every artefact issued earlier
+    stopped verifying. Nothing in the service could tell a verifier which key to use instead, which
+    made EC-KEY-2/EC-KEY-3 structurally unreachable.
+    """
+    settings = get_settings()
+    before = _public_jwk_of(settings.issuer_kid)
+
+    # A restart: forget everything the process held, then rebuild from the same environment.
+    from vi_service import keys as keys_module
+
+    keys_module.reset_keystore()
+    get_keystore()
+
+    after = _public_jwk_of(settings.issuer_kid)
+    assert after["x"] == before["x"] and after["y"] == before["y"]
+
+
+def test_P0_the_merchant_key_is_the_same_after_a_restart(client) -> None:
+    """The price-locked checkout JWT has the same property, and the same failure mode."""
+    settings = get_settings()
+    before = _public_jwk_of(settings.merchant_kid)
+
+    from vi_service import keys as keys_module
+
+    keys_module.reset_keystore()
+    get_keystore()
+
+    after = _public_jwk_of(settings.merchant_kid)
+    assert after["x"] == before["x"] and after["y"] == before["y"]
+
+
+def test_P0_a_different_kek_gives_a_different_issuer_key() -> None:
+    """Derivation must actually depend on the KEK, not just be deterministic."""
+    kek = get_settings().kek_b64
+    other = base64.b64encode(bytes(32)).decode("ascii")  # all-zero 32 bytes is a different KEK
+
+    first = derive_signing_key(kek, "ISSUER")
+    second = derive_signing_key(other, "ISSUER")
+
+    first_jwk = {
+        member: getattr(first.private_numbers().public_numbers, member)
+        for member in ("x", "y")
+    }
+    second_jwk = {
+        member: getattr(second.private_numbers().public_numbers, member)
+        for member in ("x", "y")
+    }
+    assert first_jwk != second_jwk
+
+
+def test_P0_the_two_roles_never_share_a_key() -> None:
+    """One label per role: an issuer key must not also be the merchant key."""
+    kek = get_settings().kek_b64
+    issuer = derive_signing_key(kek, "ISSUER")
+    merchant = derive_signing_key(kek, "MERCHANT")
+
+    issuer_numbers = issuer.private_numbers()
+    merchant_numbers = merchant.private_numbers()
+    assert issuer_numbers.private_value != merchant_numbers.private_value
+
+
+def test_P0_only_the_two_network_keys_are_derived() -> None:
+    """An AGENT key is per-agent and random; a derived agent key would be a shared secret."""
+    kek = get_settings().kek_b64
+    with pytest.raises(ValueError):
+        derive_signing_key(kek, "AGENT")
 
 
 def test_AT_M3_9_jwks_needs_no_bearer_token_but_the_rest_do(client) -> None:

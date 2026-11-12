@@ -380,3 +380,20 @@ WP-06s and everything needing live sandbox is not started.
   New tests: `apps/web/lib/defender-demo.test.ts` (artefact shape + no `[object Object]` + one currency
   symbol) and `packages/agent/test/readback-summary.test.ts` (structural heading rule against a real
   `readBack()` output, truncation, empty read-back).
+
+- **2026-11-13 (IST)** - **Signing keys survive a restart (P0, `prod/real-users` §3).** vi minted a fresh
+  ISSUER and MERCHANT key at every boot under an unchanged `kid`, so `GET /v1/jwks` published a *different*
+  public key after a restart and anything issued before it stopped verifying; EC-KEY-2/EC-KEY-3 were
+  structurally unreachable and the `jwks_keys` mirror silently followed. Both network keys are now derived
+  deterministically from `VI_KEK` with HKDF-SHA256, one `info` label per role (`derive_signing_key`) - vi
+  stays stateless, adds no datastore, and `VI_KEK` is already its root of trust because agent private keys
+  are encrypted under it. A missing or malformed KEK is now refused with `CS_VALIDATION` rather than
+  replaced by a random key. `scripts/dev-local.mjs` no longer overwrites an operator-configured
+  `VI_KEK`, `VI_SERVICE_TOKEN`, `SESSION_SECRET` or `GATE_SIGNING_KEY` with `randomBytes(...)` on every
+  launch; it prefers the configured value and **prints which** ones it had to generate, because that is the
+  case where a restart invalidates earlier evidence. `GATE_SIGNING_KEY` was the same defect one file over:
+  every `gate_decisions` row became unverifiable when the dev server restarted.
+  **Measured, not asserted:** two real uvicorn processes with the same KEK publish the same JWKS
+  (`probe-issuer:ISSUER:Ei2JH_G45ELInLEh` both times, `identical: true`); `apps/vi` `212 passed`, with five
+  new tests (issuer and merchant stable across `reset_keystore()`, a different KEK gives a different key,
+  the two roles never share a key, `AGENT` is refused as a derivation role); `pnpm vi:lint` clean.

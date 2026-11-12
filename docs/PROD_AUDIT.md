@@ -93,9 +93,9 @@ implementation (`CENTS()` divided by 100 and prepended `$` — the same class of
 
 ---
 
-## 3. P0 - signing keys are ephemeral per process (no persistence, no rotation)
+## 3. P0 — signing keys are ephemeral per process (no persistence, no rotation) (**FIXED**)
 
-**Where.** `apps/vi/src/vi_service/keys.py` `KeyStore._boot()`:
+**Where (before).** `apps/vi/src/vi_service/keys.py` `KeyStore._boot()`:
 
 ```python
 """Mint the ISSUER and MERCHANT keys. Ephemeral by design (spec §3.1: 'in memory')."""
@@ -103,21 +103,50 @@ for role, kid in (("ISSUER", …), ("MERCHANT", …)):
     key = generate_es256_key()
 ```
 
-**Consequence.** Every restart of `countersign-vi` mints a **new** issuer and merchant key under the same
+**Consequence.** Every restart of `countersign-vi` minted a **new** issuer and merchant key under the same
 `kid`. Evidence signed before the restart cannot be verified after it: `GET /v1/jwks` publishes a
 _different_ public key under the _same_ `kid`, so a verifier resolves the kid, gets the new key, and the
 old signature fails. There is no `RETIRED` state and no `kid` change, so EC-KEY-2/EC-KEY-3 (verify after
 rotation) are structurally unreachable. `jwks_keys` in Postgres is a mirror that is refreshed per process
-(`agent-session.ts::syncViKeys`) and therefore silently follows the restart.
+(`agent-session.ts::syncViKeys`) and therefore silently followed the restart.
 
-`GATE_SIGNING_KEY` is worse: `scripts/dev-local.mjs` generates a **fresh Ed25519 key on every launch**, so
-every Gate decision record ever signed becomes unverifiable when the dev server restarts, and
-`render.yaml` sets `GATE_SIGNING_KEY` with `sync: false` (operator must invent one).
+`GATE_SIGNING_KEY` was worse: `scripts/dev-local.mjs` generated a **fresh Ed25519 key on every launch**,
+so every Gate decision record ever signed became unverifiable when the dev server restarted.
 
-**Fix shape.** Load-or-create from `VI_KEK`-derived material persisted in Postgres (issuer/merchant), never
-regenerate under an existing `kid`; keep retired public halves in `jwks_keys` with `status`. The Gate key
-must be a required, operator-supplied secret with a boot-time shape check (already validated in
-`gate-runtime.ts`), plus a documented rotation command.
+**Fix.** vi stays stateless — no datastore — and the two network keys are now **derived deterministically
+from `VI_KEK`** with HKDF-SHA256, one `info` label per role (`derive_signing_key`,
+`keys.py`). `VI_KEK` is already this service's root of trust: agent private keys are encrypted under it,
+and losing it already invalidates them. So:
+
+- same KEK → same issuer/merchant key → the same `kid`→key pair in JWKS, across restarts and replicas;
+- different KEK → a different key, provably (a zero KEK gives a different public key);
+- the two roles never share a key (one label each);
+- `AGENT` keys are still minted at random and are refused as a derivation role;
+- a missing or malformed KEK is refused at boot with `CS_VALIDATION` instead of silently replaced by a
+  random key — a random key under an existing `kid` is exactly the failure this replaced.
+
+Rotation is unchanged and still the only way to get a new `kid` (`POST /v1/keys/rotate`).
+
+The dev launcher now prefers an operator-configured `VI_KEK`, `VI_SERVICE_TOKEN`, `SESSION_SECRET` and
+`GATE_SIGNING_KEY` from `.env.local` (`secretOr`) and only generates what is absent — and it **prints
+which** were generated, because that is the case where a restart invalidates earlier evidence. Before
+this, all four were overwritten with `randomBytes(...)` on every launch, so a developer who configured
+them was silently ignored.
+
+**Verified (real output).**
+
+```
+$ node vi-restart-probe.mjs <root>     # two real uvicorn processes, same KEK
+run1: probe-issuer:ISSUER:Ei2JH_G45ELInLEh
+      probe-merchant:MERCHANT:-I_h1tjv8UW87IW7
+run2: probe-issuer:ISSUER:Ei2JH_G45ELInLEh
+      probe-merchant:MERCHANT:-I_h1tjv8UW87IW7
+identical: true
+```
+
+`apps/vi` tests: `212 passed`, including five new ones (issuer and merchant identical across
+`reset_keystore()`, a different KEK gives a different key, the two roles never share a key, `AGENT` is
+refused as a derivation role). `pnpm vi:lint` → `All checks passed!`.
 
 ---
 
@@ -223,7 +252,8 @@ deadline.
 1. **[P0]** `[object Object]` on `/disputes` + the `$$` double symbol. ✅ **done 2026-11-13** (§1)
 2. **[P0]** garbled read-back in the agent chat + show the real cap + kill `firstLine`'s hardcoded prefix.
    ✅ **done 2026-11-13** (§2)
-3. **[P0]** persistent issuer/merchant/Gate signing keys; refuse to boot on an unusable key. _(§3)_
+3. **[P0]** persistent issuer/merchant/Gate signing keys; refuse to boot on an unusable key. ✅ **done
+   2026-11-13** (§3 — derived from `VI_KEK`, two real processes compared)
 4. **[P1]** fail-loudly configuration audit: delete the `.env.local` disk fallback; `/status` reports
    every configured-off dependency the app actually uses.
 5. **[P1]** real webhook ingest route with PayPal signature verification (unblocked; needs

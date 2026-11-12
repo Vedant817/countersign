@@ -18,12 +18,35 @@ asymmetry is the whole point.
 The service does not persist anything. Agent private keys are re-created from the KEK on demand,
 which is why losing the KEK invalidates agent keys but not historical evidence: the public halves
 stay in JWKS (EC-KEY-4).
+
+## Why the ISSUER and MERCHANT keys are derived from the KEK
+
+They used to be `generate_es256_key()` at boot — a **fresh** key under the **same** `kid` on every
+process start. `GET /v1/jwks` then published a different public key under a kid that had already
+signed artefacts, so anything issued before a restart failed verification after it, and nothing in the
+service could tell a verifier which key to use instead (EC-KEY-2 and EC-KEY-3 were structurally
+unreachable).
+
+The fix keeps vi stateless and adds no datastore: the two private keys are **derived
+deterministically** from `VI_KEK` with HKDF-SHA256, one `info` label per role. The KEK is already the
+root of trust for this service (agent keys are encrypted under it, and losing it invalidates them),
+so deriving from it means:
+
+* the same KEK always produces the same issuer/merchant key, and therefore the same `kid` → key pair
+  in JWKS, across restarts and across replicas;
+* two deployments with different KEKs cannot produce the same key pair by accident;
+* rotating is still an explicit `POST /v1/keys/rotate`, which mints a **new** `kid` (a derived key
+  cannot be rotated in place without changing the kid, which is the whole point).
+
+`scripts/dev-local.mjs` generates a KEK when the operator has not configured one, so local restarts
+are still ephemeral — and it now says so out loud rather than only in a docstring.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import uuid
@@ -92,6 +115,61 @@ def rfc7638_thumbprint(jwk: dict[str, Any]) -> str:
 
 def _kek(settings: Settings) -> bytes:
     return base64.b64decode(settings.kek_b64, validate=True)
+
+
+# --- deterministic signing-key derivation --------------------------------------------------------
+
+
+def _hkdf_sha256(ikm: bytes, info: str, length: int = 32) -> bytes:
+    """RFC 5869 HKDF with SHA-256, no salt (the KEK is already high-entropy).
+
+    Written out rather than imported because §8.3's dependency set is pinned and `cryptography`
+    exposes only the primitive; this is the extract-then-expand pair and nothing else.
+    """
+    pseudo_random = hmac.new(b"countersign/vi/hkdf-salt/v1", ikm, hashlib.sha256).digest()
+    output, block, counter = b"", b"", 1
+    while len(output) < length:
+        block = hmac.new(
+            pseudo_random, block + info.encode("utf-8") + bytes([counter]), hashlib.sha256
+        ).digest()
+        output += block
+        counter += 1
+    return output[:length]
+
+
+#: P-256's group order. A derived scalar outside `[1, n-1]` is not a valid private key, so the
+#: derivation re-labels and tries again rather than reducing mod n (which would bias the key).
+_P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+
+#: Labels are part of the contract: changing one changes the key under an unchanged `kid`.
+_ISSUER_DERIVE_INFO = "countersign/vi/issuer-key/v1"
+_MERCHANT_DERIVE_INFO = "countersign/vi/merchant-key/v1"
+
+
+def derive_signing_key(kek_b64: str, role: str) -> ec.EllipticCurvePrivateKey:
+    """The deterministic ISSUER/MERCHANT private key for `role`, from the KEK.
+
+    Same KEK, same role → same key, byte for byte, in every process. That is the property that makes
+    a signature made before a restart verifiable after it (EC-KEY-2, EC-KEY-3).
+
+    Raises `ValueError` for any role other than the two network keys: an AGENT key is per-agent and
+    is minted at random (`mint_agent_key`), never derived.
+    """
+    labels = {"ISSUER": _ISSUER_DERIVE_INFO, "MERCHANT": _MERCHANT_DERIVE_INFO}
+    label = labels.get(role)
+    if label is None:
+        raise ValueError(f"only ISSUER and MERCHANT are derived from the KEK, got {role!r}")
+    if len(base64.b64decode(kek_b64, validate=True)) != 32:
+        raise ValueError("VI_KEK must be base64 of exactly 32 bytes")
+
+    kek = base64.b64decode(kek_b64, validate=True)
+    for counter in range(64):
+        candidate = int.from_bytes(
+            _hkdf_sha256(kek, f"{label}|{counter}"), "big"
+        )
+        if 1 <= candidate < _P256_ORDER:
+            return ec.derive_private_key(candidate, ec.SECP256R1())
+    raise ValueError("could not derive a P-256 scalar from the KEK in 64 attempts")
 
 
 def encrypt_private_key(kek: bytes, private_jwk: dict[str, Any], *, aad: str) -> bytes:
@@ -169,9 +247,22 @@ class KeyStore:
     # -- lifecycle ---------------------------------------------------------------------------------
 
     def _boot(self) -> None:
-        """Mint the ISSUER and MERCHANT keys. Ephemeral by design (spec §3.1: 'in memory')."""
+        """Load the ISSUER and MERCHANT keys, deterministically, from the KEK.
+
+        Not "mint": the key for a `kid` is a function of `VI_KEK` and the role, so a restarted
+        process publishes the same JWKS it published before — and evidence signed earlier still
+        verifies. A missing or malformed KEK is refused here rather than papered over with a random
+        key, because a random key under an existing `kid` is the failure this replaced.
+        """
         for role, kid in (("ISSUER", self._settings.issuer_kid), ("MERCHANT", self._settings.merchant_kid)):
-            key = generate_es256_key()
+            try:
+                key = derive_signing_key(self._settings.kek_b64, role)
+            except ValueError as exc:
+                raise errors.http_error(
+                    "CS_VALIDATION",
+                    f"Could not derive the {role} signing key: {exc}",
+                    {"role": role, "kid": kid},
+                ) from exc
             self._entries[kid] = KeyEntry(
                 kid=kid,
                 role=role,  # type: ignore[arg-type]
@@ -389,6 +480,7 @@ __all__ = [
     "b64u_decode",
     "b64u_encode",
     "decrypt_private_key",
+    "derive_signing_key",
     "encrypt_private_key",
     "get_keystore",
     "reset_keystore",

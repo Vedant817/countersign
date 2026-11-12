@@ -65,6 +65,30 @@ function readEnvFile(path) {
 
 const localEnv = readEnvFile(join(root, '.env.local'))
 
+/**
+ * A local secret: the operator's value when they configured one, otherwise a fresh one.
+ *
+ * ## Why this is not "random every launch"
+ *
+ * It used to be. `VI_KEK`, `VI_SERVICE_TOKEN`, `SESSION_SECRET` and `GATE_SIGNING_KEY` were each
+ * overwritten with `randomBytes(...)` on every launch, so a developer who set them in `.env.local`
+ * was silently ignored — and every restart minted new identities. Since vi derives its ISSUER and
+ * MERCHANT keys from `VI_KEK` (`apps/vi/src/vi_service/keys.py`), that meant a restart also changed
+ * the issuer key under an unchanged `kid`: evidence signed on Tuesday could not be verified on
+ * Wednesday, and the failure surfaced as a verifier page saying the chain did not check out.
+ *
+ * So the operator's value wins, exactly as it does for every other variable, and the generated
+ * fallback is announced rather than silent (see `generatedSecrets`).
+ */
+const generatedSecrets = []
+
+function secretOr(name, generate) {
+  const configured = localEnv[name] ?? process.env[name]
+  if (typeof configured === 'string' && configured.trim() !== '') return configured
+  generatedSecrets.push(name)
+  return generate()
+}
+
 const webPort = portFromEnv('COUNTERSIGN_WEB_PORT', 3000)
 const viPort = portFromEnv('COUNTERSIGN_VI_PORT', 8000)
 
@@ -90,13 +114,13 @@ const environment = {
   MERCHANT_NAME: 'Northwind Outfitters',
   MERCHANT_WEBSITE: 'https://northwind.countersign.test',
   VI_SERVICE_URL: `http://127.0.0.1:${viPort}`,
-  VI_SERVICE_TOKEN: randomBytes(32).toString('hex'),
-  VI_KEK: randomBytes(32).toString('base64'),
+  VI_SERVICE_TOKEN: secretOr('VI_SERVICE_TOKEN', () => randomBytes(32).toString('hex')),
+  VI_KEK: secretOr('VI_KEK', () => randomBytes(32).toString('base64')),
   VI_ISSUER_URL: 'https://issuer.countersign.test',
   VI_AGENT_ISS: 'https://agent.countersign.test',
   VI_ISSUER_KID: 'local-issuer',
   VI_MERCHANT_KID: 'local-merchant',
-  SESSION_SECRET: randomBytes(32).toString('hex'),
+  SESSION_SECRET: secretOr('SESSION_SECRET', () => randomBytes(32).toString('hex')),
   SIGNING_LAB_ENABLED: 'true',
   // The live agent demo (S-10) provisions a session and runs a whole Gate evaluation per turn, and one of
   // those steps reads vi's **public** JWKS. vi's production default is 30 requests/min/IP (`VI_PUBLIC_
@@ -104,8 +128,9 @@ const environment = {
   // minute — exhausts; the run then reports `CS_RATE_LIMITED` from a control that is working correctly.
   // Local development wants a bigger public budget; the default is left alone everywhere else.
   VI_PUBLIC_RATE_LIMIT_PER_MIN: process.env['VI_PUBLIC_RATE_LIMIT_PER_MIN'] ?? '600',
-  // Filled in `main()` once per run; declared here so the key list stays in one place.
-  GATE_SIGNING_KEY: process.env['GATE_SIGNING_KEY'] ?? generateGateSigningKey(),
+  // The Gate's decision-signing key. The operator's value wins (see `secretOr`); only a missing one is
+  // generated, and the generated set is announced at start-up.
+  GATE_SIGNING_KEY: secretOr('GATE_SIGNING_KEY', generateGateSigningKey),
   GATE_KID: process.env['GATE_KID'] ?? 'local-gate',
   PAYPAL_CLIENT_ID: '',
   PAYPAL_CLIENT_SECRET: '',
@@ -116,15 +141,16 @@ const children = []
 let stopping = false
 
 /**
- * The Gate's decision-signing key, generated per run.
+ * The Gate's decision-signing key, generated **only when the operator has not configured one**.
  *
  * **Ed25519**, matching `signDecisionRecord`'s `alg: 'EdDSA'`. An ES256 key imports cleanly and then
  * fails at the first signature, so the algorithm is part of the contract rather than an implementation
  * detail — `apps/web/lib/gate-runtime.ts` checks `kty`/`crv` before importing for exactly that reason.
  *
- * Ephemeral for the same reason VI's issuer key is: this is a local lab, and a checked-in private key
- * would be a real one the day someone copies the file. `GATE_SIGNING_KEY` is required by the runtime
- * rather than defaulted, so without this the Gate refuses — which is the behaviour under test.
+ * It used to be generated on every run, which made every `gate_decisions` row unverifiable after a
+ * restart — the same defect as vi's issuer key, one file over. `secretOr` now prefers the operator's
+ * value, so a configured `GATE_SIGNING_KEY` keeps decision records verifiable across restarts, and the
+ * generated case is announced in the start-up banner because that is the case where it is not.
  */
 function generateGateSigningKey() {
   const { privateKey } = generateKeyPairSync('ed25519')
@@ -250,9 +276,15 @@ async function main() {
   console.info(
     `Open http://localhost:${webPort}. Ctrl+C stops web and VI; PostgreSQL data remains in Docker.`,
   )
-  console.info(
-    'Signing keys are local and ephemeral. Restarting VI invalidates its earlier sample signatures.',
-  )
+  if (generatedSecrets.length > 0) {
+    console.info(
+      `Generated for this run (not configured in .env.local): ${generatedSecrets.join(', ')}. ` +
+        'Restarting VI changes its issuer and merchant keys under the same kid, so evidence signed ' +
+        'earlier will not verify. Set these in .env.local to keep them stable.',
+    )
+  } else {
+    console.info('Signing keys are configured in .env.local, so they survive a restart.')
+  }
   await Promise.race([viExit, completion(web)])
 }
 
