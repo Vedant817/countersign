@@ -46,6 +46,7 @@ import {
   csError,
   err,
   money,
+  ok,
   newId,
   systemClock,
   type AgentId,
@@ -57,6 +58,7 @@ import {
   type UserId,
   type WalletId,
 } from '@countersign/core'
+import type { UserRow } from '@countersign/db'
 import * as repository from '@countersign/db'
 import { db, jwksKeys } from '@countersign/db'
 import { contentWords } from '@countersign/agent'
@@ -114,6 +116,20 @@ export interface ProvisionInput {
   readonly capMinor: bigint
   /** Display name for the demo buyer. */
   readonly displayName?: string
+  /**
+   * Reuse this buyer instead of minting a new one.
+   *
+   * The session route passes the id from the request's cookie, which is what turns "a fresh user per request"
+   * into "one buyer per browser" (audit §4). It reuses **identity only**: the mandate, the device key and the
+   * agent key are new every call, because a second mandate with the same cap is the point — reusing the
+   * mandate would make the second run fail with `GATE_BUDGET_EXCEEDED` for a reason a viewer would misread as
+   * a bug.
+   *
+   * A cookie that names a row which is gone (a restored database, or a forged id shaped like a real one)
+   * refuses with `CS_NOT_FOUND` rather than silently minting a stranger: a session that quietly becomes a
+   * different person is the bug this parameter exists to remove.
+   */
+  readonly userId?: UserId
 }
 
 /**
@@ -149,7 +165,26 @@ export async function provisionAgentSession(
 
   const vi = createViClient(config)
   const nowMs = systemClock.nowMs()
-  const userId = newId('usr') as UserId
+  // A session that names a buyer keeps it; anything else mints one (audit §4). Resolved before any write, so
+  // a stale cookie cannot leave half a session behind.
+  const reuse = input.userId
+  let existingUser: UserRow | undefined
+  if (reuse !== undefined) {
+    const found = await repository.findUserById(reuse)
+    if (!found.ok) return found
+    if (found.value === undefined) {
+      return err(
+        csError(
+          'CS_NOT_FOUND',
+          'This session names a buyer that does not exist on this deployment.',
+          undefined,
+          { userMessage: 'Your session expired. Start again to get a new one.' },
+        ),
+      )
+    }
+    existingUser = found.value
+  }
+  const userId = reuse ?? (newId('usr') as UserId)
   const walletId = newId('wal') as WalletId
   const deviceId = newId('dev') as DeviceId
   const agentId = newId('agt') as AgentId
@@ -177,25 +212,42 @@ export async function provisionAgentSession(
   }
 
   // --- 1. The buyer, the wallet and the device key ------------------------------------------------
-  const user = await repository.createUser({
-    id: userId,
-    persona: 'BUYER',
-    display_name: input.displayName ?? 'Demo buyer',
-    email: `demo.buyer.${userId.slice(-8)}@example.test`,
-    country: 'US',
-  })
+  const user =
+    existingUser !== undefined
+      ? ok(existingUser)
+      : await repository.createUser({
+          id: userId,
+          persona: 'BUYER',
+          display_name: input.displayName ?? 'Demo buyer',
+          email: `demo.buyer.${userId.slice(-8)}@example.test`,
+          country: 'US',
+        })
   if (!user.ok) return user
 
-  const wallet = await repository.createWallet({
-    id: walletId,
-    user_id: userId,
-    // Not a vault token: no buyer credentials exist yet (HUMAN_TODO item 2). Named so that a reader
-    // cannot mistake it for one, and so an order path that needs a real vault_id fails loudly.
-    payment_token_id: `DEMO-NOT-A-VAULT-TOKEN-${userId.slice(-8)}`,
-    payer_id: `DEMO-PAYER-${userId.slice(-8)}`,
-    payer_email: `demo.buyer.${userId.slice(-8)}@example.test`,
-  })
+  // A returning buyer keeps its **wallet**: `paypal_wallets_payment_token_id_key` is UNIQUE and this demo's
+  // placeholder token is derived from the user id, so a second insert for the same buyer is a unique violation
+  // rather than a second instrument. What is per mandate is the **device**: `demo-device.ts` mints a fresh P-256
+  // key each call and never persists the private half, so a stored device row could not sign a second L2 —
+  // and `l1_credentials` is UNIQUE (device_id, wallet_id), which a new device beside the reused wallet satisfies
+  // exactly. (Reusing the device would have meant re-issuing its L1 from a row that no longer holds the key.)
+  const wallets = reuse === undefined ? ok([]) : await repository.findWalletsByUser(userId)
+  if (!wallets.ok) return wallets
+  const wallet =
+    wallets.value.length > 0
+      ? ok(wallets.value[0]!)
+      : await repository.createWallet({
+          id: walletId,
+          user_id: userId,
+          // Not a vault token: no buyer credentials exist yet (HUMAN_TODO item 2). Named so that a reader
+          // cannot mistake it for one, and so an order path that needs a real vault_id fails loudly.
+          payment_token_id: `DEMO-NOT-A-VAULT-TOKEN-${userId.slice(-8)}`,
+          payer_id: `DEMO-PAYER-${userId.slice(-8)}`,
+          payer_email: `demo.buyer.${userId.slice(-8)}@example.test`,
+        })
   if (!wallet.ok) return wallet
+  // The mandate, the L1 and the wallet cap all name the row that was resolved, which is the existing one for a
+  // returning buyer rather than the id this call generated.
+  const resolvedWalletId = wallet.value.id as WalletId
 
   const deviceKey = await createDemoDeviceKey()
   const device = await repository.createDevice({
@@ -239,7 +291,7 @@ export async function provisionAgentSession(
     id: newId('l1') as never,
     user_id: userId,
     device_id: deviceId,
-    wallet_id: walletId,
+    wallet_id: resolvedWalletId,
     sd_jwt: issued.value.l1,
     issuer_kid: issued.value.issuer_kid,
     iat: BigInt(issued.value.iat),
@@ -361,7 +413,7 @@ export async function provisionAgentSession(
     user_id: userId,
     device_id: deviceId,
     agent_id: agentId,
-    wallet_id: walletId,
+    wallet_id: resolvedWalletId,
     l2_serialized: finalized.value.l2,
     l2_payload: toJsonSafe(prepared.value.payload) as never,
     nl_intent: input.intent,
@@ -382,14 +434,18 @@ export async function provisionAgentSession(
   })
   if (!budget.ok) return budget
 
-  const walletCap = await repository.setWalletCap(walletId, 'MONTH', money(input.capMinor, 'USD'))
+  const walletCap = await repository.setWalletCap(
+    resolvedWalletId,
+    'MONTH',
+    money(input.capMinor, 'USD'),
+  )
   if (!walletCap.ok) return walletCap
 
   return {
     ok: true,
     value: {
       userId,
-      walletId,
+      walletId: resolvedWalletId,
       deviceId,
       agentId,
       mandateId,

@@ -13,6 +13,12 @@
  * caller could also choose the merchant, the currency or the expiry would be a demo of a form, not of a
  * mandate.
  *
+ * ## One buyer per browser, not one per request
+ *
+ * The session cookie is read first and handed to `provisionAgentSession` as `userId`, so a second turn (or a
+ * reload, or a second mandate with a different cap) is the **same buyer** with a new mandate — not a new
+ * stranger. `lib/session.ts` owns the cookie; this route only decides whose it is.
+ *
  * ## Refusals
  *
  * `COUNTERSIGN_AGENT_DEMO=1` and a non-production `NODE_ENV` are required. Without them this answers 403
@@ -26,6 +32,7 @@ import { csError, formatMoney, money, toBody } from '@countersign/core'
 import { readbackSummaryLine } from '@countersign/agent'
 
 import { agentDemoAllowed, provisionAgentSession } from '@/lib/agent-session'
+import { currentUserId, rememberUser } from '@/lib/session'
 
 /** §8.0's "bound every wire input": a cap of 10,000,000.00 is $10M, far past any demo sentence. */
 const MAX_CAP_MINOR = 1_000_000_000n
@@ -93,11 +100,32 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
-  const provisioned = await provisionAgentSession({ intent: parsed.data.intent, capMinor })
+  // The cookie decides whether this is a returning buyer. A session that names a row which no longer
+  // exists is refused by the provisioner rather than quietly replaced by a stranger.
+  const session = await currentUserId()
+  if (!session.ok) {
+    return NextResponse.json(toBody(session.error), { status: 503 })
+  }
+
+  const provisioned = await provisionAgentSession({
+    intent: parsed.data.intent,
+    capMinor,
+    userId: session.value,
+  })
   if (!provisioned.ok) {
     return NextResponse.json(toBody(provisioned.error), {
-      status: provisioned.error.code === 'CS_FORBIDDEN' ? 403 : 503,
+      status:
+        provisioned.error.code === 'CS_FORBIDDEN'
+          ? 403
+          : provisioned.error.code === 'CS_NOT_FOUND'
+            ? 404
+            : 503,
     })
+  }
+
+  const remembered = await rememberUser({ userId: provisioned.value.userId })
+  if (!remembered.ok) {
+    return NextResponse.json(toBody(remembered.error), { status: 503 })
   }
 
   return NextResponse.json({

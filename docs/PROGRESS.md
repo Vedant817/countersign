@@ -584,3 +584,20 @@ WP-06s and everything needing live sandbox is not started.
   `git status --ignored -- packages/webhooks` shows only `dist/` and `node_modules/` as ignored. Nothing consumes
   `dist`: `package.json` points `main`, `types` and `exports` at `./src/index.ts`, because every package here is consumed
   as TypeScript source (vitest, Next, tsx). The audit row is corrected to "checked and not a problem".
+
+- **2026-11-13 (IST)** - **Priority 3, identity half: one browser is one buyer (P1).** `apps/web/lib/session.ts`
+  owns an iron-session cookie (`cs_session`): `SESSION_SECRET` is read **per call** and refused below 32 characters with
+  `CS_INTERNAL`, the cookie is `httpOnly`/`sameSite: 'lax'`/`Secure`-in-production with a 7-day ttl, and it carries
+  the user id and nothing else — a session is a pointer, not a cache of authority, so revoking a row takes effect on
+  the next request. `iron-session` had been validated at boot and never read; this is its first call site.
+  `/api/agent/session` reads the cookie, passes it to `provisionAgentSession({ userId })`, and calls `rememberUser`;
+  `/api/agent/run` refuses a body naming another browser's buyer **before** any mandate is read (`guardRunUser`, 403).
+  A returning buyer keeps its user row and its wallet row (`paypal_wallets_payment_token_id_key` is UNIQUE and the
+  placeholder token is derived from the user id); the mandate, device key and agent key stay per call, because
+  `demo-device.ts` never persists the private half and `l1_credentials` is UNIQUE (device_id, wallet_id).
+  **Measured:** web `typecheck` exit 0, `lint` 0 errors, `format:check` clean, `next build` exit 0, whole repo
+  `120 files / 2912 passed | 1 skipped` (11 new unit tests); Playwright `session.spec.ts` + `agent-chat.spec.ts`
+  `5 passed`.
+  **Falsified three ways:** the 32-character floor removed fails `session.test.ts`; `guardRunUser` removed from the
+  run route turns the third e2e test's 403 into a 200; a second wallet for a returning buyer fails the first e2e test
+  on `paypal_wallets_payment_token_id_key`. The anonymous branch of `guardRunUser` is a recorded decision (D-057).

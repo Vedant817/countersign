@@ -1655,3 +1655,18 @@ string/BigInt mismatch in money readers that unit tests, which inject stores tha
 BigInts, could not see.
 **Evidence:** `.github/workflows/ci.yml` (both jobs); `packages/db/src/repos/{disputes,budget,orders}.ts`;
 `packages/db/test/repos.edge-cases.live.test.ts`; `docs/verification/p0-12-ci-green.md`.
+
+## D-057 - The run guard allows an anonymous request, because the demo gate is what closes that door
+
+**Date:** 2026-11-13
+**Decision:** `guardRunUser` (`apps/web/lib/session.ts`) refuses a run whose body names a user other than the
+session's, and **allows** a request with no session at all. The `session === undefined` branch is where a login
+requirement goes when real accounts land; today it stays open on purpose.
+**Reason:** The alternative — requiring a session — would break `scripts/agent-acceptance.mts`, which drives
+`/api/agent/session` and `/api/agent/run` with plain `fetch` and no cookie jar, and the run route is already closed
+to a deployed application by `agentDemoAllowed()` (`COUNTERSIGN_AGENT_DEMO=1` **and** a non-production `NODE_ENV`).
+What the guard removes is the hole that mattered: one browser spending another browser's mandate. Guarding the
+anonymous case as well would be a rule with no reader, which is the half-feature this audit keeps removing.
+**Evidence:** `apps/web/lib/session.ts` (`guardRunUser`), `apps/web/lib/session.test.ts` ("allows an anonymous
+request"), `apps/web/tests/e2e/session.spec.ts` (the third test: 403 + "does not belong to this browser"),
+`apps/web/lib/agent-session.ts` (`agentDemoAllowed`).

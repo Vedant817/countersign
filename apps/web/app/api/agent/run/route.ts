@@ -48,6 +48,7 @@ import { z } from 'zod'
 
 import { merchantMcpUrl } from '@/app/api/mcp/[transport]/endpoint'
 import { sessionMandatePort, sessionSigner, agentDemoAllowed } from '@/lib/agent-session'
+import { currentUserId, guardRunUser } from '@/lib/session'
 import { languageModel } from '@/lib/llm'
 import { MCP_TOKEN_TTL_SECONDS, mintAgentToken } from '@/lib/mcp-token'
 
@@ -97,6 +98,18 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
   const body = parsed.data
+
+  // Per-user isolation (audit §4): when this browser has a session, the run belongs to that buyer and to no
+  // other. A body that names a different user is refused before a mandate is read, let alone spent — the
+  // mandate id in the body is otherwise a handle to someone else's budget.
+  const session = await currentUserId()
+  if (!session.ok) {
+    return NextResponse.json(toBody(session.error), { status: 503 })
+  }
+  const allowed = guardRunUser(session.value, body.user_id)
+  if (!allowed.ok) {
+    return NextResponse.json(toBody(allowed.error), { status: 403 })
+  }
 
   const token = await mintAgentToken({ agentId: body.agent_id })
   if (!token.ok) {

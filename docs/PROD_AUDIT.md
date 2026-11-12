@@ -150,23 +150,41 @@ refused as a derivation role). `pnpm vi:lint` → `All checks passed!`.
 
 ---
 
-## 4. P1 - there is no real buyer account, so nothing can be captured
+## 4. P1 - there is no real buyer account, so nothing can be captured (**identity half FIXED 2026-11-13**)
 
-**Where.** `apps/web/lib/agent-session.ts` provisions a **new user per request**
-(`newId('usr')`, `demo.buyer.<id>@example.test`), with `payment_token_id: DEMO-NOT-A-VAULT-TOKEN-…`.
+**Where.** `apps/web/lib/agent-session.ts` provisioned a **new user per request** (`newId('usr')`,
+`demo.buyer.<id>@example.test`), with `payment_token_id: DEMO-NOT-A-VAULT-TOKEN-…`.
 
-**Consequence.** No session, no login, no user-owned data, no wallet, no history. `/api/agent/session`
-mints a fresh identity every call and `agentDemoAllowed()` gates the whole surface behind
-`COUNTERSIGN_AGENT_DEMO=1` + non-production, so on a real deployment **the agent chat does not exist**.
-Per-user data isolation (priority 3 in the brief) has no foundation: `users` rows are per-request
-throwaways, and there is no cookie, no session, no ownership check anywhere in `apps/web`.
+**Consequence.** No session, no user-owned data, no history: `/api/agent/session` minted a fresh identity every
+call, so two turns in one browser were two strangers and a reload was a third. `iron-session` and
+`SESSION_SECRET` were validated at boot and never read.
 
-`iron-session` + `SESSION_SECRET` are validated at boot but **never used**: `grep -r iron-session` finds no
-call site. There is no `/api/auth`, no login page, no `middleware.ts`.
+**Fixed 2026-11-13 (identity).** `apps/web/lib/session.ts` owns the cookie (`cs_session`, `SESSION_SECRET`
+refused below 32 characters, `httpOnly`, `sameSite: 'lax'`, `Secure` in production, 7-day ttl). It carries the
+user id **and nothing else** — every other fact is re-read from `users`, so revoking a row takes effect on the next
+request instead of at cookie expiry. `/api/agent/session` reads the cookie, passes it to
+`provisionAgentSession({ userId })`, and calls `rememberUser`; `/api/agent/run` refuses a body that names another
+browser's buyer **before the mandate is read** (`guardRunUser` → 403).
 
-**Blocked on** HUMAN_TODO 1a (Vault + buyer credentials). The code path that needs it is
-`packages/orders/src/create.ts:305` `payment_source: { paypal: { vault_id: draft.wallet.vaultId } }` —
-complete and tested, unreachable because no wallet ever holds a real `vault_id`.
+A returning browser keeps its user row and its wallet row — `paypal_wallets_payment_token_id_key` is UNIQUE and
+the demo's placeholder token is derived from the user id, so a second insert is a unique violation rather than a
+second instrument. The mandate, the device key and the agent key stay **per call**: `demo-device.ts` mints a fresh
+P-256 key each time and never persists the private half, so a stored device row could not sign a second L2, and
+`l1_credentials` is UNIQUE (device_id, wallet_id) — a new device beside the reused wallet is exactly the row that
+constraint expects.
+
+**Verified:** `apps/web/lib/session.test.ts` (11 tests: round-trip, forged cookie is anonymous rather than an
+error, missing/short secret refuses, forget, cookie flags, the run-user rule); `apps/web/tests/e2e/session.spec.ts`
+(3 browser tests: one browser keeps one buyer across two mandates, two browsers are two buyers, a run cannot claim
+another browser's buyer). **Falsified three ways:** dropping the 32-character floor fails the secret test; removing
+`guardRunUser` from the run route turns the third e2e test's 403 into a 200; creating a second wallet for a
+returning buyer fails the first e2e test on `paypal_wallets_payment_token_id_key`.
+
+**Still blocked on** HUMAN_TODO 1a (Vault + buyer credentials) for the money half. The code path that needs it is
+`packages/orders/src/create.ts:305` `payment_source: { paypal: { vault_id: draft.wallet.vaultId } }` — complete and
+tested, unreachable because no wallet ever holds a real `vault_id`. `agentDemoAllowed()` still gates the whole
+surface behind `COUNTERSIGN_AGENT_DEMO=1` plus a non-production `NODE_ENV`, so a deployed application does not
+serve demo identities; a real login is what replaces that gate when real accounts land.
 
 ---
 
