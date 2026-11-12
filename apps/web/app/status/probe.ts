@@ -110,6 +110,14 @@ export interface StatusReport {
   readonly viLibCommit: string
   /** Names only. Nothing on this side of the boundary is ever rendered. */
   readonly configured: Readonly<Record<string, boolean>>
+  /**
+   * The resolved `PAYPAL_API_BASE` **host**, not the credential and not the whole URL.
+   *
+   * `configured.PAYPAL_API_BASE` alone cannot tell "the operator set it" apart from "the app fell back to
+   * its own default", and that difference is exactly what hid the disagreement between `/status` and the
+   * order path (D-040). The host is enough to answer it and is not a secret: `api-m.sandbox.paypal.com`.
+   */
+  readonly paypalApiBaseHost: string
 }
 
 /** Everything {@link probeAll} is allowed to reach. A closed list, like every other port in this repo. */

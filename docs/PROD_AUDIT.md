@@ -192,16 +192,52 @@ highest-value unblocked item in this list.
 
 ---
 
-## 6. P1 - the demo money path reads `.env.local` from disk behind the app's own config
+## 6. P1 - the demo money path reads `.env.local` from disk behind the app's own config (**FIXED**)
 
-**Where.** `apps/web/lib/demo-order.ts::paypalCreds()` — when `process.env.PAYPAL_CLIENT_ID` is empty it
-walks `cwd`, `../../`, `../../../` looking for `.env.local` and parses it with a regex.
+**Where (before).** `apps/web/lib/demo-order.ts::paypalCreds()` — when `process.env.PAYPAL_CLIENT_ID` was
+empty it walked `cwd`, `../../`, `../../../` looking for `.env.local` and parsed it with a regex.
 
-**Why it is wrong for production.** `docs/` and `.env.example` both say secrets come from env vars only
+**Why it was wrong for production.** `docs/` and `.env.example` both say secrets come from env vars only
 (AGENTS.md rule 4, spec §6). A file-reading fallback means a container with a mounted `.env.local` would
-silently use credentials the operator did not put in the environment, and a failed read is swallowed by
-`catch {}`. It also means `/status` and the order path can disagree about whether PayPal is configured —
+silently use credentials the operator did not put in the environment, and a failed read was swallowed by
+`catch {}`. It also meant `/status` and the order path could disagree about whether PayPal is configured —
 the exact class of "two sources of truth" this repo documents as a bug class (D-040).
+
+**Fix.** `paypalCreds()` now reads the environment and nothing else; there is no `fs` or `path` import left
+in the module, so the behaviour cannot come back by accident. `scripts/dev-local.mjs` remains the single
+thing that turns `.env.local` into the environment, for the whole process rather than for one code path.
+
+**A second instance of the same defect, found while fixing this one.** `PAYPAL_API_BASE` had _two_
+resolutions: `demo-order.ts` defaulted an unset value to `https://api-m.sandbox.paypal.com`, while
+`status/route.ts` treated an unset `PAYPAL_API_BASE` as "PayPal is not configured" and answered
+`paypalConfigured: false` (a 503). So the money path could create a real sandbox order on a deployment
+whose own health page said PayPal was absent. Both now call `lib/paypal-base.ts`
+(`resolvePaypalBase` / `isAllowedPaypalBase` / `DEFAULT_PAYPAL_BASE`), which is the one answer; the status
+report also carries the resolved **host** (`paypalApiBaseHost`) so a reader can see that the app default is
+in use rather than having to guess from a boolean. A live host is still refused by `assertSandbox` in
+`PayPalClient`, so the default cannot become a route to real money.
+
+**Verified (real output).**
+
+```
+$ pnpm --filter @countersign/web test
+ Test Files  14 passed (14)
+      Tests  152 passed | 1 skipped (153)
+
+$ pnpm vitest --run apps/web/lib/paypal-base.test.ts
+ ✓ |web| lib/paypal-base.test.ts (7 tests) 5ms
+      Tests  7 passed (7)
+
+$ pnpm --filter @countersign/web typecheck
+$ tsc --noEmit        # no errors
+```
+
+`pnpm lint` → 0 errors, 8 pre-existing warnings, `money-discipline: clean`. `pnpm format:check` → clean.
+
+**Live credential check (no secret printed).** The sandbox client id/secret in `.env.local` were exercised
+against `POST /v1/oauth2/token` with HTTP Basic: `oauth ok, token len 97`. The `Authorization: Bearer`
+form a first attempt used was refused `401 invalid_client` — worth recording because `PayPalClient` uses
+Basic, so the working form is the one the app already uses.
 
 ---
 
@@ -254,8 +290,9 @@ deadline.
    ✅ **done 2026-11-13** (§2)
 3. **[P0]** persistent issuer/merchant/Gate signing keys; refuse to boot on an unusable key. ✅ **done
    2026-11-13** (§3 — derived from `VI_KEK`, two real processes compared)
-4. **[P1]** fail-loudly configuration audit: delete the `.env.local` disk fallback; `/status` reports
-   every configured-off dependency the app actually uses.
+4. **[P1]** fail-loudly configuration audit: delete the `.env.local` disk fallback. ✅ **done 2026-11-13**
+   (§6 — env-only credentials, and one shared `PAYPAL_API_BASE` resolution for `/status` and the order
+   path).
 5. **[P1]** real webhook ingest route with PayPal signature verification (unblocked; needs
    `PAYPAL_WEBHOOK_ID` only for the positive case, and must refuse loudly without it).
 6. **[P1]** real buyer accounts + per-user isolation (blocked on Vault for the money half; the account

@@ -14,6 +14,16 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 ---
 
+## ☐ 0. Rotate the Modal proxy token (agent log exposure)
+
+While inspecting configuration on 13 Nov 2026, an agent printed `.env.local` **values** to the terminal
+instead of names and lengths. `MODAL_PROXY_TOKEN_ID` and `MODAL_PROXY_TOKEN_SECRET` appeared in that log
+(the LLM proxy in front of the model endpoint — not a PayPal or signing credential). No value is recorded
+here. Regenerate that token pair in Modal and update `MODAL_PROXY_TOKEN_ID` /
+`MODAL_PROXY_TOKEN_SECRET` in `.env.local` and in the deployment's environment.
+
+---
+
 ## ★ 1a. A vaulted buyer, so the agent's purchase can end in a **capture**
 
 **Blocks:** P0-6's last inch. The shopping agent now runs the whole path — real mandate, real vi-signed

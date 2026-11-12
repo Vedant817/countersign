@@ -397,3 +397,23 @@ WP-06s and everything needing live sandbox is not started.
   (`probe-issuer:ISSUER:Ei2JH_G45ELInLEh` both times, `identical: true`); `apps/vi` `212 passed`, with five
   new tests (issuer and merchant stable across `reset_keystore()`, a different KEK gives a different key,
   the two roles never share a key, `AGENT` is refused as a derivation role); `pnpm vi:lint` clean.
+
+- **2026-11-13 (IST)** - **PayPal configuration reads the environment only (P1, `prod/real-users` §6).**
+  `apps/web/lib/demo-order.ts::paypalCreds()` fell back to parsing `.env.local` out of `cwd` and two
+  parents when `PAYPAL_CLIENT_ID` was empty, with the whole read inside `catch {}`. That made a mounted
+  `.env.local` in a container apply without the operator setting anything, and it let the money path use
+  credentials `/status` could not see. The fallback is deleted - `paypalCreds()` reads `process.env` and
+  there is no `fs`/`path` import left in the module - and `scripts/dev-local.mjs` stays the single thing
+  that turns `.env.local` into the environment.
+  Fixing it exposed a second instance of the same D-040 pattern: `PAYPAL_API_BASE` had two resolutions.
+  `demo-order.ts` defaulted an unset value to `https://api-m.sandbox.paypal.com`; `status/route.ts`
+  required the operator to set it and answered `paypalConfigured: false`, so the order path could create a
+  real sandbox order on a deployment whose health page said PayPal was absent. Both now resolve through
+  `apps/web/lib/paypal-base.ts` (`DEFAULT_PAYPAL_BASE`, `resolvePaypalBase`, `isAllowedPaypalBase`), the
+  status report carries the resolved host as `paypalApiBaseHost`, and a live host is still refused by
+  `assertSandbox` so the default cannot become a route to real money.
+  **Measured, not asserted:** `apps/web` `152 passed | 1 skipped (14 files)`, `paypal-base.test.ts`
+  `7 passed` including a test that the default is a sandbox host and that a lookalike
+  (`evilsandbox.paypal.com`) is refused; `tsc --noEmit` clean; `pnpm lint` 0 errors; `format:check` clean.
+  The sandbox client credentials were also exercised for real against `POST /v1/oauth2/token`
+  (`oauth ok, token len 97`) - no value printed.

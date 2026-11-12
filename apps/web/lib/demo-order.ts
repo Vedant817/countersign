@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { resolvePaypalBase } from './paypal-base'
+
 /**
  * The demo money path — a **real PayPal sandbox order** created from a Gate `ALLOW`, without a vault.
  *
@@ -52,45 +54,35 @@ export interface DemoOrder {
   readonly createTime: string | null
 }
 
-import fs from 'node:fs'
-import path from 'node:path'
-
-/** Fallback: read PayPal creds from root .env.local if the server process didn't inherit them.
+/**
+ * PayPal's credentials — **from the environment, and only the environment** (spec §6, AGENTS.md rule 4).
  *
- * Same file the dev launcher reads (`scripts/dev-local.mjs`), used only to fill a gap the demo money
- * path would otherwise fail on. Values are never logged, and the normal path is `process.env`. */
+ * ## The disk fallback this replaced, and why it had to go
+ *
+ * This function used to fall back to reading `.env.local` from `process.cwd()` and two parent
+ * directories with a regex when `PAYPAL_CLIENT_ID` was empty. Three things were wrong with that:
+ *
+ *  1. **Two sources of truth.** `/status` decides `paypalConfigured` from `process.env` alone, so the
+ *     health page could say `not_configured` while this path happily created a real sandbox order from
+ *     a file the operator had not put in the environment. That is the D-040 class of bug this repo
+ *     documents: two readers that can disagree, where one of them is inside a signature or a money call.
+ *  2. **A swallowed failure.** The whole read sat in `try { … } catch { /* ignore *\/ }`, so an
+ *     unreadable file was indistinguishable from an absent one.
+ *  3. **A container would use it.** A mounted `.env.local` in a deployed image would be read without the
+ *     operator ever setting those variables, which is the opposite of "secrets come from the
+ *     environment".
+ *
+ * `scripts/dev-local.mjs` is the only thing that turns `.env.local` into the environment, and it does it
+ * for the whole process rather than for one code path.
+ */
 function paypalCreds(): { id: string; secret: string; base: string } {
-  let id = process.env['PAYPAL_CLIENT_ID'] ?? ''
-  let secret = process.env['PAYPAL_CLIENT_SECRET'] ?? ''
-  let base = process.env['PAYPAL_API_BASE'] ?? 'https://api-m.sandbox.paypal.com'
-  if (id === '' || secret === '') {
-    try {
-      const candidates = [
-        path.resolve(process.cwd(), '.env.local'),
-        path.resolve(process.cwd(), '../../.env.local'),
-        path.resolve(process.cwd(), '../../../.env.local'),
-      ]
-      for (const p of candidates) {
-        if (!fs.existsSync(p)) continue
-        const text = fs.readFileSync(p, 'utf8')
-        for (const line of text.split(/\r?\n/)) {
-          const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
-          if (m === null) continue
-          const key = m[1] ?? ''
-          const value = (m[2] ?? '').trim()
-          if (key === 'PAYPAL_CLIENT_ID' && id === '') id = value
-          if (key === 'PAYPAL_CLIENT_SECRET' && secret === '') secret = value
-          if (key === 'PAYPAL_API_BASE' && base === 'https://api-m.sandbox.paypal.com') {
-            base = value === '' ? base : value
-          }
-        }
-        if (id !== '' && secret !== '') break
-      }
-    } catch {
-      // ignore
-    }
+  return {
+    id: process.env['PAYPAL_CLIENT_ID']?.trim() ?? '',
+    secret: process.env['PAYPAL_CLIENT_SECRET']?.trim() ?? '',
+    // `lib/paypal-base.ts`, not a second constant: `/status` resolves the same default, so the health
+    // page and the money path cannot disagree about whether PayPal is configured (D-040).
+    base: resolvePaypalBase(),
   }
-  return { id, secret, base }
 }
 
 /** True when this deployment is allowed and able to create demo orders at all. */
