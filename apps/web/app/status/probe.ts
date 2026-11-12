@@ -36,8 +36,17 @@
  * So "never a failure" is true of the row's vocabulary and false of the report's verdict, and it is the
  * verdict that maps to the HTTP status. `not_configured` buys a clearer diagnosis, not a softer one.
  */
-import { systemClock } from '@countersign/core'
-import { type WebhookHealth } from '@countersign/privacy'
+import { formatIst, systemClock } from '@countersign/core'
+import type { JobHeartbeat } from '@countersign/db'
+import {
+  JOB_CADENCE_SEC,
+  expectedCadenceSec,
+  jobHealth,
+  workerHealth,
+  type JobHealth,
+  type WebhookHealth,
+  type WorkerHealthState,
+} from '@countersign/privacy'
 import { ViClient } from '@countersign/vi-client'
 
 /* ------------------------------------------------------------------------------------------ */
@@ -107,6 +116,14 @@ export interface StatusReport {
     readonly health: WebhookHealth
     readonly note: string
   }
+  /**
+   * The worker's heartbeat, read from `worker_job_runs` by the route.
+   *
+   * **Not a probe row** — the worker is a different process, so there is nothing here to call. It is
+   * informational for the same reason webhook lag is: a dead reconciler stops lost webhooks being repaired
+   * and reservations being released, and it does not stop this instance serving a buyer.
+   */
+  readonly worker: WorkerSection
   readonly viLibCommit: string
   /** Names only. Nothing on this side of the boundary is ever rendered. */
   readonly configured: Readonly<Record<string, boolean>>
@@ -527,4 +544,120 @@ function messageOf(cause: unknown): string {
       : message
   }
   return String(cause)
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Worker heartbeats — spec §8.19, docs/PROD_AUDIT.md §7                                         */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * The `worker` section of `/status`.
+ *
+ * ## Why the worker is a section and not a sixth probe row
+ *
+ * The five probe rows are **dependencies of this process**: each one is called, and a failure means this
+ * instance cannot serve. The worker is a **different process**, and the honest fact about it is a set of
+ * timestamps — "which job last ran, and did it succeed" — not a call `/status` can make. So it gets its own
+ * shape, read from `worker_job_runs` by the route.
+ *
+ * ## Why it cannot fail the check
+ *
+ * Same reasoning as webhook lag: the web process still answers, still verifies chains and still
+ * acknowledges webhooks. A dead reconciler means lost webhooks stop being *repaired*, which is a serious
+ * operational fault and an outage of nothing a buyer is currently asking for. Pulling the web instance out of
+ * rotation would take the storefront down with it and fix nothing — so the section is reported, loudly and
+ * with a state, and the verdict stays with the probes.
+ */
+export interface WorkerSection {
+  readonly state: WorkerHealthState
+  readonly summary: string
+  readonly jobs: readonly JobHealth[]
+  /** The newest finished run across every job, in both clocks. `null` when nothing has ever run. */
+  readonly lastRunAt: { readonly utc: string; readonly ist: string } | null
+  readonly secondsSinceLastRun: number | null
+  /**
+   * `true` when the heartbeat table itself could not be read.
+   *
+   * Kept apart from `state: 'never'` because they are different faults with the same symptom: "no worker has
+   * ever reported" and "we cannot see whether one has" call for different first moves, and a page that
+   * collapses them sends an operator to restart a worker that is running.
+   */
+  readonly unreadable: boolean
+  readonly note: string
+}
+
+/** `Date` → epoch seconds, without `getTime()/1000` repeated at every call site. */
+function epochSec(at: Date): number {
+  return Math.floor(at.getTime() / 1000)
+}
+
+/**
+ * Read the heartbeat rows into the section `/status` renders.
+ *
+ * Every job in {@link JOB_CADENCE_SEC} gets a row whether or not it has ever run, because the interesting
+ * case is precisely the job with **no** row: on a worker that stopped registering schedules, the other five
+ * jobs go on reporting `ok` and the missing one is the only evidence. A job present in the table but absent
+ * from the expected list is included too — that is a cron from an older deploy, and dropping it would hide it.
+ */
+export function buildWorkerSection(input: {
+  readonly heartbeats: readonly JobHeartbeat[]
+  readonly nowSec: number
+  /** Set when `findJobHeartbeats()` itself failed. */
+  readonly unreadable?: boolean
+  readonly unreadableCode?: string | null
+}): WorkerSection {
+  const byJob = new Map(input.heartbeats.map((row) => [row.job, row]))
+
+  if (input.unreadable === true) {
+    return {
+      state: 'never',
+      summary: `The heartbeat table could not be read${
+        input.unreadableCode === null || input.unreadableCode === undefined
+          ? ''
+          : ` (${input.unreadableCode})`
+      }. This page cannot say whether the worker is running.`,
+      jobs: [],
+      lastRunAt: null,
+      secondsSinceLastRun: null,
+      unreadable: true,
+      note: 'A read failure, not a quiet worker: the table is the only record of the worker, so nothing here is a measurement.',
+    }
+  }
+
+  const jobNames = [
+    ...new Set([...Object.keys(JOB_CADENCE_SEC), ...input.heartbeats.map((r) => r.job)]),
+  ].sort()
+  const jobs = jobNames.map((job) => {
+    const row = byJob.get(job)
+    return jobHealth({
+      job,
+      cadenceSec: expectedCadenceSec(job),
+      lastStartedAtSec: row === undefined ? null : epochSec(row.lastStartedAt),
+      lastFinishedAtSec: row === undefined ? null : epochSec(row.lastFinishedAt),
+      lastSuccessAtSec: row?.lastSuccessAt == null ? null : epochSec(row.lastSuccessAt),
+      lastFailureAtSec: row?.lastFailureAt == null ? null : epochSec(row.lastFailureAt),
+      lastErrorCode: row?.lastErrorCode ?? null,
+      nowSec: input.nowSec,
+    })
+  })
+
+  const rollup = workerHealth(jobs)
+  const newest = input.heartbeats.reduce<Date | null>(
+    (latest, row) =>
+      latest === null || row.lastFinishedAt.getTime() > latest.getTime()
+        ? row.lastFinishedAt
+        : latest,
+    null,
+  )
+
+  return {
+    state: rollup.state,
+    summary: rollup.detail,
+    jobs,
+    lastRunAt:
+      newest === null ? null : { utc: newest.toISOString(), ist: formatIst(epochSec(newest)) },
+    secondsSinceLastRun: newest === null ? null : Math.max(0, input.nowSec - epochSec(newest)),
+    unreadable: false,
+    note: 'Informational. A dead worker stops lost webhooks being repaired (§8.12) and reservations being released (§8.10); it does not stop this instance serving.',
+  }
 }

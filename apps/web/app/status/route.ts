@@ -24,6 +24,7 @@
  * | **PayPal OAuth** | **yes** | Every side effect is a `POST /v2/...` behind a bearer token. Without it no order, capture, refund or dispute action can go out. |
  * | OpenAI | **no** | The deterministic paths are the product (§8.0 rule 4: "no LLM output is authoritative"). A missing key degrades the intent compiler and the notes drafter to nothing; it does not stop a purchase. |
  * | MCP | **no** | Only the agent's shopping tools. §11 check C3 may still be running. |
+ * | **worker heartbeat** | informational | The reconciler is another process. A dead one stops lost webhooks being repaired and reservations being released; it does not stop this instance serving, so it is reported rather than made a 503 (see the `worker` section). |
  * | webhook lag | informational | A lost webhook is repaired by the reconciler within five minutes (§8.12); it is a fact to report, not a reason to pull the instance out of rotation. |
  *
  * ## Probe, do not assume
@@ -47,13 +48,13 @@
  * hand before they can trust it.
  */
 import { formatIst, formatIstHuman, VI_LIB_COMMIT, type CsError } from '@countersign/core'
-import { findLatestWebhookEvent, listUnprocessedEvents } from '@countersign/db'
+import { findJobHeartbeats, findLatestWebhookEvent, listUnprocessedEvents } from '@countersign/db'
 import { webhookHealth } from '@countersign/privacy'
 
 import { readLlmConfig } from '@/lib/llm'
 import { isAllowedPaypalBase, resolvePaypalBase } from '@/lib/paypal-base'
 
-import { probeAll, type StatusReport } from './probe'
+import { buildWorkerSection, probeAll, type StatusReport } from './probe'
 
 /** Never cache a health check, in any layer. */
 export const dynamic = 'force-dynamic'
@@ -89,6 +90,9 @@ export async function GET(request: Request): Promise<Response> {
       'cache-control': 'no-store, no-cache, must-revalidate',
       // So a Render log line and a `curl` can both name the failing dependency without parsing the body.
       'x-countersign-status': report.ok ? 'ok' : 'degraded',
+      // So a Render log line, a curl and an uptime monitor can all name the reconciler state without
+      // parsing a body — the same reason the probe rows exist.
+      'x-countersign-worker': report.worker.state,
     },
   })
 }
@@ -180,6 +184,15 @@ async function buildReport(): Promise<StatusReport> {
 
   const unprocessed = await countUnprocessed()
 
+  /*
+   * The worker's heartbeat, read from `worker_job_runs`.
+   *
+   * `unreadable` rather than a throw: `/status` must answer even when one read fails, and the section says
+   * "could not be read" instead of guessing at "never run". A guessed `never` is the more dangerous of the
+   * two — it would send an operator to restart a worker that is running.
+   */
+  const heartbeats = await findJobHeartbeats()
+
   const ok = probes.every((p) => !p.required || p.status === 'up')
 
   return {
@@ -206,6 +219,12 @@ async function buildReport(): Promise<StatusReport> {
     },
     dependencies: probes,
     webhook: unprocessed,
+    worker: buildWorkerSection({
+      heartbeats: heartbeats.ok ? heartbeats.value : [],
+      nowSec,
+      unreadable: !heartbeats.ok,
+      unreadableCode: heartbeats.ok ? null : heartbeats.error.code,
+    }),
     viLibCommit: VI_LIB_COMMIT,
     paypalApiBaseHost: new URL(resolvePaypalBase()).hostname,
     /** Names only. No value from this object ever reaches the response. */
@@ -330,6 +349,32 @@ function renderHtml(report: StatusReport): string {
     ? '<h1>All required dependencies are up.</h1><p>This instance can gate a purchase and verify a chain. It <strong>cannot</strong> move money: order creation and capture are not wired, and the README forbids this page from implying otherwise.</p>'
     : '<h1>One or more required dependencies are down.</h1><p>Render will take this instance out of rotation. The failing rows are named below.</p>'
 
+  const worker = report.worker
+  const workerRows = worker.jobs
+    .map((job) => {
+      const symbol = job.state === 'ok' ? '✓' : job.state === 'never' ? '–' : '✗'
+      const age = job.ageSec === null ? 'never' : `${job.ageSec}s ago`
+      const code =
+        job.lastErrorCode === null || job.state !== 'failing'
+          ? ''
+          : ` <code>${escapeHtml(job.lastErrorCode)}</code>`
+      return `<tr>
+<th scope="row">${symbol} <code>${escapeHtml(job.job)}</code></th>
+<td><strong>${escapeHtml(job.state)}</strong>${code}</td>
+<td class="num">${escapeHtml(age)}</td>
+<td>${escapeHtml(job.detail)}</td>
+</tr>`
+    })
+    .join('')
+  const workerTable =
+    workerRows === ''
+      ? ''
+      : `<table>
+<caption class="meta">Read from <code>worker_job_runs</code>. A Render background worker has no health check of its own, so these rows are the only evidence it is alive.</caption>
+<thead><tr><th scope="col">Job</th><th scope="col">State</th><th scope="col">Last success</th><th scope="col">What was observed</th></tr></thead>
+<tbody>${workerRows}</tbody>
+</table>`
+
   const webhook = report.webhook
   const webhookRow =
     webhook.lastReceivedAt === null
@@ -380,6 +425,9 @@ ${headline}
 <h2>Webhooks</h2>
 <p><code>${escapeHtml(webhook.health.state)}</code> ${escapeHtml(webhook.health.detail)}${webhook.health.sloBreached ? ' <strong>Past the §14 target of 300 s.</strong>' : ''}</p>
 <p>${webhookRow} ${webhook.unprocessed ?? 0} event(s) stored and not yet processed; the oldest has been waiting ${webhook.backlogOldestSeconds}s. ${escapeHtml(webhook.note)}</p>
+<h2>Worker</h2>
+<p><code>${escapeHtml(worker.state)}</code> ${escapeHtml(worker.summary)} ${escapeHtml(worker.note)}</p>
+${workerTable}
 <h2>Build</h2>
 <p class="meta">Verifiable Intent commit <code>${escapeHtml(report.viLibCommit)}</code> · APP_ENV <code>${escapeHtml(String(report.environment.appEnv))}</code> · PayPal environment <code>${escapeHtml(String(report.environment.paypalEnv))}</code>${report.environment.paypalEnvRejected ? ' — <strong>not sandbox; boot should have refused (§6, EC-ENV-1)</strong>' : report.environment.sandboxOnly ? '' : ' — PayPal is not configured on this deployment'}</p>
 <p class="meta">PayPal base <code>${escapeHtml(report.paypalApiBaseHost)}</code>${report.configured.PAYPAL_API_BASE ? '' : ' (the app default; set PAYPAL_API_BASE to override)'}</p>
