@@ -143,3 +143,228 @@ export function humaniseSeconds(seconds: number): string {
   if (hours > 0) return `${hours}h ${minutes}m`
   return `${minutes}m`
 }
+
+/* ------------------------------------------------------------------------------------------ */
+/* Job heartbeats — spec §8.19, §14                                                                */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * What one job's heartbeat says, as `/status` reads it out of `worker_job_runs`.
+ *
+ * `cadenceSec` is the schedule's own interval (`wh.reconcile` 300, `wh.disputes` 120, the nightly 86400).
+ * It is an input rather than a constant here because a **nightly** job that misses one run is not five
+ * minutes late, and a threshold that ignores that would page every night at 00:05.
+ */
+export interface JobHealthInput {
+  readonly job: string
+  /** How often `schedule.ts` says this job should run, in seconds. */
+  readonly cadenceSec: number
+  /** `null` when this job has never been recorded at all. */
+  readonly lastStartedAtSec: number | null
+  readonly lastFinishedAtSec: number | null
+  /** `null` when the job has never succeeded — a different state from "has not run recently". */
+  readonly lastSuccessAtSec: number | null
+  readonly lastFailureAtSec: number | null
+  readonly lastErrorCode: string | null
+  readonly nowSec: number
+}
+
+/**
+ * `ok` / `lagging` / `stalled` are about **time**. `failing` is about the **last answer**, and it is kept
+ * separate because a job can be perfectly punctual and completely broken: a cron that throws on every tick
+ * produces a fresh heartbeat and no work, and "lagging" would describe it as merely behind.
+ *
+ * `never` is the state a brand-new deployment is in, and the one a dead worker is in too. They are told
+ * apart by {@link workerHealth} across the whole job list rather than per job: one job that has never run
+ * on a worker whose other jobs are fine is a missing schedule, while *every* job never having run is a
+ * worker that is not there.
+ */
+export type JobHealthState = 'ok' | 'lagging' | 'stalled' | 'failing' | 'never'
+
+export interface JobHealth {
+  readonly job: string
+  readonly state: JobHealthState
+  /** Age of the last success. `null` when there has never been one. */
+  readonly ageSec: number | null
+  readonly lastSuccessAtSec: number | null
+  readonly lastFailureAtSec: number | null
+  readonly lastErrorCode: string | null
+  /**
+   * The two thresholds actually applied, so the page can print the number it judged against.
+   *
+   * §14 quotes 300 s and 900 s for the reconciler; those are floors, not absolutes — a job whose cadence
+   * is longer than the floor is judged against its own cadence, and saying which number was used is the
+   * difference between an SLO and a rumour.
+   */
+  readonly lagThresholdSec: number
+  readonly stallThresholdSec: number
+  /** One line for the page. */
+  readonly detail: string
+}
+
+/**
+ * Judge one job's heartbeat against its own cadence and §14's floors.
+ *
+ * Order matters, and it is the order of *severity*, not of the code:
+ *
+ *  1. **never** — no record at all.
+ *  2. **failing** — the most recent run failed. Checked before any time comparison because a job that
+ *     fails every five minutes is not "behind", it is broken, and the fix is a stack trace rather than a
+ *     longer wait.
+ *  3. **stalled / lagging** — the last success is older than the (cadence-aware) threshold.
+ *
+ * A job that started and has not finished is judged against `lastStartedAtSec`: that is the only reading
+ * of "it is running right now", and after the stall threshold it is the reading of "it hung".
+ */
+export function jobHealth(input: JobHealthInput): JobHealth {
+  const lagThresholdSec = Math.max(RECONCILER_LAG_SLO_SEC, input.cadenceSec)
+  const stallThresholdSec = Math.max(RECONCILER_STALLED_SEC, input.cadenceSec * 2)
+  const base = {
+    job: input.job,
+    lastSuccessAtSec: input.lastSuccessAtSec,
+    lastFailureAtSec: input.lastFailureAtSec,
+    lastErrorCode: input.lastErrorCode,
+    lagThresholdSec,
+    stallThresholdSec,
+  }
+
+  if (
+    input.lastStartedAtSec === null &&
+    input.lastSuccessAtSec === null &&
+    input.lastFailureAtSec === null
+  ) {
+    return {
+      ...base,
+      state: 'never',
+      ageSec: null,
+      detail: 'has never run on this deployment.',
+    }
+  }
+
+  const failedLast =
+    input.lastFailureAtSec !== null &&
+    (input.lastSuccessAtSec === null || input.lastFailureAtSec > input.lastSuccessAtSec)
+  if (failedLast) {
+    const code = input.lastErrorCode === null ? 'an unrecorded error' : input.lastErrorCode
+    return {
+      ...base,
+      state: 'failing',
+      ageSec:
+        input.lastSuccessAtSec === null ? null : Math.max(0, input.nowSec - input.lastSuccessAtSec),
+      detail: `the most recent run failed with ${code}.`,
+    }
+  }
+
+  // No success yet and nothing failed yet: the only honest reading is "in flight", judged by when it
+  // started. If it never finishes, the stall threshold turns it into `stalled`.
+  const reference = input.lastSuccessAtSec ?? input.lastStartedAtSec
+  if (reference === null) {
+    return { ...base, state: 'never', ageSec: null, detail: 'has never run on this deployment.' }
+  }
+
+  const age = Math.max(0, input.nowSec - reference)
+  const state: JobHealthState =
+    age > stallThresholdSec ? 'stalled' : age > lagThresholdSec ? 'lagging' : 'ok'
+
+  const since =
+    input.lastSuccessAtSec === null ? 'no run has ever succeeded' : `last success ${age}s ago`
+
+  return {
+    ...base,
+    state,
+    ageSec: input.lastSuccessAtSec === null ? null : age,
+    detail: `${since}; expected every ${input.cadenceSec}s (target ${lagThresholdSec}s).`,
+  }
+}
+
+/** §14's roll-up over every job the worker is supposed to run. */
+export type WorkerHealthState = 'ok' | 'lagging' | 'stalled' | 'never'
+
+export interface WorkerHealth {
+  readonly state: WorkerHealthState
+  readonly jobs: number
+  readonly never: number
+  readonly failing: number
+  /** One line for the page, and it never says "ok" about a worker that has never reported. */
+  readonly detail: string
+}
+
+/**
+ * Roll per-job heartbeats into one verdict about the **worker**.
+ *
+ * The distinction this exists for: a worker whose *every* job is `never` has not had a quiet hour, it is
+ * not there — and that is the exact failure a `type: worker` service has on Render, where there is no port
+ * for the platform to probe. One job that has never run while the others are healthy is a missing schedule
+ * entry instead, which is a different fix and is reported as `lagging` rather than `never`.
+ *
+ * `failing` is promoted to `stalled` in the roll-up: from the page's point of view, a job that fails every
+ * tick and a job that stopped ticking both mean "nothing is being repaired", and a reader should not have
+ * to know which one it is to know that the deployment is not all right.
+ */
+export function workerHealth(jobs: readonly JobHealth[]): WorkerHealth {
+  const never = jobs.filter((j) => j.state === 'never').length
+  const failing = jobs.filter((j) => j.state === 'failing').length
+  const stalled = jobs.filter((j) => j.state === 'stalled').length
+  const lagging = jobs.filter((j) => j.state === 'lagging').length
+
+  const state: WorkerHealthState =
+    jobs.length === 0 || never === jobs.length
+      ? 'never'
+      : stalled > 0 || failing > 0
+        ? 'stalled'
+        : lagging > 0 || never > 0
+          ? 'lagging'
+          : 'ok'
+
+  const detail =
+    state === 'never'
+      ? jobs.length === 0
+        ? 'No job has ever reported a run.'
+        : `None of the ${jobs.length} jobs has ever reported a run. The worker is not running.`
+      : state === 'stalled'
+        ? `${stalled} job(s) past the stall threshold, ${failing} failing on every run. Lost webhooks are not being repaired.`
+        : state === 'lagging'
+          ? `${lagging} job(s) past the §14 target, ${never} never run.`
+          : `All ${jobs.length} jobs ran inside their target.`
+
+  return { state, jobs: jobs.length, never, failing, detail }
+}
+
+/* ------------------------------------------------------------------------------------------ */
+/* Expected cadences — the bridge between the worker's schedule and /status                      */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * How often each cron job is expected to run, in seconds.
+ *
+ * **The owner of these numbers is `apps/worker/src/schedule.ts`**, which derives them from the cron
+ * expressions pg-boss actually runs (`cadenceSeconds`). They are repeated here because `apps/web` must not
+ * import the worker's module graph — that is what keeps `pg-boss` and its `pg` dependency out of the Next
+ * bundle (see `apps/worker/src/index.ts`'s lazy-construction rule).
+ *
+ * A copy with no test is a copy that drifts, so `apps/worker/test/schedule.test.ts` asserts that this table
+ * and `jobCadences()` agree. A changed cadence therefore fails a test in the package that owns it rather than
+ * silently moving the web page's threshold.
+ *
+ * `wh.process` is absent on purpose: it is event-driven, not on a cron, so "every 5 minutes" would be a lie
+ * about the one job that runs whenever PayPal calls.
+ */
+export const JOB_CADENCE_SEC: Readonly<Record<string, number>> = {
+  'wh.reconcile': 5 * 60,
+  'wh.disputes': 2 * 60,
+  'wh.auth-expiry': 5 * 60,
+  'wh.verify': 5 * 60,
+  'release.reservations': 5 * 60,
+  'budget.reconcile': 24 * 60 * 60,
+}
+
+/**
+ * The cadence to judge one job against.
+ *
+ * Defaults to §8.12's five-minute promise rather than to "never": a job name nobody has a cadence for is a
+ * job that was added without a decision, and reporting it as behind is the reading that gets the decision
+ * made.
+ */
+export function expectedCadenceSec(job: string): number {
+  return JOB_CADENCE_SEC[job] ?? 5 * 60
+}

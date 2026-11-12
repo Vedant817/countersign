@@ -74,16 +74,25 @@ export {
 } from './export'
 
 export {
+  JOB_CADENCE_SEC,
   RECONCILER_LAG_SLO_SEC,
   RECONCILER_STALLED_SEC,
+  expectedCadenceSec,
   humaniseSeconds,
+  jobHealth,
   overallStatus,
   webhookHealth,
+  workerHealth,
   type DependencyStatus,
+  type JobHealth,
+  type JobHealthInput,
+  type JobHealthState,
   type OverallStatus,
   type WebhookHealth,
   type WebhookHealthInput,
   type WebhookHealthState,
+  type WorkerHealth,
+  type WorkerHealthState,
 } from './status'
 
 export {
