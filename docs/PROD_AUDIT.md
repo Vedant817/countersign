@@ -263,13 +263,46 @@ Basic, so the working form is the one the app already uses.
 
 ---
 
-## 7. P1 - `/status` is the only health surface, and the worker has none
+## 7. P1 - `/status` is the only health surface, and the worker has none (**FIXED 2026-11-13**)
 
-`render.yaml` gives `web` `healthCheckPath: /status`, and `countersign-vi` is `internal: true` with no
-health check. `countersign-worker` has no health check either (correct for a worker, but then nothing
-detects a dead reconciler). `/status` reads Postgres, vi, PayPal, MCP and the model, which is good — but it
-cannot tell a reader that the **reconciler has never run**, which is the failure that loses a dispute
-deadline.
+Three separate gaps, three separate fixes.
+
+**(a) The worker had no liveness signal at all.** `countersign-worker` is `type: worker`: no port, no
+health check, and nothing to notice that it died. The symptom would have been invisible — the web process
+keeps acknowledging webhooks (§8.12 step 5), so a dead reconciler looks like a quiet week until a dispute
+deadline is missed. The worker now writes **one row per finished job run** to `worker_job_runs`
+(`packages/db/src/schema.ts`, migration `0004`, pruned on write to seven days):
+`worker_id`, `job`, `outcome`, `started_at`, `finished_at`, `duration_ms`, `error_code`. The write is
+applied by `withHeartbeats` (`apps/worker/src/heartbeat.ts`) around the whole handler table, so it covers
+`wh.process` and every cron, and it records the **throw** — a handler that throws is the retryable case a
+"last run" column would miss. A failed heartbeat write never fails the job.
+
+**(b) `/status` could not say whether the reconciler had ever run.** It now has a `worker` section
+(`buildWorkerSection` in `apps/web/app/status/probe.ts`) that reads those rows and judges each job with
+`jobHealth`/`workerHealth` from `@countersign/privacy`. The states are `ok | lagging | stalled | failing |
+never`, and they are deliberately different: a job that is **punctual and failing** is `failing` (a cron
+that throws every five minutes is not "behind", it is broken), a job with no row is `never`, and a worker
+whose _every_ job is `never` is reported as "not running" rather than as a quiet system. Thresholds are
+`max(§14's 300 s, the job's own cadence)` — a nightly job is not judged against five minutes, or the page
+would be red for 23 hours a day and nobody would believe it. The cadence table lives in
+`@countersign/privacy` because `apps/web` must not import the worker's module graph; a worker test asserts
+the copy and `apps/worker/src/schedule.ts` agree, so a changed cron fails in the package that owns it.
+
+**(c) Two services had no health check they could have had.** `countersign-vi` gains
+`healthCheckPath: /v1/status` — it is `internal: true`, but Render health-checks an internal service over
+the private network, which is exactly where the Gate calls it. `countersign-worker` gains an **opt-in**
+`GET /health` (`apps/worker/src/health.ts`, bound to loopback, on only when `WORKER_HEALTH_PORT` is set)
+for an operator or an external monitor. It is opt-in because a listener nobody asked for is a liability; the
+primary signal remains the heartbeat table.
+
+The worker section **cannot** fail `/status`: a dead reconciler is a serious operational fault and not an
+outage of anything a buyer is asking for, and pulling the web instance out of rotation would take the
+storefront down with it and repair nothing.
+
+Verified by: `packages/db/test/repos.worker.live.test.ts` (6 tests against a real Postgres — including
+`max(...) FILTER`, the retention delete and the caller's transaction), `packages/privacy/test/job-health.test.ts`
+(14), `apps/worker/test/heartbeat.test.ts` (7), `apps/worker/test/health.test.ts` (7, over a real socket),
+`apps/web/app/status/worker-section.test.ts` (8).
 
 ---
 
@@ -328,4 +361,6 @@ deadline.
     checkouts on one budget, revoked mandate mid-checkout, refund after chargeback, tampered packets,
     prompt injection.
 11. **[P1]** CI green: lint, typecheck, test, Python tests, Playwright e2e.
+    11b. **[P1]** health surfaces: worker heartbeats, a `worker` section on `/status`, and a vi
+    health check. ✅ **done 2026-11-13** (§7)
 12. **[P2]** deploy readiness: Dockerfiles, Render config, health checks, migrations.

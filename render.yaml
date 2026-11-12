@@ -147,8 +147,9 @@ services:
   # ---------------------------------------------------------------------------------------------
   # vi — the crypto oracle (spec D2, §8.3). Private network only.
   #     `internal: true` means Render never assigns it a public hostname, so the issuer key and the
-  #     encrypted agent private keys are unreachable from the internet. It has no health check path
-  #     because it is not routable; readiness is checked from web's /status instead.
+  #     encrypted agent private keys are unreachable from the internet. It is still health-checked:
+  #     Render probes it over the private network at /v1/status (the same route web's /status calls), so a
+  #     vi-service that cannot verify a chain is taken out of rotation instead of failing every Gate check.
   # ---------------------------------------------------------------------------------------------
   - type: web
     name: countersign-vi
@@ -161,6 +162,9 @@ services:
     buildCommand: uv sync --frozen --no-dev
     startCommand: uv run --no-dev uvicorn vi_service.main:app --host 0.0.0.0 --port $PORT
     internal: true
+    # §8.19: the liveness route the Gate depends on. No public hostname, so this is checked on the private
+    # network — which is exactly where the Gate calls it from.
+    healthCheckPath: /v1/status
     numInstances: 1
     envVars:
       - key: APP_ENV
@@ -193,6 +197,11 @@ services:
   #         `runtime: worker` rather than `web`: Render's worker type has no public port and no
   #         health check, which is exactly right for a process whose only output is durable side
   #         effects. A `web` service here would just burn an ingress.
+  #
+  #         It is also the reason the worker writes a heartbeat row per job run (worker_job_runs,
+  #         §8.19) and why web's /status reads them: with no port for Render to probe, that table is
+  #         the only channel through which a dead reconciler is visible. Set WORKER_HEALTH_PORT to also
+  #         expose GET /health on the private network, for an external monitor that can reach it.
   # ---------------------------------------------------------------------------------------------
   - type: worker
     name: countersign-worker

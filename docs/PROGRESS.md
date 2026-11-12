@@ -601,3 +601,33 @@ WP-06s and everything needing live sandbox is not started.
   **Falsified three ways:** the 32-character floor removed fails `session.test.ts`; `guardRunUser` removed from the
   run route turns the third e2e test's 403 into a 200; a second wallet for a returning buyer fails the first e2e test
   on `paypal_wallets_payment_token_id_key`. The anonymous branch of `guardRunUser` is a recorded decision (D-057).
+
+- **2026-11-13 (IST)** - **Audit §7 closed: the worker has a liveness signal, `/status` can say whether the
+  reconciler ever ran, and vi is health-checked (P1).** `countersign-worker` is `type: worker` — no port, no
+  health check, and nothing that would notice it died; the symptom would have been invisible, because the web
+  process keeps acknowledging webhooks (§8.12 step 5) and a dead reconciler looks like a quiet week until a
+  dispute deadline is missed. The worker now writes **one row per finished job run** to `worker_job_runs`
+  (migration `0004`, pruned to seven days on write): `worker_id`, `job`, `outcome`, `started_at`,
+  `finished_at`, `duration_ms`, `error_code`. `withHeartbeats` wraps the whole handler table in
+  `apps/worker/src/heartbeat.ts`, so `wh.process` and every cron is covered and the **throw** is recorded — the
+  retryable case a "last run" column would miss. A failed heartbeat write never fails the job.
+  `/status` gains a `worker` section (`buildWorkerSection`) that judges each job with `jobHealth` from
+  `@countersign/privacy`: `ok | lagging | stalled | failing | never`, where **a punctual job that fails every
+  tick is `failing`**, a job with no row is `never`, and a worker whose every job is `never` is reported as "not
+  running" rather than as a quiet system. Thresholds are `max(§14's 300 s, the job's own cadence)`, so the
+  nightly job is not red for 23 hours a day. The cadence table is copied into `@countersign/privacy` (with a
+  drift test in `apps/worker/test/schedule.test.ts`) because `apps/web` must not import the worker's module
+  graph. `countersign-vi` gains `healthCheckPath: /v1/status`; `countersign-worker` gains an **opt-in**
+  loopback `GET /health` for an operator or an external monitor. The section cannot fail `/status`: a dead
+  reconciler is an operational fault, not an outage of anything a buyer is asking for.
+  **Measured:** `pnpm typecheck` all packages exit 0, `pnpm lint` 0 errors, `format:check` clean, web `next build`
+  exit 0, worker `build` exit 0, whole repo `125 files / 2966 passed | 1 skipped`, `pnpm secret-scan`
+  no leaks.
+  **End to end, against the real database:** a throwaway script inserted one run through `recordJobRun`, read it
+  back through `findJobHeartbeats` and served it from `startHealthServer` on an ephemeral port —
+  `HTTP 200 x-countersign-worker: lagging`, `wh.reconcile` `state: "ok", ageSec: 0`, `wh.disputes`
+  `state: "never"` (five of six jobs have no row in an empty table, which is the honest reading). The script
+  and its row are deleted; the evidence is the output above.
+  **Falsified three ways (each run, then reverted):** registering `runner` instead of `handlers` fails
+  `worker.test.ts`'s heartbeat test; making `jobHealth` ignore the last failure fails 3 tests in
+  `job-health.test.ts`; a flat 300 s threshold fails the nightly cadence test. Recorded as D-058.

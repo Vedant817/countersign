@@ -1670,3 +1670,28 @@ anonymous case as well would be a rule with no reader, which is the half-feature
 **Evidence:** `apps/web/lib/session.ts` (`guardRunUser`), `apps/web/lib/session.test.ts` ("allows an anonymous
 request"), `apps/web/tests/e2e/session.spec.ts` (the third test: 403 + "does not belong to this browser"),
 `apps/web/lib/agent-session.ts` (`agentDemoAllowed`).
+
+## D-058 - The worker reports liveness through a table, because a Render worker has no port
+
+**Date:** 2026-11-13
+**Decision:** `countersign-worker` writes one row per finished job run to `worker_job_runs`
+(`worker_id`, `job`, `outcome`, `started_at`, `finished_at`, `duration_ms`, `error_code`), and `/status` reads
+them. The table is pruned on write to seven days. An opt-in `GET /health` on `WORKER_HEALTH_PORT` exists as a
+second transport, and `countersign-vi` gains `healthCheckPath: /v1/status`.
+**Reason:** `type: worker` gives Render no port to probe, so the only way to notice that the reconciler died is
+a measurement the worker writes itself. The table is append-per-run rather than one upserted "last seen" row
+because the questions that separate a quiet system from a dead one - *has it ever succeeded*, *did the most
+recent run fail*, *was it running an hour ago* - need the history. The `failing` state exists because a job can
+be perfectly punctual and completely broken: a cron that throws every five minutes is not "lagging", and a
+time-only reading would report it as healthy. Thresholds are `max(§14's 300 s, the job's own cadence)`, so a
+nightly job is not red for 23 hours a day. The cadence table is copied into `@countersign/privacy` (with a
+drift test) rather than imported, because `apps/web` must not pull `pg-boss` into the Next bundle. The worker
+section cannot fail `/status`: a dead reconciler is an operational fault, not an outage of anything a buyer is
+currently asking for, and a 503 would take the storefront down with it while repairing nothing.
+**Evidence:** `packages/db/src/repos/worker.ts`; `packages/db/drizzle/0004_worker_job_runs.sql`;
+`packages/db/test/repos.worker.live.test.ts` (real Postgres: the `max(...) FILTER` aggregate, retention,
+caller transaction); `packages/privacy/src/status.ts` (`jobHealth`, `workerHealth`, `JOB_CADENCE_SEC`);
+`packages/privacy/test/job-health.test.ts`; `apps/worker/src/{heartbeat,health}.ts`;
+`apps/worker/test/{heartbeat,health}.test.ts`; `apps/worker/test/schedule.test.ts` (the cadence drift test);
+`apps/web/app/status/probe.ts` (`buildWorkerSection`); `apps/web/app/status/worker-section.test.ts`;
+`render.yaml`.
