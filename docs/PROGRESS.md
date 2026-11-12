@@ -434,3 +434,15 @@ WP-06s and everything needing live sandbox is not started.
   `pnpm typecheck`, `pnpm lint` (0 errors), `pnpm format:check` and `pnpm --filter @countersign/web build`
   all green. Two pre-existing tests were made environment-independent in the same change (the worker's
   WORKER-2 refusal test now clears `process.env` and the env cache, as `boot.test.ts` already did).
+
+- **2026-11-13 (IST)** - **The LLM path is reachable from the agent chat (P2, `prod/real-users` §8.4).**
+  `agent-chat.tsx` sent `mode: 'scripted'` from every button, so a configured model was never used from the UI.
+  A **Planner** toggle (Model / Scripted, default **Model**) now drives the free-form turn and the
+  "buy inside the limit" button; the injected-listing button stays `compromised` because it is a fixed attack
+  scenario. The run route's `llm` path already degrades to the scripted shopper and announces it in the stream
+  when no key is configured, so the default is safe on a providerless deployment.
+  **Real call, not a claim:** the configured Modal-direct provider
+  (`deepseek-ai/DeepSeek-V4.1-Flash`) answered a live `generateText` probe in 1.98 s with `"OK"` - evidence the
+  model path works end to end, not just that a key is present.
+  **Measured:** `pnpm --filter @countersign/web typecheck` clean, `eslint` 0 errors, `format:check` clean,
+  web tests `152 passed | 7 skipped`, `next build` exit 0.

@@ -121,6 +121,16 @@ export function AgentChat() {
   const [busy, setBusy] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [message, setMessage] = useState('Buy running shoes under $50')
+  /**
+   * Which planner runs the free-form turn.
+   *
+   * This defaulted to `scripted` before, which made the model path unreachable from the UI even when a
+   * provider was configured (audit 8.4). `llm` is the default now; the run route already falls back to the
+   * deterministic shopper - and says so in the stream - when no key is configured, so choosing `llm` is safe
+   * on a deployment without a provider. The two scenario buttons below stay deterministic on purpose: they
+   * exist to show a fixed, reproducible behaviour.
+   */
+  const [mode, setMode] = useState<'llm' | 'scripted'>('llm')
 
   const startSession = useCallback(async (): Promise<SessionView | null> => {
     setSessionError(null)
@@ -329,12 +339,33 @@ export function AgentChat() {
         >
           2 · Run a turn
         </h2>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-ink-soft">Planner</span>
+          <div
+            role="group"
+            aria-label="Planner"
+            className="flex overflow-hidden rounded-card border border-rule"
+          >
+            {(['llm', 'scripted'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={mode === option}
+                disabled={busy}
+                onClick={() => setMode(option)}
+                className={`px-3 py-1 text-sm font-semibold disabled:opacity-50 ${
+                  mode === option ? 'bg-ink text-paper-raised' : 'bg-paper text-ink-soft'
+                }`}
+              >
+                {option === 'llm' ? 'Model' : 'Scripted'}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             disabled={busy}
             onClick={() => {
-              void send(message.trim() === '' ? 'Buy running shoes under $50' : message, 'scripted')
+              void send(message.trim() === '' ? 'Buy running shoes under $50' : message, mode)
             }}
             className="rounded-card bg-ink px-4 py-2 font-semibold text-paper-raised disabled:opacity-50"
           >
@@ -360,7 +391,7 @@ export function AgentChat() {
           onSubmit={(event) => {
             event.preventDefault()
             if (message.trim() === '') return
-            void send(message.trim(), 'scripted')
+            void send(message.trim(), mode)
           }}
         >
           <input
@@ -380,8 +411,11 @@ export function AgentChat() {
           </button>
         </form>
         <p className="text-sm text-ink-soft">
-          Runs use the deterministic scripted shopper — the same tools, the same signer and the same
-          Gate as the model path — so the result is reproducible without a provider key.
+          <span className="font-semibold">Model</span> runs the configured LLM;{' '}
+          <span className="font-semibold">Scripted</span> runs the deterministic shopper. Both use
+          the same tools, the same signer and the same Gate, so a run is reproducible without a
+          provider key — and with no key the Model path falls back to the scripted shopper and says
+          so in the transcript.
         </p>
       </section>
 
