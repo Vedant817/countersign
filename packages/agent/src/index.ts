@@ -100,6 +100,8 @@ export {
 export type { RunReading } from './refusal'
 
 // --- the vocabulary ------------------------------------------------------------------------------
+export { READBACK_SUMMARY_MAX_CHARS, readbackSummaryLine } from './readback-summary'
+
 export { REFUSAL_OUTCOMES, SHOP_EVENT_KINDS } from './types'
 export type {
   AgentToolSet,

@@ -22,7 +22,8 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { csError, toBody } from '@countersign/core'
+import { csError, formatMoney, money, toBody } from '@countersign/core'
+import { readbackSummaryLine } from '@countersign/agent'
 
 import { agentDemoAllowed, provisionAgentSession } from '@/lib/agent-session'
 
@@ -105,7 +106,13 @@ export async function POST(request: Request): Promise<Response> {
     agent_id: provisioned.value.agentId,
     agent_kid: provisioned.value.agentKid,
     readback: provisioned.value.readback,
+    // The mandate chip shows this, not the raw read-back: the raw string starts with the markdown
+    // heading `**What you are authorising**`, which is a header and not a limit. One rule, computed
+    // once, server-side (packages/agent/src/readback-summary.ts) — a client re-implementation is the
+    // D-040 shape of bug: two copies that can disagree.
+    readback_summary: readbackSummaryLine(provisioned.value.readback),
     cap_minor: capMinor.toString(),
+    cap_display: formatMoney(money(capMinor, 'USD')),
     expires_at_epoch_sec: provisioned.value.expiresAtEpochSec,
   })
 }

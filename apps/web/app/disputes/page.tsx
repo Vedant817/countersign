@@ -118,7 +118,10 @@ function CaseCard({ caseView }: { caseView: DefenderCaseView }) {
       {caseView.draft !== null ? (
         <div className="mt-5">
           <p className="font-mono text-xs uppercase tracking-widest text-ink-faint">
-            Drafted note — {caseView.draft.source === 'template' ? 'deterministic template' : caseView.draft.source}
+            Drafted note —{' '}
+            {caseView.draft.source === 'template'
+              ? 'deterministic template'
+              : caseView.draft.source}
           </p>
           <p className="mt-2 whitespace-pre-wrap rounded-card border border-rule bg-paper p-4 text-sm">
             {caseView.draft.notes}
@@ -130,7 +133,10 @@ function CaseCard({ caseView }: { caseView: DefenderCaseView }) {
                 <span className="text-ink-soft">
                   “{citation.sentence.slice(0, 110)}
                   {citation.sentence.length > 110 ? '…' : ''}” ←{' '}
-                  <span className="font-mono">{citation.artefact}</span>
+                  <span className="font-mono" title={citation.artefact.description}>
+                    {citation.artefact.id}
+                  </span>
+                  <span className="text-ink-faint"> — {citation.artefact.description}</span>
                 </span>
               </li>
             ))}
@@ -175,9 +181,9 @@ function CaseCard({ caseView }: { caseView: DefenderCaseView }) {
             Download the packet PDF
           </a>
           <p className="mt-2 text-xs text-ink-soft">
-            The QR inside points at <span className="font-mono">{caseView.pdf.qrPayload}</span> — the
-            public verifier. A packet from a SIMULATED dispute verifies honestly there: the chain
-            checks report exactly what they can and cannot prove.
+            The QR inside points at <span className="font-mono">{caseView.pdf.qrPayload}</span> —
+            the public verifier. A packet from a SIMULATED dispute verifies honestly there: the
+            chain checks report exactly what they can and cannot prove.
           </p>
         </div>
       ) : null}

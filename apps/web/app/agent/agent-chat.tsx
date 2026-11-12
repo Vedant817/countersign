@@ -27,13 +27,19 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { formatMoney, isCurrency, money } from '@countersign/core'
+
 interface SessionView {
   user_id: string
   mandate_id: string
   agent_id: string
   agent_kid: string
   readback: string
+  /** The first signed limit, plain text, computed server-side — never the read-back's markdown heading. */
+  readback_summary: string
   cap_minor: string
+  /** The cap, formatted once on the server (`formatMoney`) so the client never re-implements money. */
+  cap_display: string
   expires_at_epoch_sec: number
 }
 
@@ -88,16 +94,23 @@ interface Turn {
   readonly mode: 'llm' | 'scripted' | 'compromised'
 }
 
-const CENTS = (minor: string): string => {
-  const value = BigInt(minor)
-  const whole = value / 100n
-  const cents = value % 100n
-  return `$${whole.toString()}.${cents.toString().padStart(2, '0')}`
-}
-
-function firstLine(text: string): string {
-  const line = text.split('\n').find((entry) => entry.trim() !== '' && !entry.startsWith('**What'))
-  return line?.replaceAll('**', '') ?? text.slice(0, 80)
+/**
+ * One money value from the Gate's own numbers, with the canonical formatter.
+ *
+ * The previous local `CENTS()` divided by 100 and prepended `$`, which is wrong twice over: it hardcodes
+ * USD (EC-FX-1) and it duplicates `formatMoney` — the same bug class as `c6d6855`, one file over. The
+ * Gate sends minor units and an ISO-4217 code, so the client has everything it needs.
+ */
+function amountLabel(minor: string, currency: string | null): string {
+  if (currency !== null && isCurrency(currency)) {
+    try {
+      return formatMoney(money(minor, currency))
+    } catch {
+      // A malformed amount is rendered as the raw number rather than throwing inside render.
+      return minor
+    }
+  }
+  return minor
 }
 
 export function AgentChat() {
@@ -292,9 +305,9 @@ export function AgentChat() {
             <p className="font-mono text-xs uppercase tracking-widest text-signed">
               Mandate {session.mandate_id.slice(0, 12)}… · signed by your device
             </p>
-            <p className="mt-2 font-medium">{firstLine(session.readback)}</p>
+            <p className="mt-2 font-medium">{session.readback_summary}</p>
             <p className="mt-1 text-sm text-ink-soft">
-              Cap {CENTS(session.cap_minor)} · expires{' '}
+              Cap {session.cap_display} · expires{' '}
               {new Date(session.expires_at_epoch_sec * 1000).toLocaleString('en-IN', {
                 timeZone: 'Asia/Kolkata',
               })}{' '}
@@ -415,7 +428,7 @@ function TurnView({ turn }: { turn: Turn }) {
             The agent asked the merchant to charge
             {gate?.amountMinor === null || gate?.amountMinor === undefined
               ? ' this cart'
-              : ` ${CENTS(gate.amountMinor)}`}
+              : ` ${amountLabel(gate.amountMinor, gate.currency)}`}
             . The Gate refused before any payment, and recorded the decision
             {gate?.decisionId === null || gate?.decisionId === undefined
               ? ''

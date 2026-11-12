@@ -30,6 +30,7 @@ import { csError, type CsError } from '@countersign/core'
 import { isStepCount, streamText, type ToolSet } from 'ai'
 
 import { buildAgentTools } from './tools'
+import { readbackSummaryLine } from './readback-summary'
 import type {
   GateOutcomeView,
   MandateView,
@@ -131,8 +132,14 @@ export async function* runShoppingAgent(
   }
 
   const { tools, bound } = prepareTools(mandate.value, deps)
+  // Same rule as the scripted shopper: the buyer's first signed limit, as plain text, never the
+  // read-back's markdown heading. Both paths render into the same transcript.
+  const mandateLine = readbackSummaryLine(mandate.value.readback)
   yield event('thought', nowMs(), {
-    text: `Reading your mandate: ${mandate.value.readback.split('\n')[0] ?? 'limits loaded'}`,
+    text:
+      mandateLine === ''
+        ? 'Reading your mandate: limits loaded.'
+        : `Reading your mandate: ${mandateLine}`,
   })
 
   let finalText = ''

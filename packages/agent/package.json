@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@ai-sdk/provider": "4.0.21",
+    "@countersign/compiler": "workspace:*",
     "@types/node": "24.19.1",
     "fast-check": "4.10.2",
     "tsx": "4.23.15",

@@ -156,7 +156,10 @@ const makeCaptionApi = () => {
   /** A word at a time, on the cue's own clock, so the strip moves for the whole line. */
   const typeCaption = async (cue, now) => {
     const words = cue.text.split(' ')
-    const progress = Math.min(1, Math.max(0, (now - cue.start) / Math.max(0.8, cue.end - cue.start)))
+    const progress = Math.min(
+      1,
+      Math.max(0, (now - cue.start) / Math.max(0.8, cue.end - cue.start)),
+    )
     const n = Math.max(1, Math.ceil(progress * words.length))
     await setCaption(words.slice(0, n).join(' '))
   }
@@ -254,7 +257,8 @@ try {
   // --- 31s: ALLOW and the real PayPal sandbox order -----------------------------------------------
   const panel = page.locator('[data-testid="paypal-order-panel"]')
   await panel.waitFor({ state: 'visible' })
-  paypalOrderId = (await page.locator('[data-testid="paypal-order-id"]').textContent())?.trim() ?? null
+  paypalOrderId =
+    (await page.locator('[data-testid="paypal-order-id"]').textContent())?.trim() ?? null
   paypalOrderStatus =
     (await page.locator('[data-testid="paypal-order-status"]').textContent())?.trim() ?? null
   await park(await topOf(panel))
@@ -304,7 +308,12 @@ try {
 } catch (err) {
   console.error('record-demo failed:', err?.stack || err)
   console.log(
-    JSON.stringify({ ok: false, paypalOrderId, paypalOrderStatus, error: String(err?.message || err) }),
+    JSON.stringify({
+      ok: false,
+      paypalOrderId,
+      paypalOrderStatus,
+      error: String(err?.message || err),
+    }),
   )
   process.exitCode = 1
 } finally {

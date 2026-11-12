@@ -186,6 +186,16 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
 
+  // --- Playwright's browser-side code is written in the Node script that drives it ---
+  //
+  // `scripts/record-demo.mjs` passes `() => { document… }` closures to `page.evaluate`, so the
+  // identifiers are browser globals even though the file runs under Node. Without this the whole
+  // `pnpm lint` gate fails with `no-undef`, which is a fact about ESLint rather than about the code.
+  {
+    files: ['scripts/record-demo.mjs'],
+    languageOptions: { globals: { ...nodeGlobals, ...browserGlobals } },
+  },
+
   // --- generated ---
   {
     files: ['packages/db/src/migrations/**', '**/drizzle/**'],

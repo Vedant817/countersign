@@ -355,3 +355,28 @@ WP-06s and everything needing live sandbox is not started.
   figure, and 22/167 sentences still hand `lineItems` to a model when one is configured.
 
 
+
+- **2026-11-13 (IST)** - **`prod/real-users` opened: production-readiness audit and the first two P0
+  user-visible bugs fixed.** `docs/PROD_AUDIT.md` ranks what breaks when real users arrive; this entry
+  records what is verified fixed so far. **P0-1**: `/disputes` rendered `citation.artefact` - a
+  `ClaimArtefact` *object* (`packages/defender/src/citation-check.ts`), not a string - so
+  `apps/web/lib/defender-demo.ts` flattened it with `String(c.artefact)` and the packet's own page read
+  `"..." <- [object Object]` for every cited claim. The view now carries `{ id, kind, description }` and
+  the page renders the §7.3 bundle id with its description. Same file: `amount` was
+  `` `$${formatMoney(...)}` `` and printed `$$128.00`. **P0-2**: both the LLM loop
+  (`packages/agent/src/agent.ts`) and the scripted shopper (`scripted.ts`) built the agent's first
+  thought as `readback.split('\n')[0]`, which is the read-back's markdown *heading*
+  `**What you are authorising**` (`packages/compiler/src/readback.ts`) - so the buyer's actual cap never
+  appeared in the transcript and the markdown was rendered literally. The rule is now structural, not
+  textual: a line that is entirely a bold span is a heading, and the first line that is not is content
+  (`packages/agent/src/readback-summary.ts`). That replaced a hardcoded `startsWith('**What')` filter in
+  `agent-chat.tsx`, which would have stopped matching the moment the wording changed. The session route
+  now returns `readback_summary` and `cap_display` so the client renders one server-computed string
+  instead of re-implementing money (`CENTS()` divided by 100 and prepended `$`, the same bug class as
+  `c6d6855`). **Verified against the live app, not asserted:** `GET /disputes` returns 200 with 0
+  occurrences of `[object Object]`; `POST /api/agent/session` returns
+  `readback_summary: "Spend at most $50.00 in total"`, `cap_display: "$50.00"`; the SSE stream of
+  `POST /api/agent/run` carries `thought: "Reading your mandate. Spend at most $50.00 in total"`.
+  New tests: `apps/web/lib/defender-demo.test.ts` (artefact shape + no `[object Object]` + one currency
+  symbol) and `packages/agent/test/readback-summary.test.ts` (structural heading rule against a real
+  `readBack()` output, truncation, empty read-back).

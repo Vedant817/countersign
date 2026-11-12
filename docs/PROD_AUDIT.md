@@ -9,25 +9,25 @@ configured-off state** and never fake success.
 
 Baseline measured on this branch, with real command output:
 
-| Check | Result |
-|---|---|
-| `git status` at start | clean `main`, 3 untracked paths (2 demo scripts, 1 screenshot dir) |
-| `git log -1 main` | `eb05a31 chore: clear the lint errors main was carrying` |
-| `pnpm test` | **2862 passed, 10 skipped, 112 files passed / 2 skipped** |
-| `docker compose up -d --wait db` | `Container countersign-db Healthy` |
-| `pnpm db:migrate` | `migrations applied successfully!` |
-| `pnpm db:seed` | 3 users, 1 device, 1 wallet, 24 products |
-| `GET /status` | 503 - **correct**: PayPal is `not_configured` (no client id/secret) |
-| `POST /api/agent/session` | 200, real mandate `mdt_…` with real read-back |
-| `POST /api/agent/run` (scripted) | ALLOW → real PayPal order `93826634BT458811M` |
-| `GET /disputes` | 200, **reproduces `[object Object]`** |
+| Check                            | Result                                                              |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `git status` at start            | clean `main`, 3 untracked paths (2 demo scripts, 1 screenshot dir)  |
+| `git log -1 main`                | `eb05a31 chore: clear the lint errors main was carrying`            |
+| `pnpm test`                      | **2862 passed, 10 skipped, 112 files passed / 2 skipped**           |
+| `docker compose up -d --wait db` | `Container countersign-db Healthy`                                  |
+| `pnpm db:migrate`                | `migrations applied successfully!`                                  |
+| `pnpm db:seed`                   | 3 users, 1 device, 1 wallet, 24 products                            |
+| `GET /status`                    | 503 - **correct**: PayPal is `not_configured` (no client id/secret) |
+| `POST /api/agent/session`        | 200, real mandate `mdt_…` with real read-back                       |
+| `POST /api/agent/run` (scripted) | ALLOW → real PayPal order `93826634BT458811M`                       |
+| `GET /disputes`                  | 200, **reproduces `[object Object]`**                               |
 
 Severity: **P0** = a user sees wrong output or loses data. **P1** = a real-user flow is impossible.
 **P2** = correctness/robustness that will not be hit on day one but will be hit.
 
 ---
 
-## 1. P0 - `[object Object]` on the dispute evidence page (FIXED, see §8)
+## 1. P0 — `[object Object]` on the dispute evidence page (**FIXED**)
 
 **Where.** `apps/web/app/disputes/page.tsx:127-137` renders `citation.artefact` inside a `<span>`:
 
@@ -36,19 +36,26 @@ Severity: **P0** = a user sees wrong output or loses data. **P1** = a real-user 
 ```
 
 **What the type actually is.** `packages/defender/src/citation-check.ts:86` - `ClaimArtefact` is an
-**object** `{ id, kind, description }`, not a string. `apps/web/lib/defender-demo.ts:829` flattens it with
+**object** `{ id, kind, description }`, not a string. `apps/web/lib/defender-demo.ts` flattened it with
 `String(c.artefact)`, which is `String({...})` → `"[object Object]"`.
 
-**Evidence.** Live render of `http://127.0.0.1:3000/disputes` contains 15 instances of
+**Evidence (before).** Live render of `http://127.0.0.1:3000/disputes` contained 15 instances of
 `<span class="font-mono">[object Object]</span>`, one per cited claim, on the packet the PDF publishes.
 This is the page a PayPal adjudicator reads.
 
-**Also found in the same render (P1, §2).** `amount` prints **`$$128.00`** - the template already prefixes
-`$` and `defender-demo.ts:470` passes `$${formatMoney(...)}`.
+**Fix.** The view type now carries `artefact: { id, kind, description }`; `demoCases` maps the three
+fields through; the page renders the §7.3 bundle id (`capture:…`, `gate:…`) with its description.
+
+**Verified after.** `GET /disputes` → 200, `[object Object]` occurrences **0**, `capture:DEMO00000000000002`
+rendered. `apps/web/lib/defender-demo.test.ts` asserts the shape and the absence of `[object Object]` in
+the serialised view.
+
+**Also found in the same render, fixed with it.** `amount` printed **`$$128.00`** — the value is now
+`formatMoney(...)` alone, and the test asserts `/^\$[\d,]+\.\d{2}$/`.
 
 ---
 
-## 2. P0 - garbled intent read-back in the agent chat
+## 2. P0 — garbled intent read-back in the agent chat (**FIXED**)
 
 **Where.** `packages/agent/src/scripted.ts:108` and `packages/agent/src/agent.ts:135`:
 
@@ -63,15 +70,26 @@ text: `Reading your mandate. ${mandatory.readback.split('\n')[0] ?? ''}`.trim()
 Reading your mandate. **What you are authorising**
 ```
 
-**Evidence.** Captured from the SSE stream of `POST /api/agent/run` (real run, order
+**Evidence (before).** Captured from the SSE stream of `POST /api/agent/run` (real run, order
 `93826634BT458811M`): `thought: {"text":"Reading your mandate. **What you are authorising**"}`.
 
 Two more defects in the same two lines:
 
-- `agent-chat.tsx:83` `firstLine()` strips `**What` lines by `startsWith('**What')` — a hardcoded English
+- `agent-chat.tsx` `firstLine()` stripped `**What` lines by `startsWith('**What')` — a hardcoded English
   prefix, so any other read-back wording renders as raw markdown in the mandate chip.
-- `scripted.ts:108` picks `split('\n')[0]`, so **the cap the buyer signed is never shown** in the
-  transcript. The whole point of the chip is "what did I sign".
+- `split('\n')[0]` means **the cap the buyer signed is never shown** in the transcript. The whole point
+  of the chip is "what did I sign".
+
+**Fix.** `packages/agent/src/readback-summary.ts` — a structural rule, not a textual one: a line that is
+_entirely_ a bold span is a heading and is skipped; the first line that is not is content, and it comes
+back with no markup, cut on a word boundary. Both loops use it. The session route returns
+`readback_summary` and `cap_display` so the client renders one server-computed string instead of a second
+implementation (`CENTS()` divided by 100 and prepended `$` — the same class of bug as `c6d6855`).
+
+**Verified after.** `POST /api/agent/session` → `readback_summary: "Spend at most $50.00 in total"`,
+`cap_display: "$50.00"`. SSE `POST /api/agent/run` →
+`thought: "Reading your mandate. Spend at most $50.00 in total"`.
+`packages/agent/test/readback-summary.test.ts` asserts the rule against a real `readBack()` output.
 
 ---
 
@@ -87,7 +105,7 @@ for role, kid in (("ISSUER", …), ("MERCHANT", …)):
 
 **Consequence.** Every restart of `countersign-vi` mints a **new** issuer and merchant key under the same
 `kid`. Evidence signed before the restart cannot be verified after it: `GET /v1/jwks` publishes a
-*different* public key under the *same* `kid`, so a verifier resolves the kid, gets the new key, and the
+_different_ public key under the _same_ `kid`, so a verifier resolves the kid, gets the new key, and the
 old signature fails. There is no `RETIRED` state and no `kid` change, so EC-KEY-2/EC-KEY-3 (verify after
 rotation) are structurally unreachable. `jwks_keys` in Postgres is a mirror that is refreshed per process
 (`agent-session.ts::syncViKeys`) and therefore silently follows the restart.
@@ -130,13 +148,13 @@ Verified live in this session: `createDemoOrder` (no payment source) → real sa
 
 Not reachable from the app:
 
-| Capability | Library | App call site |
-|---|---|---|
-| authorize / capture | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none |
-| refund / void | `refundCapture`, `voidAuthorization` ✅ | none |
-| webhooks (verify + ingest) | `packages/webhooks` ✅ + `apps/worker` ✅ | **no route** - `apps/web/app/api` has no `webhooks/` directory |
-| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅ | none - `/disputes` renders fixtures |
-| reconciler crons | `apps/worker/src/schedule.ts` ✅ | `render.yaml` defines the worker; never run here |
+| Capability                         | Library                                               | App call site                                                  |
+| ---------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------- |
+| authorize / capture                | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none                                                           |
+| refund / void                      | `refundCapture`, `voidAuthorization` ✅               | none                                                           |
+| webhooks (verify + ingest)         | `packages/webhooks` ✅ + `apps/worker` ✅             | **no route** - `apps/web/app/api` has no `webhooks/` directory |
+| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅    | none - `/disputes` renders fixtures                            |
+| reconciler crons                   | `apps/worker/src/schedule.ts` ✅                      | `render.yaml` defines the worker; never run here               |
 
 `PAYPAL_WEBHOOK_ID` is empty, so `verify-webhook-signature` cannot be attempted.
 
@@ -170,21 +188,21 @@ deadline.
 
 ## 8. P2 - correctness and robustness
 
-| # | Finding | Evidence |
-|---|---|---|
-| 8.1 | `$$128.00` on `/disputes` (double currency symbol) | live render |
-| 8.2 | `defender-demo.ts` caches rendered cases in a module `Map` forever, keyed by case id, with `nowSec` baked in — a long-running process shows a **stale** `response due` date and a stale hash | `const cache = new Map<DefenderCaseId, RenderedCase>()` |
-| 8.3 | `demoVerifierRows` awaits a **render** from a GET handler and `jwks.listAll()` returns `[]`, so a scanned QR reports chain checks as SKIPPED forever | `demo-verifier.tsx:78` |
-| 8.4 | `agent-chat.tsx` sends `mode: 'scripted'` from both chat buttons, so the LLM path is unreachable from the UI even when a model is configured | `agent-chat.tsx:271,290` |
-| 8.5 | `agent-chat.tsx` `CENTS()` re-implements money formatting instead of `formatMoney` (the same bug class as `c6d6855`) | `agent-chat.tsx:71` |
-| 8.6 | `defender-demo.ts` is `server-only` but imports `ai` and calls the model at request time with no timeout; a hung provider hangs the page | `renderDefenderCase` |
-| 8.7 | `apps/web/app/api/agent/run` builds an MCP HTTP client **pointing at itself** (`/api/mcp/http`) while the route is `/api/mcp/[transport]` — it works only because `[transport]` matches `http` | `route.ts:110` |
-| 8.8 | `demo-order.ts` `toDemoOrder` casts `raw as {...}` and reads `custom_id` from two places with different shapes | — |
-| 8.9 | `packages/webhooks/src/*.d.ts` files exist in the tree (untracked build emit, ignored by `.gitignore` `*.d.ts`) — harmless, but `packages/webhooks` has no `dist` | `git ls-files` shows none |
-| 8.10 | `render.yaml` still pins `LLM_MAIN_MODEL: gpt-6.1-sol` / `gpt-6-luna` — illustrative spec names, not real model ids (docs/DECISIONS.md already removed this default from `env.ts`) | `render.yaml` |
-| 8.11 | `render.yaml` `GATE_SIGNING_KEY` comment says "P-256 private JWK"; the code requires **Ed25519** | `render.yaml` vs `gate-runtime.ts` |
-| 8.12 | No CI job runs the Python tests on Linux in the same workflow as the JS gates (`sandbox-nightly.yml` is separate and needs secrets) | `.github/workflows/ci.yml` |
-| 8.13 | `docs/EDGE_CASES.md`: 62 done / 42 wip / 3 blocked / 2 dropped of 109 | `pnpm test:ec` |
+| #    | Finding                                                                                                                                                                                                       | Evidence                                                |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| 8.1  | `$$128.00` on `/disputes` (double currency symbol)                                                                                                                                                            | live render                                             |
+| 8.2  | `defender-demo.ts` caches rendered cases in a module `Map` forever, keyed by case id, with `nowSec` baked in — a long-running process shows a **stale** `response due` date and a stale hash                  | `const cache = new Map<DefenderCaseId, RenderedCase>()` |
+| 8.3  | `demoVerifierRows` awaits a **render** from a GET handler and `jwks.listAll()` returns `[]`, so a scanned QR reports chain checks as SKIPPED forever                                                          | `demo-verifier.tsx:78`                                  |
+| 8.4  | `agent-chat.tsx` sends `mode: 'scripted'` from both chat buttons, so the LLM path is unreachable from the UI even when a model is configured                                                                  | `agent-chat.tsx:271,290`                                |
+| 8.5  | ~~`agent-chat.tsx` `CENTS()` re-implements money formatting~~ **FIXED 2026-11-13** — the client now calls `formatMoney` from `@countersign/core` with the Gate's own minor units and currency (`amountLabel`) | `agent-chat.tsx`                                        |
+| 8.6  | `defender-demo.ts` is `server-only` but imports `ai` and calls the model at request time with no timeout; a hung provider hangs the page                                                                      | `renderDefenderCase`                                    |
+| 8.7  | `apps/web/app/api/agent/run` builds an MCP HTTP client **pointing at itself** (`/api/mcp/http`) while the route is `/api/mcp/[transport]` — it works only because `[transport]` matches `http`                | `route.ts:110`                                          |
+| 8.8  | `demo-order.ts` `toDemoOrder` casts `raw as {...}` and reads `custom_id` from two places with different shapes                                                                                                | —                                                       |
+| 8.9  | `packages/webhooks/src/*.d.ts` files exist in the tree (untracked build emit, ignored by `.gitignore` `*.d.ts`) — harmless, but `packages/webhooks` has no `dist`                                             | `git ls-files` shows none                               |
+| 8.10 | `render.yaml` still pins `LLM_MAIN_MODEL: gpt-6.1-sol` / `gpt-6-luna` — illustrative spec names, not real model ids (docs/DECISIONS.md already removed this default from `env.ts`)                            | `render.yaml`                                           |
+| 8.11 | `render.yaml` `GATE_SIGNING_KEY` comment says "P-256 private JWK"; the code requires **Ed25519**                                                                                                              | `render.yaml` vs `gate-runtime.ts`                      |
+| 8.12 | No CI job runs the Python tests on Linux in the same workflow as the JS gates (`sandbox-nightly.yml` is separate and needs secrets)                                                                           | `.github/workflows/ci.yml`                              |
+| 8.13 | `docs/EDGE_CASES.md`: 62 done / 42 wip / 3 blocked / 2 dropped of 109                                                                                                                                         | `pnpm test:ec`                                          |
 
 ---
 
@@ -202,10 +220,10 @@ deadline.
 
 ## 10. Order of work (this branch)
 
-1. **[P0]** `[object Object]` on `/disputes` + the `$$` double symbol. *(done - §1)*
+1. **[P0]** `[object Object]` on `/disputes` + the `$$` double symbol. ✅ **done 2026-11-13** (§1)
 2. **[P0]** garbled read-back in the agent chat + show the real cap + kill `firstLine`'s hardcoded prefix.
-   *(done - §2)*
-3. **[P0]** persistent issuer/merchant/Gate signing keys; refuse to boot on an unusable key. *(§3)*
+   ✅ **done 2026-11-13** (§2)
+3. **[P0]** persistent issuer/merchant/Gate signing keys; refuse to boot on an unusable key. _(§3)_
 4. **[P1]** fail-loudly configuration audit: delete the `.env.local` disk fallback; `/status` reports
    every configured-off dependency the app actually uses.
 5. **[P1]** real webhook ingest route with PayPal signature verification (unblocked; needs

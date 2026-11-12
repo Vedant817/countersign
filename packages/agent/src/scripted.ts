@@ -33,6 +33,7 @@
  */
 import type { ShopDeps, ShopEvent, ShopEventData, ShopOutcome, ShopRequest } from './types'
 import { createAgentOps, parseMinor, type SubmitCheckoutOutput } from './tools'
+import { readbackSummaryLine } from './readback-summary'
 
 export type ScriptedBehaviour = 'lawful' | 'instructed' | 'compromised'
 
@@ -104,8 +105,14 @@ export async function* runScriptedShopper(
 
   const ops = createAgentOps({ mandate, deps })
   const mandatory = await ops.readMandate()
+  // The buyer's own first limit, in plain text. `readback.split('\n')[0]` was the markdown heading
+  // `**What you are authorising**`, so the transcript said nothing about what the buyer had signed.
+  const mandateLine = readbackSummaryLine(mandatory.readback)
   yield ev('thought', nowMs(), {
-    text: `Reading your mandate. ${mandatory.readback.split('\n')[0] ?? ''}`.trim(),
+    text:
+      mandateLine === ''
+        ? 'Reading your mandate. Your limits are loaded and the Gate will hold them.'
+        : `Reading your mandate. ${mandateLine}`,
   })
 
   try {

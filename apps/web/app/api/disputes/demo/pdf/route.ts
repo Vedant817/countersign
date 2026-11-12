@@ -23,7 +23,10 @@ function isCaseId(value: string): value is DefenderCaseId {
 export async function GET(request: Request): Promise<NextResponse> {
   if (!agentDemoAllowed()) {
     return NextResponse.json(
-      { error: 'The Defender demo is off here: it needs COUNTERSIGN_AGENT_DEMO=1 and non-production.' },
+      {
+        error:
+          'The Defender demo is off here: it needs COUNTERSIGN_AGENT_DEMO=1 and non-production.',
+      },
       { status: 403 },
     )
   }
@@ -45,7 +48,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   const pdf = await demoCasePdf(caseParam, base)
   if (pdf === null) {
     return NextResponse.json(
-      { error: 'This case files nothing, so it has no packet. Only the unauthorised case renders one.' },
+      {
+        error:
+          'This case files nothing, so it has no packet. Only the unauthorised case renders one.',
+      },
       { status: 404 },
     )
   }

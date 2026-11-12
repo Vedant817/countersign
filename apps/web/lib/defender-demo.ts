@@ -182,7 +182,12 @@ export interface DefenderCaseView {
     readonly citations: readonly {
       readonly claimId: string
       readonly sentence: string
-      readonly artefact: string
+      /** The §7.3 bundle id the sentence cites (`l1`, `gate:<id>`, `capture:<id>`, …). */
+      readonly artefact: {
+        readonly id: string
+        readonly kind: string
+        readonly description: string
+      }
     }[]
   } | null
   readonly pdf: {
@@ -542,7 +547,7 @@ export async function renderDefenderCase(
       reason: row.reason,
       stage: row.stage,
       status: row.status,
-      amount: `$${formatMoney(money(AMOUNT_MINOR, CURRENCY))}`,
+      amount: formatMoney(money(AMOUNT_MINOR, CURRENCY)),
       opened: new Date(world.openedSec * 1000).toISOString(),
       responseDue: new Date(world.dueSec * 1000).toISOString(),
     },
@@ -689,7 +694,11 @@ export async function renderDefenderCase(
         citations: citations.map((c) => ({
           claimId: c.claimId,
           sentence: c.sentence,
-          artefact: String(c.artefact),
+          artefact: {
+            id: c.artefact.id,
+            kind: c.artefact.kind,
+            description: c.artefact.description,
+          },
         })),
       },
       pdf: {
@@ -721,9 +730,7 @@ export async function renderDefenderCase(
  * the hex digest the verifier's offline check compares against. The JWKS stay empty on purpose: the
  * fixture chain artefacts are not real signatures, and a real deployment would hold the Gate's key.
  */
-export async function demoVerifierRows(
-  packetId: string,
-): Promise<{
+export async function demoVerifierRows(packetId: string): Promise<{
   packet: Record<string, unknown>
   dispute: Record<string, unknown>
   bundle: EvidenceBundle
