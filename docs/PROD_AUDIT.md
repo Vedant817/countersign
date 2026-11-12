@@ -1,0 +1,223 @@
+# PROD AUDIT - what breaks when real users arrive
+
+_Started 2026-11-13 (overnight, `prod/real-users`)._
+
+Scope: make Countersign behave like a product if real users arrive tomorrow. No hardcoded values, no
+stale data, no demo-only paths in production code, no dummy data, no fixtures outside
+`packages/*/test/`. Where an external credential is genuinely missing, the app must **fail loudly with a
+configured-off state** and never fake success.
+
+Baseline measured on this branch, with real command output:
+
+| Check | Result |
+|---|---|
+| `git status` at start | clean `main`, 3 untracked paths (2 demo scripts, 1 screenshot dir) |
+| `git log -1 main` | `eb05a31 chore: clear the lint errors main was carrying` |
+| `pnpm test` | **2862 passed, 10 skipped, 112 files passed / 2 skipped** |
+| `docker compose up -d --wait db` | `Container countersign-db Healthy` |
+| `pnpm db:migrate` | `migrations applied successfully!` |
+| `pnpm db:seed` | 3 users, 1 device, 1 wallet, 24 products |
+| `GET /status` | 503 - **correct**: PayPal is `not_configured` (no client id/secret) |
+| `POST /api/agent/session` | 200, real mandate `mdt_…` with real read-back |
+| `POST /api/agent/run` (scripted) | ALLOW → real PayPal order `93826634BT458811M` |
+| `GET /disputes` | 200, **reproduces `[object Object]`** |
+
+Severity: **P0** = a user sees wrong output or loses data. **P1** = a real-user flow is impossible.
+**P2** = correctness/robustness that will not be hit on day one but will be hit.
+
+---
+
+## 1. P0 - `[object Object]` on the dispute evidence page (FIXED, see §8)
+
+**Where.** `apps/web/app/disputes/page.tsx:127-137` renders `citation.artefact` inside a `<span>`:
+
+```tsx
+<span className="font-mono">{citation.artefact}</span>
+```
+
+**What the type actually is.** `packages/defender/src/citation-check.ts:86` - `ClaimArtefact` is an
+**object** `{ id, kind, description }`, not a string. `apps/web/lib/defender-demo.ts:829` flattens it with
+`String(c.artefact)`, which is `String({...})` → `"[object Object]"`.
+
+**Evidence.** Live render of `http://127.0.0.1:3000/disputes` contains 15 instances of
+`<span class="font-mono">[object Object]</span>`, one per cited claim, on the packet the PDF publishes.
+This is the page a PayPal adjudicator reads.
+
+**Also found in the same render (P1, §2).** `amount` prints **`$$128.00`** - the template already prefixes
+`$` and `defender-demo.ts:470` passes `$${formatMoney(...)}`.
+
+---
+
+## 2. P0 - garbled intent read-back in the agent chat
+
+**Where.** `packages/agent/src/scripted.ts:108` and `packages/agent/src/agent.ts:135`:
+
+```ts
+text: `Reading your mandate. ${mandatory.readback.split('\n')[0] ?? ''}`.trim()
+```
+
+`readBack()`'s first line is the **markdown header** `**What you are authorising**`
+(`packages/compiler/src/readback.ts:65`), not a limit. Every run opens with the literal sentence:
+
+```
+Reading your mandate. **What you are authorising**
+```
+
+**Evidence.** Captured from the SSE stream of `POST /api/agent/run` (real run, order
+`93826634BT458811M`): `thought: {"text":"Reading your mandate. **What you are authorising**"}`.
+
+Two more defects in the same two lines:
+
+- `agent-chat.tsx:83` `firstLine()` strips `**What` lines by `startsWith('**What')` — a hardcoded English
+  prefix, so any other read-back wording renders as raw markdown in the mandate chip.
+- `scripted.ts:108` picks `split('\n')[0]`, so **the cap the buyer signed is never shown** in the
+  transcript. The whole point of the chip is "what did I sign".
+
+---
+
+## 3. P0 - signing keys are ephemeral per process (no persistence, no rotation)
+
+**Where.** `apps/vi/src/vi_service/keys.py` `KeyStore._boot()`:
+
+```python
+"""Mint the ISSUER and MERCHANT keys. Ephemeral by design (spec §3.1: 'in memory')."""
+for role, kid in (("ISSUER", …), ("MERCHANT", …)):
+    key = generate_es256_key()
+```
+
+**Consequence.** Every restart of `countersign-vi` mints a **new** issuer and merchant key under the same
+`kid`. Evidence signed before the restart cannot be verified after it: `GET /v1/jwks` publishes a
+*different* public key under the *same* `kid`, so a verifier resolves the kid, gets the new key, and the
+old signature fails. There is no `RETIRED` state and no `kid` change, so EC-KEY-2/EC-KEY-3 (verify after
+rotation) are structurally unreachable. `jwks_keys` in Postgres is a mirror that is refreshed per process
+(`agent-session.ts::syncViKeys`) and therefore silently follows the restart.
+
+`GATE_SIGNING_KEY` is worse: `scripts/dev-local.mjs` generates a **fresh Ed25519 key on every launch**, so
+every Gate decision record ever signed becomes unverifiable when the dev server restarts, and
+`render.yaml` sets `GATE_SIGNING_KEY` with `sync: false` (operator must invent one).
+
+**Fix shape.** Load-or-create from `VI_KEK`-derived material persisted in Postgres (issuer/merchant), never
+regenerate under an existing `kid`; keep retired public halves in `jwks_keys` with `status`. The Gate key
+must be a required, operator-supplied secret with a boot-time shape check (already validated in
+`gate-runtime.ts`), plus a documented rotation command.
+
+---
+
+## 4. P1 - there is no real buyer account, so nothing can be captured
+
+**Where.** `apps/web/lib/agent-session.ts` provisions a **new user per request**
+(`newId('usr')`, `demo.buyer.<id>@example.test`), with `payment_token_id: DEMO-NOT-A-VAULT-TOKEN-…`.
+
+**Consequence.** No session, no login, no user-owned data, no wallet, no history. `/api/agent/session`
+mints a fresh identity every call and `agentDemoAllowed()` gates the whole surface behind
+`COUNTERSIGN_AGENT_DEMO=1` + non-production, so on a real deployment **the agent chat does not exist**.
+Per-user data isolation (priority 3 in the brief) has no foundation: `users` rows are per-request
+throwaways, and there is no cookie, no session, no ownership check anywhere in `apps/web`.
+
+`iron-session` + `SESSION_SECRET` are validated at boot but **never used**: `grep -r iron-session` finds no
+call site. There is no `/api/auth`, no login page, no `middleware.ts`.
+
+**Blocked on** HUMAN_TODO 1a (Vault + buyer credentials). The code path that needs it is
+`packages/orders/src/create.ts:305` `payment_source: { paypal: { vault_id: draft.wallet.vaultId } }` —
+complete and tested, unreachable because no wallet ever holds a real `vault_id`.
+
+---
+
+## 5. P1 - PayPal: order create/get work; authorize, capture, refund, void, webhooks, disputes are unreachable
+
+Verified live in this session: `createDemoOrder` (no payment source) → real sandbox order; `rereadDemoOrder`
+→ `GET /v2/checkout/orders/{id}` answers.
+
+Not reachable from the app:
+
+| Capability | Library | App call site |
+|---|---|---|
+| authorize / capture | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none |
+| refund / void | `refundCapture`, `voidAuthorization` ✅ | none |
+| webhooks (verify + ingest) | `packages/webhooks` ✅ + `apps/worker` ✅ | **no route** - `apps/web/app/api` has no `webhooks/` directory |
+| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅ | none - `/disputes` renders fixtures |
+| reconciler crons | `apps/worker/src/schedule.ts` ✅ | `render.yaml` defines the worker; never run here |
+
+`PAYPAL_WEBHOOK_ID` is empty, so `verify-webhook-signature` cannot be attempted.
+
+**Blocked on** HUMAN_TODO 1a/2/3 for the buyer-side half. The **webhook route is not blocked** and is the
+highest-value unblocked item in this list.
+
+---
+
+## 6. P1 - the demo money path reads `.env.local` from disk behind the app's own config
+
+**Where.** `apps/web/lib/demo-order.ts::paypalCreds()` — when `process.env.PAYPAL_CLIENT_ID` is empty it
+walks `cwd`, `../../`, `../../../` looking for `.env.local` and parses it with a regex.
+
+**Why it is wrong for production.** `docs/` and `.env.example` both say secrets come from env vars only
+(AGENTS.md rule 4, spec §6). A file-reading fallback means a container with a mounted `.env.local` would
+silently use credentials the operator did not put in the environment, and a failed read is swallowed by
+`catch {}`. It also means `/status` and the order path can disagree about whether PayPal is configured —
+the exact class of "two sources of truth" this repo documents as a bug class (D-040).
+
+---
+
+## 7. P1 - `/status` is the only health surface, and the worker has none
+
+`render.yaml` gives `web` `healthCheckPath: /status`, and `countersign-vi` is `internal: true` with no
+health check. `countersign-worker` has no health check either (correct for a worker, but then nothing
+detects a dead reconciler). `/status` reads Postgres, vi, PayPal, MCP and the model, which is good — but it
+cannot tell a reader that the **reconciler has never run**, which is the failure that loses a dispute
+deadline.
+
+---
+
+## 8. P2 - correctness and robustness
+
+| # | Finding | Evidence |
+|---|---|---|
+| 8.1 | `$$128.00` on `/disputes` (double currency symbol) | live render |
+| 8.2 | `defender-demo.ts` caches rendered cases in a module `Map` forever, keyed by case id, with `nowSec` baked in — a long-running process shows a **stale** `response due` date and a stale hash | `const cache = new Map<DefenderCaseId, RenderedCase>()` |
+| 8.3 | `demoVerifierRows` awaits a **render** from a GET handler and `jwks.listAll()` returns `[]`, so a scanned QR reports chain checks as SKIPPED forever | `demo-verifier.tsx:78` |
+| 8.4 | `agent-chat.tsx` sends `mode: 'scripted'` from both chat buttons, so the LLM path is unreachable from the UI even when a model is configured | `agent-chat.tsx:271,290` |
+| 8.5 | `agent-chat.tsx` `CENTS()` re-implements money formatting instead of `formatMoney` (the same bug class as `c6d6855`) | `agent-chat.tsx:71` |
+| 8.6 | `defender-demo.ts` is `server-only` but imports `ai` and calls the model at request time with no timeout; a hung provider hangs the page | `renderDefenderCase` |
+| 8.7 | `apps/web/app/api/agent/run` builds an MCP HTTP client **pointing at itself** (`/api/mcp/http`) while the route is `/api/mcp/[transport]` — it works only because `[transport]` matches `http` | `route.ts:110` |
+| 8.8 | `demo-order.ts` `toDemoOrder` casts `raw as {...}` and reads `custom_id` from two places with different shapes | — |
+| 8.9 | `packages/webhooks/src/*.d.ts` files exist in the tree (untracked build emit, ignored by `.gitignore` `*.d.ts`) — harmless, but `packages/webhooks` has no `dist` | `git ls-files` shows none |
+| 8.10 | `render.yaml` still pins `LLM_MAIN_MODEL: gpt-6.1-sol` / `gpt-6-luna` — illustrative spec names, not real model ids (docs/DECISIONS.md already removed this default from `env.ts`) | `render.yaml` |
+| 8.11 | `render.yaml` `GATE_SIGNING_KEY` comment says "P-256 private JWK"; the code requires **Ed25519** | `render.yaml` vs `gate-runtime.ts` |
+| 8.12 | No CI job runs the Python tests on Linux in the same workflow as the JS gates (`sandbox-nightly.yml` is separate and needs secrets) | `.github/workflows/ci.yml` |
+| 8.13 | `docs/EDGE_CASES.md`: 62 done / 42 wip / 3 blocked / 2 dropped of 109 | `pnpm test:ec` |
+
+---
+
+## 9. Explicitly checked and **not** a problem
+
+- **`[object Object]` from error handling** — `DECISIONS.md:803` records the fix; `gate-runtime.ts`,
+  `apps/worker/src/index.ts` and `agent-session.ts` all now unwrap `CsError` before stringifying.
+- **`packages/gate` importing `ai`** — ESLint rule present, no violations (`pnpm lint` passes on main).
+- **`countersign.vercel.app`** — not referenced anywhere in the tree.
+- **Fixtures in production code** — `packages/paypal/test/fixtures/` is the only fixture directory and is
+  outside `src/`.
+- **Float money** — `scripts/check-money-discipline.mjs` passes.
+
+---
+
+## 10. Order of work (this branch)
+
+1. **[P0]** `[object Object]` on `/disputes` + the `$$` double symbol. *(done - §1)*
+2. **[P0]** garbled read-back in the agent chat + show the real cap + kill `firstLine`'s hardcoded prefix.
+   *(done - §2)*
+3. **[P0]** persistent issuer/merchant/Gate signing keys; refuse to boot on an unusable key. *(§3)*
+4. **[P1]** fail-loudly configuration audit: delete the `.env.local` disk fallback; `/status` reports
+   every configured-off dependency the app actually uses.
+5. **[P1]** real webhook ingest route with PayPal signature verification (unblocked; needs
+   `PAYPAL_WEBHOOK_ID` only for the positive case, and must refuse loudly without it).
+6. **[P1]** real buyer accounts + per-user isolation (blocked on Vault for the money half; the account
+   half is buildable now).
+7. **[P1]** PayPal authorize → capture → refund → void wired to the app, each verified against the
+   sandbox by command output in this thread.
+8. **[P1]** Disputes API ingest + provide-evidence wired to the app, replacing the fixture page.
+9. **[P1]** LLM path configurable, with graceful configured-off behaviour everywhere.
+10. **[P1]** edge cases: every §12 row, including PayPal 5xx/timeouts, duplicate webhooks, concurrent
+    checkouts on one budget, revoked mandate mid-checkout, refund after chargeback, tampered packets,
+    prompt injection.
+11. **[P1]** CI green: lint, typecheck, test, Python tests, Playwright e2e.
+12. **[P2]** deploy readiness: Dockerfiles, Render config, health checks, migrations.
