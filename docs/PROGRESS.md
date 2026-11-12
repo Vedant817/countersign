@@ -544,3 +544,16 @@ WP-06s and everything needing live sandbox is not started.
   compiler-checked reads (the cast had also been reading a top-level `custom_id` that `Order` does not carry).
   **Measured:** `pnpm --filter @countersign/web typecheck` exit 0, `apps/web/lib` tests `71 passed | 1 skipped`,
   `prettier` clean. The two throwaway probes were deleted after the run (output above is the record).
+
+- **2026-11-13 (IST)** - **8.7: the merchant MCP path has one definition, and a test that keeps it that way (P2).**
+  `app/api/mcp/[transport]/endpoint.ts` owns `MERCHANT_MCP_PATH` and `merchantMcpUrl(origin)`; `app/api/agent/run/route.ts`
+  now calls `merchantMcpUrl(request.url)` instead of `new URL('/api/mcp/http', request.url)`, and the route's header names
+  `./endpoint.ts` as the owner of its path. `endpoint.test.ts` pins three things: the helper resolves against the request
+  **origin** (a path-relative resolve would break a subdirectory deploy), the path names the transport `mcp-handler` serves,
+  and the agent route contains no `'/api/mcp/http'` literal.
+  **Falsified:** restoring the literal made the third test fail (`FAIL … is not repeated as a literal by the agent run route`).
+  The self-call over HTTP stays: `packages/agent` consumes an MCP *client*, so either the agent calls this app or the tool
+  runtime is duplicated in-process; a configurable base URL that nothing reads would be the half-feature this audit removes.
+  **Measured:** `pnpm --filter @countersign/web typecheck` exit 0, `lint` 0 errors, `format:check` clean, `build` exit 0
+  (`Compiled successfully`, 14/14 static pages), whole repo `119 files / 2897 passed | 1 skipped` (3 new tests).
+  **CI run 43317244868** (head `df81480`) finished **11 of 11 jobs success** - `all gates green`.

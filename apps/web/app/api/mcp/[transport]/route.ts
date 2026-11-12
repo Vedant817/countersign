@@ -5,6 +5,9 @@
  * (lib/mcp-checkout) and records the decision; it does NOT create a PayPal order, because an ALLOW is a
  * permission and the order path needs a vaulted buyer this deployment does not have yet. Order status
  * reads the persisted orders table.
+ *
+ * The path this route answers on is owned by `./endpoint.ts`, which the agent run route reads too; it is
+ * not repeated as a literal anywhere else.
  */
 import type { AuthInfo, CallToolResult } from '@modelcontextprotocol/server'
 import { createMcpHandler, withMcpAuth } from 'mcp-handler'

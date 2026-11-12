@@ -46,6 +46,7 @@ import {
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { merchantMcpUrl } from '@/app/api/mcp/[transport]/endpoint'
 import { sessionMandatePort, sessionSigner, agentDemoAllowed } from '@/lib/agent-session'
 import { languageModel } from '@/lib/llm'
 import { MCP_TOKEN_TTL_SECONDS, mintAgentToken } from '@/lib/mcp-token'
@@ -102,7 +103,8 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json(toBody(token.error), { status: 503 })
   }
 
-  const mcpUrl = new URL('/api/mcp/http', request.url).toString()
+  // One definition of the merchant MCP path, shared with the route that serves it (audit 8.7).
+  const mcpUrl = merchantMcpUrl(request.url)
   const merchantMcp = await createMCPClient({
     transport: {
       type: 'http',
