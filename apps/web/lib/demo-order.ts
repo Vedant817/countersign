@@ -52,21 +52,57 @@ export interface DemoOrder {
   readonly createTime: string | null
 }
 
+import fs from 'node:fs'
+import path from 'node:path'
+
+/** Fallback: read PayPal creds from root .env.local if the server process didn't inherit them. */
+function paypalCreds(): { id: string; secret: string; base: string } {
+  let id = process.env['PAYPAL_CLIENT_ID'] ?? ''
+  let secret = process.env['PAYPAL_CLIENT_SECRET'] ?? ''
+  let base = process.env['PAYPAL_API_BASE'] ?? 'https://api-m.sandbox.paypal.com'
+  if (id === '' || secret === '') {
+    try {
+      const candidates = [
+        path.resolve(process.cwd(), '.env.local'),
+        path.resolve(process.cwd(), '../../.env.local'),
+        path.resolve(process.cwd(), '../../../.env.local'),
+      ]
+      for (const p of candidates) {
+        if (!fs.existsSync(p)) continue
+        const text = fs.readFileSync(p, 'utf8')
+        for (const line of text.split(/\r?\n/)) {
+          const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
+          if (!m) continue
+          if (m[1] === 'PAYPAL_CLIENT_ID' && id === '') id = m[2].trim()
+          if (m[1] === 'PAYPAL_CLIENT_SECRET' && secret === '') secret = m[2].trim()
+          if (m[1] === 'PAYPAL_API_BASE' && base === 'https://api-m.sandbox.paypal.com') base = m[2].trim() || base
+        }
+        if (id !== '' && secret !== '') break
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return { id, secret, base }
+}
+
 /** True when this deployment is allowed and able to create demo orders at all. */
 export function demoOrderPossible(): boolean {
+  const creds = paypalCreds()
   return (
     agentDemoAllowed() &&
     process.env['PAYPAL_ENV'] === 'sandbox' &&
-    (process.env['PAYPAL_CLIENT_ID'] ?? '') !== '' &&
-    (process.env['PAYPAL_CLIENT_SECRET'] ?? '') !== ''
+    creds.id !== '' &&
+    creds.secret !== ''
   )
 }
 
 function client(): PayPalClient {
+  const creds = paypalCreds()
   return new PayPalClient({
-    baseUrl: process.env['PAYPAL_API_BASE'] ?? 'https://api-m.sandbox.paypal.com',
-    clientId: process.env['PAYPAL_CLIENT_ID'] ?? '',
-    clientSecret: process.env['PAYPAL_CLIENT_SECRET'] ?? '',
+    baseUrl: creds.base,
+    clientId: creds.id,
+    clientSecret: creds.secret,
     clock: systemClock,
   })
 }

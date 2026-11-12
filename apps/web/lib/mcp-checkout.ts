@@ -155,7 +155,7 @@ export async function submitCheckout(
       orderNote =
         `PayPal sandbox order ${order.value.id} was created from this decision (status ` +
         `${order.value.status}; it carries the decision id in its custom_id). It is not ` +
-        'authorized or captured — that needs a buyer present, which this demo does not have.'
+        'authorized or captured - that needs a buyer present, which this demo does not have.'
     } else {
       orderNote = `A PayPal order was not created: ${order.reason}.`
     }
