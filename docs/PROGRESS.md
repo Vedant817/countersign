@@ -514,3 +514,12 @@ WP-06s and everything needing live sandbox is not started.
     exactly why the gap was invisible locally. The next CI run is the test of the fix.)
   **Measured locally before re-dispatch:** `format:check` clean, whole repo `118 files / 2894 passed | 1 skipped`,
   `vi:lint` and `vi:test` green, `secret-scan` green.
+
+- **2026-11-13 (IST)** - **CI is green on every job (P1, `prod/real-users` §8.12).**
+  Workflow run **43315696870** on `bed4e28`: **11 of 11 jobs success**, `all gates green` success. The two jobs that
+  were red before are now green with the same evidence the local gates produce:
+  - `secret scan` - `gitleaks version: 8.30.1`, `199 commits scanned`, `no leaks found`. (The earlier red run was
+    gitleaks 8.24.3, the version `gitleaks-action@v2` hard-codes, reporting 24 already-allowlisted placeholders.)
+  - `tests (e2e, playwright)` - `Running 16 tests using 1 worker`, **`16 passed (38.2s)`**. (The earlier red run was a
+    migrated-but-unseeded database, so the storefront had no products.)
+  `tests (vi-service)` is green with `ruff check` **and** `ruff format --check`, and the local `vi:lint` now runs both.
