@@ -55,19 +55,22 @@ const CASE_TITLE: Record<DefenderCaseId, string> = {
  * The store the demo page verifies against: fixture packet + dispute rows from the same rendered
  * case `/disputes` showed, and **no JWKS** — the fixture chain carries no signatures, so every
  * signature check reports exactly that instead of a verdict about key material that does not exist.
+ *
+ * `publicBaseUrl` is a parameter rather than an env var: the render bakes it into the packet's QR payload,
+ * so the rows must be read for the origin the reader is on (audit 8.3).
  */
-function demoStore(): VerifierStore {
+function demoStore(publicBaseUrl: string): VerifierStore {
   return {
     packets: {
       findById: async (id: string) => {
-        const rows = await demoVerifierRows(id)
+        const rows = await demoVerifierRows(id, publicBaseUrl)
         return ok(rows === null ? undefined : (rows.packet as unknown as EvidencePacketRow))
       },
     },
     disputes: {
       findById: async (id: string) => {
         for (const caseId of ['unauthorised', 'agent-fault'] as const) {
-          const rows = await demoVerifierRows(DEMO_PACKET_IDS[caseId])
+          const rows = await demoVerifierRows(DEMO_PACKET_IDS[caseId], publicBaseUrl)
           if (rows !== null && rows.dispute['id'] === id) {
             return ok(rows.dispute as unknown as DisputeRow)
           }
@@ -83,18 +86,22 @@ export default async function DemoVerifier({ packetId }: { packetId: string }) {
   const caseId = demoCaseForPacketId(packetId)
   if (caseId === null) return null
 
-  const rows = await demoVerifierRows(packetId)
-  if (rows === null) return null
-
+  // The origin is read **before** the rows, because the render embeds it in the packet's QR payload: a
+  // packet served here must be the one whose QR points back here, not one rendered for another host
+  // (audit 8.3). `demoVerifierRows` used to fall back to `PUBLIC_BASE_URL` / localhost, which meant a judge
+  // who scanned a QR on a cold process got a URL the server could not serve.
   const h = await headers()
   const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3210'
   const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https')
   const base = `${proto}://${host}`
 
+  const rows = await demoVerifierRows(packetId, base)
+  if (rows === null) return null
+
   const clock: Clock = systemClock
   const deps: VerifierDeps = defineVerifierDeps({
     clock,
-    store: demoStore(),
+    store: demoStore(base),
     vi: {
       publicVerify: () => {
         throw new Error(
@@ -123,24 +130,31 @@ export default async function DemoVerifier({ packetId }: { packetId: string }) {
   const redacted = buildRedactedView(packet, deps)
   assertRedactionHolds(redacted, packet.bundle)
 
-  // For this SIMULATED fixture we surface the checks that are meaningful and honest: the bundle
-  // digest/custom_id integrity (recomputed from the packet), and signature/chain checks reported as
-  // SKIPPED because this fixture carries no real signed chain or JWKS. Checks that would FAIL only
-  // because the fixture omits fields a real filing would carry (readback, preferences, decodable
-  // tokens) are summarized rather than shown as failures — we do not weaken the verifier, we scope
-  // the view to what this fixture can honestly prove.
-  const shown = report.checks.filter(
-    (c) =>
-      c.id === 'bundle_hash' ||
-      c.id === 'custom_id' ||
-      c.id === 'custom_id_binding' ||
-      c.id === 'key_order' ||
-      c.id === 'gate_record' ||
-      c.id.startsWith('gate_record_') ||
-      c.category === 'signature' ||
-      c.category === 'chain',
-  )
+  // What this SIMULATED fixture can honestly prove, split from what it cannot run at all.
+  //
+  // The first group is every row about the packet itself: the bundle digest, the derived custom_id, the
+  // canonical key order, and the two read-back digests the verifier reports as WARN because the document
+  // publishes them. The second group is the Gate's signature on its decision record and the seven bindings
+  // that depend on it — they cannot run here, because a fixture has no Gate key (audit 8.3: they used to be
+  // rendered as nine permanent SKIPPED rows, which reads as a broken verifier rather than an absent chain).
+  //
+  // Checks that would FAIL only because the fixture omits fields a real filing carries (readback,
+  // preferences, decodable tokens) are still omitted: we do not weaken the verifier, we scope the view.
+  const isFixtureCheck = (c: VerifierReport['checks'][number]) =>
+    c.id === 'bundle_hash' ||
+    c.id === 'custom_id' ||
+    c.id === 'custom_id_binding' ||
+    c.id === 'key_order' ||
+    c.id === 'gate_record' ||
+    c.id.startsWith('gate_record_') ||
+    c.category === 'signature' ||
+    c.category === 'chain'
+
+  const shown = report.checks.filter((c) => isFixtureCheck(c) && c.status !== 'SKIPPED')
   const checks = shown.length > 0 ? shown : report.checks.filter((c) => c.status !== 'FAIL')
+  /** The rows this fixture cannot run. Reported as a count and a reason, not as eight grey verdicts. */
+  const notRun = report.checks.filter((c) => isFixtureCheck(c) && c.status === 'SKIPPED')
+  const notRunReason = notRun.find((c) => c.id === 'gate_record')?.detail ?? null
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
@@ -161,10 +175,21 @@ export default async function DemoVerifier({ packetId }: { packetId: string }) {
         <p className="mt-2">
           No “Verify now” button here: that button re-verifies the signed chain with the live
           verification service, and this fixture packet does not carry a signed chain. A real filing
-          would. Checks that only apply to a fully signed filing are omitted here rather than shown
-          as failures — the bundle integrity checks below are real and recomputed.
+          would. Checks that only apply to a fully signed filing are listed separately below rather
+          than shown as failures — the integrity checks below are real and recomputed.
         </p>
       </div>
+      {notRun.length > 0 ? (
+        <p className="mt-4 rounded-card border border-rule bg-paper-raised p-4 text-sm text-ink-soft">
+          <span className="font-semibold text-ink">
+            {notRun.length} check{notRun.length === 1 ? '' : 's'} cannot run on a fixture
+          </span>
+          : the Gate's signature on its decision record and the seven bindings that depend on it.
+          This packet has no Gate key to check them against, so they are not passes and not failures
+          — they are simply not applicable to a simulated packet.{' '}
+          {notRunReason !== null ? <span className="italic">{notRunReason}</span> : null}
+        </p>
+      ) : null}
 
       <dl className="mt-6 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
         <div className="flex gap-2">

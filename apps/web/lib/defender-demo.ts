@@ -481,6 +481,16 @@ interface RenderedCase {
   readonly packetId: string
   readonly bundle: EvidenceBundle
   readonly disputeRow: DisputeRow
+  /**
+   * The bundle digest **as it was when this render printed it**.
+   *
+   * Captured here, at render time, and not recomputed by the reader: the verifier compares the digest it
+   * recomputes from the bundle against the one the packet claims, and if both numbers come from the same
+   * read the check cannot fail. This is the number the PDF and the QR were rendered against.
+   */
+  readonly bundleHash: string
+  /** The origin this render embedded in the packet's QR payload. Part of the cache key for that reason. */
+  readonly publicBaseUrl: string
 }
 
 /**
@@ -503,7 +513,7 @@ interface CacheEntry {
   readonly rendered: RenderedCase
 }
 
-const cache = new Map<DefenderCaseId, CacheEntry>()
+const cache = new Map<string, CacheEntry>()
 
 /**
  * One render per case at a time.
@@ -512,16 +522,30 @@ const cache = new Map<DefenderCaseId, CacheEntry>()
  * the pipeline (and, when a model is configured, each calling the provider). It also means a provider that
  * hangs is awaited once, not once per request.
  */
-const inflight = new Map<DefenderCaseId, Promise<RenderedCase>>()
+const inflight = new Map<string, Promise<RenderedCase>>()
 
-/** The live entry for a case, or `null` when it is absent or older than {@link CACHE_TTL_SEC}. */
-function cachedCase(id: DefenderCaseId, nowSec: number): RenderedCase | null {
-  const entry = cache.get(id)
+/**
+ * One cache slot per (case, origin).
+ *
+ * The render bakes `publicBaseUrl` into the PDF's QR payload (`publicPacketUrl(publicBaseUrl, packetId)`),
+ * so a cache keyed by case id alone would serve one origin's packet to another: a reader on host B would be
+ * handed a PDF whose QR points at host A. Behind one hostname the two are the same and this is invisible,
+ * which is exactly why it is a key rather than an assumption. The demo page, the download route and the
+ * verifier page each derive the origin from their own request (`x-forwarded-host` / `host`), and each now
+ * gets the render that matches what it will print.
+ */
+function cacheKey(id: DefenderCaseId, publicBaseUrl: string): string {
+  return `${id}\u0000${publicBaseUrl}`
+}
+
+/** The live entry for a case at one origin, or `null` when it is absent or older than {@link CACHE_TTL_SEC}. */
+function cachedCase(key: string, nowSec: number): RenderedCase | null {
+  const entry = cache.get(key)
   if (entry === undefined) return null
   if (nowSec - entry.atSec >= CACHE_TTL_SEC) {
     // Dropped rather than refreshed in place: a reader holding the old object must not be able to keep
     // serving it, and the next caller recomputes.
-    cache.delete(id)
+    cache.delete(key)
     return null
   }
   return entry.rendered
@@ -607,16 +631,17 @@ export async function renderDefenderCase(
   publicBaseUrl: string,
 ): Promise<RenderedCase> {
   const nowSec = systemClock.nowSec()
-  const cached = cachedCase(id, nowSec)
+  const key = cacheKey(id, publicBaseUrl)
+  const cached = cachedCase(key, nowSec)
   if (cached !== null) return cached
 
-  const running = inflight.get(id)
+  const running = inflight.get(key)
   if (running !== undefined) return running
 
   const pending = renderUncached(id, publicBaseUrl, nowSec).finally(() => {
-    inflight.delete(id)
+    inflight.delete(key)
   })
-  inflight.set(id, pending)
+  inflight.set(key, pending)
   return pending
 }
 
@@ -681,8 +706,12 @@ async function renderUncached(
       packetId: fixturePacketId('AGNTFXT01'),
       bundle: world.bundle,
       disputeRow: row,
+      // Nothing was printed for this case, so the digest is still recorded: the verifier reads a packet row
+      // for both cases, and a missing field would read as a broken packet rather than an unfiled one.
+      bundleHash: bundleHashHex(world.bundle as unknown as Readonly<Record<string, unknown>>),
+      publicBaseUrl,
     }
-    cache.set(id, { atSec: nowSec, rendered: out })
+    cache.set(cacheKey(id, publicBaseUrl), { atSec: nowSec, rendered: out })
     return out
   }
 
@@ -783,6 +812,11 @@ async function renderUncached(
     throw new Error(`renderPacketPdf: ${pdfResult.error.code} ${pdfResult.error.message}`)
   const pdf: RenderedPacket = pdfResult.value
 
+  // The digest this render is about to print, taken from the same object the PDF inventories. Reading it
+  // here — once, at the moment of render — is what makes the verifier's `bundle_hash` row a real check:
+  // the reader compares a digest it recomputes against this number, not against a second copy of itself.
+  const bundleHash = bundleHashHex(bundle as unknown as Readonly<Record<string, unknown>>)
+
   const out: RenderedCase = {
     view: {
       ...base,
@@ -817,8 +851,10 @@ async function renderUncached(
     packetId,
     bundle,
     disputeRow: row,
+    bundleHash,
+    publicBaseUrl,
   }
-  cache.set(id, { atSec: nowSec, rendered: out })
+  cache.set(cacheKey(id, publicBaseUrl), { atSec: nowSec, rendered: out })
   return out
 }
 
@@ -830,29 +866,35 @@ async function renderUncached(
  * the hex digest the verifier's offline check compares against. The JWKS stay empty on purpose: the
  * fixture chain artefacts are not real signatures, and a real deployment would hold the Gate's key.
  */
-export async function demoVerifierRows(packetId: string): Promise<{
+export async function demoVerifierRows(
+  packetId: string,
+  publicBaseUrl: string,
+): Promise<{
   packet: Record<string, unknown>
   dispute: Record<string, unknown>
   bundle: EvidenceBundle
 } | null> {
   const caseId = demoCaseForPacketId(packetId)
   if (caseId === null) return null
-  const nowSec = systemClock.nowSec()
   // Rendering is idempotent and cached; awaiting it here guarantees the rows exist even when a judge
   // scans the QR before ever opening /disputes. The lookup goes through the same freshness rule as the
   // render, so a stale entry cannot be half-served: one clock reading, one entry.
-  await renderDefenderCase(caseId, process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000')
-  const rendered = cachedCase(caseId, systemClock.nowSec())
+  //
+  // `publicBaseUrl` is the caller's own origin, not an env var: the render bakes it into the PDF's QR
+  // payload, and a packet served to `https://shop.example` whose QR says `http://localhost:3000` is a
+  // broken link printed by us (audit 8.3).
+  const nowSec = systemClock.nowSec()
+  await renderDefenderCase(caseId, publicBaseUrl)
+  const rendered = cachedCase(cacheKey(caseId, publicBaseUrl), nowSec)
   if (rendered === null) return null
   const at = (sec: number) => new Date(sec * 1000)
-  const bundleHash = bundleHashHex(rendered.bundle as unknown as Readonly<Record<string, unknown>>)
   return {
     packet: {
       id: rendered.packetId,
       dispute_id: rendered.disputeRow.id,
       version: 1,
       bundle: rendered.bundle,
-      bundle_hash: bundleHash,
+      bundle_hash: rendered.bundleHash,
       pdf_sha256: rendered.view.pdf?.sha256 ?? null,
       notes: rendered.view.draft?.notes ?? null,
       citations: rendered.view.draft?.citations ?? null,
@@ -885,7 +927,12 @@ function buyerSentence(decision: LiabilityDecision): string {
   return decision.rationale
 }
 
-/** Both cases, page-ready. Cached per process, so the PDF route serves the same draft. */
+/**
+ * Both cases, page-ready, for the origin that asked.
+ *
+ * The cache is keyed by (case, origin) because the render embeds the origin in the PDF's QR payload: one
+ * process can legitimately hold two renders of one case, and each reader must get the one that points at it.
+ */
 export async function demoCases(publicBaseUrl: string): Promise<readonly DefenderCaseView[]> {
   const [a, b] = await Promise.all([
     renderDefenderCase('unauthorised', publicBaseUrl),
@@ -894,7 +941,7 @@ export async function demoCases(publicBaseUrl: string): Promise<readonly Defende
   return [a.view, b.view]
 }
 
-/** The cached PDF for one case, for the download route. */
+/** The cached PDF for one case at one origin, for the download route. */
 export async function demoCasePdf(
   id: DefenderCaseId,
   publicBaseUrl: string,

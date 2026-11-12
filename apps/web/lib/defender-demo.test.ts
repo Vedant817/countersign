@@ -17,7 +17,22 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { LanguageModel as AiLanguageModel } from 'ai'
 
-import { defenderDraftPort, demoCasePdf, demoCases } from './defender-demo'
+import {
+  buildVerifierReport,
+  defineVerifierDeps,
+  loadVerifierPacket,
+  type VerifierStore,
+} from '@countersign/verifier'
+import type { DisputeRow, EvidencePacketRow } from '@countersign/db'
+import { logger, ok, systemClock } from '@countersign/core'
+
+import {
+  DEMO_PACKET_IDS,
+  defenderDraftPort,
+  demoCasePdf,
+  demoCases,
+  demoVerifierRows,
+} from './defender-demo'
 
 const PUBLIC_BASE_URL = 'https://merchant.example.test'
 
@@ -75,6 +90,100 @@ describe('the render cache', () => {
     // serves, byte for byte.
     const served = createHash('sha256').update(pdf!).digest('hex')
     expect(served).toBe(first?.pdf?.sha256)
+  })
+
+  it('holds one render per origin, because the QR payload carries the origin (8.3)', async () => {
+    // The render bakes `publicBaseUrl` into the PDF's QR payload, so a cache keyed by case id alone would
+    // hand a reader on host B a packet whose QR points at host A. Two origins, two renders, two QR payloads.
+    const here = await demoCases('https://here.example')
+    const there = await demoCases('https://there.example')
+
+    expect(here[0]).not.toBe(there[0])
+    expect(here[0]?.pdf?.qrPayload).toContain('https://here.example')
+    expect(there[0]?.pdf?.qrPayload).toContain('https://there.example')
+    expect(here[0]?.pdf?.qrPayload).not.toBe(there[0]?.pdf?.qrPayload)
+  })
+
+  it('reads the packet row for the origin the page is served from (8.3)', async () => {
+    // `demoVerifierRows` used to ignore its caller and render against `PUBLIC_BASE_URL ?? localhost:3000`,
+    // so on a cold process the packet a judge scanned was rendered for a different host than the one that
+    // served it. The row carries the PDF digest, which pins which render it came from: read at one origin,
+    // it must equal the PDF that origin is served.
+    const origin = 'https://row.example'
+    const rows = await demoVerifierRows(DEMO_PACKET_IDS.unauthorised, origin)
+    expect(rows).not.toBeNull()
+
+    const pdf = await demoCasePdf('unauthorised', origin)
+    expect(pdf).not.toBeNull()
+    const digest = createHash('sha256').update(pdf!).digest('hex')
+    expect(rows!.packet['pdf_sha256']).toBe(digest)
+  })
+})
+
+/**
+ * A verifier store over one demo packet.
+ *
+ * `jwks` is empty on purpose — the fixture chain artefacts are not signatures, so the signature rows must
+ * report exactly that rather than a verdict about key material that does not exist.
+ */
+function storeFor(packet: unknown, dispute: unknown): VerifierStore {
+  return {
+    packets: { findById: async () => ok(packet as EvidencePacketRow) },
+    disputes: { findById: async () => ok(dispute as DisputeRow) },
+    jwks: { listAll: async () => ok([]) },
+  }
+}
+
+async function reportFor(packet: Record<string, unknown>, dispute: Record<string, unknown>) {
+  const deps = defineVerifierDeps({
+    clock: systemClock,
+    store: storeFor(packet, dispute),
+    vi: {
+      publicVerify: () => {
+        throw new Error('no live verification in a unit test')
+      },
+    },
+    publicBaseUrl: PUBLIC_BASE_URL,
+    logger: logger.child({ module: 'defender-demo-test' }),
+  })
+  const loaded = await loadVerifierPacket(deps, packet['id'] as never)
+  if (!loaded.ok) throw new Error(`loadVerifierPacket: ${loaded.error.message}`)
+  if (loaded.value === undefined) throw new Error('the packet row did not load')
+  return await buildVerifierReport(loaded.value, deps)
+}
+
+describe('the packet digest the verifier reads', () => {
+  it('is the digest captured at render time, so a tampered bundle fails the check', async () => {
+    // `demoVerifierRows` names a case by its **packet id** (that is the URL a QR encodes).
+    const rows = await demoVerifierRows(DEMO_PACKET_IDS.unauthorised, PUBLIC_BASE_URL)
+    expect(rows).not.toBeNull()
+
+    const clean = await reportFor(rows!.packet, rows!.dispute)
+    const cleanHash = clean.checks.find((c) => c.id === 'bundle_hash')
+    expect(cleanHash?.status, 'an untouched bundle must pass its own digest check').toBe('PASS')
+
+    // The check is only worth showing if it can fail. Re-serving the same packet with one bundle member
+    // changed is what an edited packet looks like to the reader.
+    const bundle = rows!.bundle as unknown as Record<string, unknown>
+    const tampered = {
+      ...rows!.packet,
+      bundle: { ...bundle, l1: 'l1.eyJhbGciOiJFUzI1NiJ9.dGFtcGVyZWQ.dGVhbGVk' },
+    }
+    const tamperedReport = await reportFor(tampered, rows!.dispute)
+    const tamperedHash = tamperedReport.checks.find((c) => c.id === 'bundle_hash')
+
+    expect(tamperedHash?.status, 'a changed bundle must not pass the digest check').toBe('FAIL')
+    expect(tamperedHash?.detail).not.toBe(cleanHash?.detail)
+  })
+
+  it('reads a digest the render recorded, not one recomputed from the same read', async () => {
+    const rows = await demoVerifierRows(DEMO_PACKET_IDS.unauthorised, PUBLIC_BASE_URL)
+    expect(rows).not.toBeNull()
+    // `bundle_hash` is a stored field on the row (as `evidence_packets.bundle_hash` is in the database).
+    // The render is what writes it; the verifier only ever compares.
+    expect(typeof rows!.packet['bundle_hash']).toBe('string')
+    expect((rows!.packet['bundle_hash'] as string).length).toBe(64)
+    expect(rows!.packet['bundle_hash'] as string).toMatch(/^[0-9a-f]{64}$/)
   })
 })
 

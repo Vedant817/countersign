@@ -557,3 +557,23 @@ WP-06s and everything needing live sandbox is not started.
   **Measured:** `pnpm --filter @countersign/web typecheck` exit 0, `lint` 0 errors, `format:check` clean, `build` exit 0
   (`Compiled successfully`, 14/14 static pages), whole repo `119 files / 2897 passed | 1 skipped` (3 new tests).
   **CI run 43317244868** (head `df81480`) finished **11 of 11 jobs success** - `all gates green`.
+
+- **2026-11-13 (IST)** - **8.3: the demo packet's digest is a check again, and a QR points at the host that served it (P2).**
+  Two real defects were hiding behind "a scanned QR reports chain checks as SKIPPED forever":
+  - **The render was cached by case id alone**, but the origin is baked into the PDF's QR payload
+    (`publicPacketUrl(publicBaseUrl, packetId)`). One process could therefore hold host A's packet and serve it to a
+    reader on host B - a QR that resolves to a URL the server does not answer. `demoVerifierRows` made it worse by
+    rendering against `PUBLIC_BASE_URL ?? 'http://localhost:3000'` instead of the caller's origin, so a judge who scanned
+    a QR on a cold process got a packet rendered for localhost. The cache is now keyed by (case, origin), and the
+    verifier page reads `x-forwarded-host`/`host` **before** it asks for rows.
+  - **`bundle_hash` could not fail.** `demoVerifierRows` recomputed the digest from `rendered.bundle` and the verifier
+    recomputed it from the same object, so the row compared a number with itself. The digest is now captured once, at
+    render time, stored on `RenderedCase.bundleHash`, and written to the packet row as the stored value - what the
+    verifier compares against is what the PDF was printed with.
+  The nine `SKIPPED` gate-signature rows (no Gate key in a fixture) are no longer nine grey verdicts: the page reports a
+  count and the reason, under its own heading.
+  **Falsified twice:** making `demoVerifierRows` ignore the origin fails "reads the packet row for the origin the page is
+  served from"; making `cacheKey` ignore the origin fails "holds one render per origin". A tampered bundle fails
+  `bundle_hash` while the untouched one passes it.
+  **Measured:** web `typecheck` exit 0, `lint` 0 errors, `format:check` clean, `next build` exit 0, whole repo
+  `119 files / 2901 passed | 1 skipped` (4 new tests; `defender-demo.test.ts` now 8).
