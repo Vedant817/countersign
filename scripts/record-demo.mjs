@@ -1,10 +1,19 @@
 /**
- * Rough-but-real screen recording of the Countersign demo beats on localhost:3210.
- * Drives: /agent (mandate -> ALLOW + real PayPal sandbox order + re-read, then injected BLOCK),
- * /disputes (two SIMULATED cases), /v (demo verifier). Records 1920x1080 webm.
+ * Continuous screen recording of the Countersign demo beats on localhost:3210.
  *
- * Run from repo root: node scripts/record-demo.mjs
- * Requires: stack up on http://localhost:3210 (and VI on 8010), Playwright installed in pnpm store.
+ * Records one continuous Playwright video (1920x1080, 30fps WebM) while driving the real app with
+ * visible typing and clicking (slowMo), paced against docs/demo/narration.vtt.
+ *
+ * ```sh
+ * node scripts/record-demo.mjs            # records docs/demo/record/take.webm
+ * ```
+ *
+ * Beats: /agent mandate -> Gate ALLOW -> real PayPal sandbox order panel + "Re-read from PayPal" ->
+ * injected listing BLOCK -> /disputes two SIMULATED cases -> /v demo verifier. Nothing here fakes a
+ * result: every beat is the running app (localhost:3210, VI on 8010).
+ *
+ * Playwright's own ffmpeg + Chromium are required:
+ *   pnpm --filter @countersign/web exec playwright install chromium ffmpeg
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -19,90 +28,101 @@ fs.mkdirSync(OUT_DIR, { recursive: true })
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-const browser = await chromium.launch({
-  headless: true,
-  channel: 'msedge',
-})
+const browser = await chromium.launch({ headless: true, slowMo: 150 })
 const context = await browser.newContext({
   viewport: { width: 1920, height: 1080 },
+  recordVideo: { dir: OUT_DIR, size: { width: 1920, height: 1080 } },
   colorScheme: 'light',
 })
 const page = await context.newPage()
-page.setDefaultTimeout(120_000)
-
-const shots = []
-let n = 0
-const snap = async (name, ms = 1200) => {
-  await page.waitForTimeout(ms)
-  const file = path.join(OUT_DIR, `${String(++n).padStart(2, '0')}-${name}.png`)
-  await page.screenshot({ path: file, fullPage: false })
-  shots.push(file)
-  console.log(JSON.stringify({ shot: file }))
-  return file
-}
+page.setDefaultTimeout(180_000)
 
 let paypalOrderId = null
+let paypalOrderStatus = null
 
 try {
-  // --- Beat: /agent intro + mandate ---
+  // --- 0-6s: the agent chat, mandate form -------------------------------------------------------
   await page.goto(`${BASE}/agent`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2500)
-  await snap('agent-intro')
+  await page.waitForTimeout(4500)
 
+  // --- 6-18s: buyer types intent, picks the signed cap, creates the mandate ----------------------
   const intentInput = page.locator('input[maxlength="200"]').first()
-  await intentInput.fill('Buy the cheapest trail shoes you can find, under $150')
+  await intentInput.click()
+  await intentInput.type('Buy the cheapest trail shoes you can find, under $150', { delay: 45 })
+  await page.waitForTimeout(1200)
   await page.locator('select').first().selectOption('15000')
+  await page.waitForTimeout(900)
   await page.getByRole('button', { name: 'Create mandate' }).click()
-  await page.locator('[data-testid="mandate-chip"]').waitFor({ state: 'visible', timeout: 120_000 })
-  await snap('mandate-signed', 3000)
+  await page.locator('[data-testid="mandate-chip"]').waitFor({ state: 'visible' })
+  await page.waitForTimeout(5000)
 
-  // --- Beat: ALLOW + real sandbox order (CREATED, unpaid) ---
+  // --- 18-30s: the agent turn; Gate ALLOW creates the real PayPal sandbox order ------------------
   const msg = page.getByLabel('Message the agent')
-  await msg.fill('Buy the cheapest trail shoes you can find, under $150')
+  await msg.click()
+  await msg.type('Buy the cheapest trail shoes you can find, under $150', { delay: 35 })
+  await page.waitForTimeout(900)
   await page.getByRole('button', { name: 'Send', exact: true }).click()
-  await page.locator('[data-testid="paypal-order-panel"]').waitFor({ state: 'visible', timeout: 180_000 })
+
+  await page.locator('[data-testid="paypal-order-panel"]').waitFor({ state: 'visible' })
   await page.waitForTimeout(3000)
   paypalOrderId = (await page.locator('[data-testid="paypal-order-id"]').textContent())?.trim() ?? null
-  await page.locator('[data-testid="paypal-order-panel"]').scrollIntoViewIfNeeded().catch(() => null)
-  await snap('allow-order', 1500)
+  paypalOrderStatus =
+    (await page.locator('[data-testid="paypal-order-status"]').textContent())?.trim() ?? null
+  await page.locator('[data-testid="paypal-order-panel"]').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(4000)
 
+  // --- re-read from PayPal ----------------------------------------------------------------------
   const reread = page.getByRole('button', { name: 'Re-read from PayPal' })
   if (await reread.isVisible().catch(() => false)) {
     await reread.click()
     await page.waitForTimeout(5000)
   }
-  await page.locator('[data-testid="paypal-order-panel"]').scrollIntoViewIfNeeded().catch(() => null)
-  await snap('order-reread', 1500)
 
-  // --- Beat: BLOCK (injected/out-of-scope listing) ---
+  // --- BLOCK: the injected listing ---------------------------------------------------------------
   await page.getByRole('button', { name: /Try the injected listing/i }).click()
-  await page.locator('[data-testid="limits-held"]').waitFor({ state: 'visible', timeout: 120_000 })
-  await page.locator('[data-testid="limits-held"]').scrollIntoViewIfNeeded().catch(() => null)
-  await snap('block', 2500)
+  await page.locator('[data-testid="limits-held"]').waitFor({ state: 'visible' })
+  await page.locator('[data-testid="limits-held"]').scrollIntoViewIfNeeded()
+  await page.waitForTimeout(6000)
 
-  // --- Beat: /disputes (SIMULATED) ---
+  // --- /disputes: two SIMULATED cases through the production pipeline -----------------------------
   await page.goto(`${BASE}/disputes`, { waitUntil: 'domcontentloaded' })
-  await page.getByText('R-UNAUTH-1').first().waitFor({ state: 'visible', timeout: 180_000 })
-  await page.waitForTimeout(2000)
-  await snap('disputes-top', 1000)
-  await page.evaluate(() => window.scrollTo({ top: 900, behavior: 'instant' }))
-  await snap('disputes-mid', 1500)
-  await page.evaluate(() => window.scrollTo({ top: 2000, behavior: 'instant' }))
-  await snap('disputes-bottom', 1500)
+  await page.getByText('R-UNAUTH-1').first().waitFor({ state: 'visible' })
+  await page.waitForTimeout(4000)
+  await page.evaluate(() => window.scrollTo({ top: 800, behavior: 'smooth' }))
+  await page.waitForTimeout(4000)
+  await page.evaluate(() => window.scrollTo({ top: 1800, behavior: 'smooth' }))
+  await page.waitForTimeout(4000)
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }))
+  await page.waitForTimeout(2500)
 
-  // --- Beat: /v demo verifier ---
+  // --- /v: the demo verifier --------------------------------------------------------------------
   await page.goto(`${BASE}/v/pkt_F1RSTCASE10000000000000000`, { waitUntil: 'domcontentloaded' })
-  await page.getByText('SIMULATED DISPUTE').waitFor({ state: 'visible', timeout: 120_000 })
-  await snap('verifier-top', 2000)
-  await page.evaluate(() => window.scrollTo({ top: 900, behavior: 'instant' }))
-  await snap('verifier-checks', 2000)
+  await page.getByText('SIMULATED DISPUTE').first().waitFor({ state: 'visible' })
+  await page.waitForTimeout(4000)
+  await page.evaluate(() => window.scrollTo({ top: 700, behavior: 'smooth' }))
+  await page.waitForTimeout(5000)
+  await page.evaluate(() => window.scrollTo({ top: 1400, behavior: 'smooth' }))
+  await page.waitForTimeout(4000)
 
-  console.log(JSON.stringify({ ok: true, paypalOrderId, shots }))
+  console.log(JSON.stringify({ ok: true, paypalOrderId, paypalOrderStatus }))
 } catch (err) {
   console.error('record-demo failed:', err?.stack || err)
-  console.log(JSON.stringify({ ok: false, paypalOrderId, shots, error: String(err?.message || err) }))
+  console.log(JSON.stringify({ ok: false, paypalOrderId, paypalOrderStatus, error: String(err?.message || err) }))
   process.exitCode = 1
 } finally {
+  const video = page.video()
   await context.close().catch(() => null)
   await browser.close().catch(() => null)
+  if (video) {
+    const src = await video.path().catch(() => null)
+    if (src && fs.existsSync(src)) {
+      const dest = path.resolve('docs/demo/record/take.webm')
+      try {
+        fs.copyFileSync(src, dest)
+      } catch {
+        fs.renameSync(src, dest)
+      }
+      console.log(JSON.stringify({ video: dest, bytes: fs.statSync(dest).size }))
+    }
+  }
 }
