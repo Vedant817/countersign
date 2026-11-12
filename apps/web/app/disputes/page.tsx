@@ -48,7 +48,7 @@ function VerdictBadge({ posture }: { posture: string }) {
   )
 }
 
-function CaseCard({ caseView, children }: { caseView: DefenderCaseView; children?: never }) {
+function CaseCard({ caseView }: { caseView: DefenderCaseView }) {
   return (
     <section
       aria-labelledby={`case-${caseView.id}`}

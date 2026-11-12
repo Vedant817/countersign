@@ -99,15 +99,6 @@ page.setDefaultTimeout(180_000)
 const t0 = Date.now()
 const elapsed = () => (Date.now() - t0) / 1000
 
-/** Block until the narration reaches this beat's first word, minus the lead. */
-const at = async (beat, lead = 0.5) => {
-  const target = Math.max(0, (beats[beat] ?? 0) - lead)
-  const wait = target - elapsed()
-  if (wait <= 0) return
-  if (wait > 300) await hold(wait * 1000, { caret: true, limit: 300, step: 140 })
-  else await sleep(wait * 1000)
-}
-
 /** Milliseconds to wait so the next beat lands on its narration offset. */
 const until = (beat, lead = 1) => Math.max(0, (beats[beat] - lead - elapsed()) * 1000)
 

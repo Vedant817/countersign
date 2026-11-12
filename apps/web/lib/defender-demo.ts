@@ -46,7 +46,6 @@ import {
   route,
   templateNote,
   plainNotes,
-  type Citation,
   type Draft,
   type DraftSource,
   type EvidenceBundle,

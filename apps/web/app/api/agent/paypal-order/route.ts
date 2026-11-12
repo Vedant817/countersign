@@ -15,7 +15,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { demoOrderPossible, isPlausiblePayPalOrderId, rereadDemoOrder } from '@/lib/demo-order'
+import { demoOrderPossible, rereadDemoOrder } from '@/lib/demo-order'
 
 const idSchema = z.string().regex(/^[A-Z0-9]{17}$/, 'A PayPal order id is 17 characters, A–Z0–9.')
 
