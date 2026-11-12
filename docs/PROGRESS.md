@@ -417,3 +417,20 @@ WP-06s and everything needing live sandbox is not started.
   (`evilsandbox.paypal.com`) is refused; `tsc --noEmit` clean; `pnpm lint` 0 errors; `format:check` clean.
   The sandbox client credentials were also exercised for real against `POST /v1/oauth2/token`
   (`oauth ok, token len 97`) - no value printed.
+
+- **2026-11-13 (IST)** - **Real PayPal webhook ingest route (P1, `prod/real-users` §5).**
+  `apps/web/app/api/webhooks/paypal/route.ts` now accepts `POST`, hands `handleWebhook` the exact request
+  bytes (read once, never re-serialised, so `verify-webhook-signature` sees what PayPal signed), verifies
+  through the real `PayPalClient`, and acknowledges per §8.12: 200 for anything stored, 400 for a forged or
+  unreadable body. The store and audit sink are composed over `@countersign/db` (the app does not depend on
+  `@countersign/worker`; that duplication is recorded as `docs/contract-issues.md` item 11). The producer
+  queue is deliberately not wired to `pg-boss` in the web process, so a stored delivery is deferred to
+  `wh.verify` and the reconciler rather than lost. `PAYPAL_WEBHOOK_ID` is empty on this deployment, so
+  verification is the EC-WH-7 configured-off path until HUMAN_TODO 2/3 lands.
+  **Measured, not asserted:** the Postgres-backed adapter suite
+  `apps/web/app/api/webhooks/paypal/route.test.ts` is `6 passed` against
+  `postgres://countersign:countersign@localhost:5432/countersign` (byte-exactness, forged/unreadable 400,
+  redelivery invariant, header canonicalisation); the whole repo suite is `118 files / 2892 passed | 1 skipped`;
+  `pnpm typecheck`, `pnpm lint` (0 errors), `pnpm format:check` and `pnpm --filter @countersign/web build`
+  all green. Two pre-existing tests were made environment-independent in the same change (the worker's
+  WORKER-2 refusal test now clears `process.env` and the env cache, as `boot.test.ts` already did).

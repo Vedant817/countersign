@@ -14,6 +14,7 @@
 import { readFile } from 'node:fs/promises'
 
 import { describe, expect, it } from 'vitest'
+import { setEnvForTesting } from '@countersign/core'
 import { JOB_BUDGET_RECONCILE, JOB_PROCESS, JOB_RECONCILE } from '@countersign/webhooks'
 
 import { startWorker, type CronSpec } from '../src/index'
@@ -158,13 +159,19 @@ describe('main — the entry point', () => {
     // with a missing `PAYPAL_CLIENT_ID` and fails on its first tick an hour later is far worse than a
     // process that exits immediately and says which variable is absent.
     //
-    // The test environment has none of the required variables set, so this exercises the real failure path
-    // rather than a simulated one - which is the honest reason the assertion can name specific keys.
+    // `process.env` is swapped for an empty object and the cache cleared, exactly as `boot.test.ts` does for
+    // the same assertion. Without that, this test passes or fails depending on the shell the suite was launched
+    // from: a `DATABASE_URL` exported for the Postgres-backed suites would make `DATABASE_URL` *present*, and
+    // the assertion would fail on a machine that did nothing wrong. A property of the code under test must not
+    // depend on the caller's environment.
     const { main } = await import('../src/index')
     const errors: string[] = []
-    const original = console.error
+    const originalError = console.error
+    const saved = process.env
     console.error = (...args: unknown[]) => errors.push(args.map(String).join(' '))
     try {
+      process.env = {}
+      setEnvForTesting(null)
       const code = await main()
       // 78 is EX_CONFIG from sysexits.h: "misconfigured", distinct from a transient outage so a platform
       // reporting only exit codes can tell the two apart.
@@ -176,7 +183,9 @@ describe('main — the entry point', () => {
       expect(output).toContain('DATABASE_URL')
       expect(output).toContain('PAYPAL_CLIENT_ID')
     } finally {
-      console.error = original
+      console.error = originalError
+      process.env = saved
+      setEnvForTesting(null)
     }
   })
 

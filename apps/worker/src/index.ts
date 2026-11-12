@@ -477,8 +477,12 @@ export function productionDeps(): WorkerDeps {
  *
  * A `WebhookQueue` built over the same `pg-boss` connection the worker starts, wrapped so this process's
  * queue operations report a `CsError` rather than throwing. The worker itself starts its own boss in
- * `startWorker`; this is only the **producer** side, which `apps/web`'s webhook route also needs and which
- * §8.12 step 4 calls for.
+ * `startWorker`; this is only the **producer** side, which §8.12 step 4 calls for.
+ *
+ * It stays private on purpose. `apps/web`'s webhook route needs the same *port* (`WebhookQueue`) but composes
+ * it from the packages `apps/web` already depends on, because importing across the `apps/worker` boundary would
+ * pull the worker's job runner into the Next bundle (see `docs/contract-issues.md` item 9). Two call sites
+ * satisfy the same port; the port is what `packages/webhooks` tests.
  */
 function queueForWebhooks(): WebhookQueue {
   return {

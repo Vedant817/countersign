@@ -170,27 +170,31 @@ complete and tested, unreachable because no wallet ever holds a real `vault_id`.
 
 ---
 
-## 5. P1 - PayPal: order create/get work; authorize, capture, refund, void, webhooks, disputes are unreachable
+## 5. P1 - PayPal: order create/get work; authorize, capture, refund, void, disputes still unreachable (webhooks **DONE**)
 
 Verified live in this session: `createDemoOrder` (no payment source) → real sandbox order; `rereadDemoOrder`
 → `GET /v2/checkout/orders/{id}` answers.
 
 Not reachable from the app:
 
-| Capability                         | Library                                               | App call site                                                  |
-| ---------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------- |
-| authorize / capture                | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none                                                           |
-| refund / void                      | `refundCapture`, `voidAuthorization` ✅               | none                                                           |
-| webhooks (verify + ingest)         | `packages/webhooks` ✅ + `apps/worker` ✅             | **no route** - `apps/web/app/api` has no `webhooks/` directory |
-| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅    | none - `/disputes` renders fixtures                            |
-| reconciler crons                   | `apps/worker/src/schedule.ts` ✅                      | `render.yaml` defines the worker; never run here               |
+| Capability                         | Library                                               | App call site                                                     |
+| ---------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------- |
+| authorize / capture                | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none                                                              |
+| refund / void                      | `refundCapture`, `voidAuthorization` ✅               | none                                                              |
+| webhooks (verify + ingest)         | `packages/webhooks` ✅ + `apps/worker` ✅             | **`apps/web/app/api/webhooks/paypal/route.ts` — DONE 2026-11-13** |
+| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅    | none - `/disputes` renders fixtures                               |
+| reconciler crons                   | `apps/worker/src/schedule.ts` ✅                      | `render.yaml` defines the worker; never run here                  |
 
-`PAYPAL_WEBHOOK_ID` is empty, so `verify-webhook-signature` cannot be attempted.
+**Webhook ingest (fixed 2026-11-13).** `POST /api/webhooks/paypal` now stores PayPal's exact bytes, verifies
+through `PayPalClient`, marks the row `PENDING`/`VERIFIED`/`FAILED`, and acknowledges per §8.12 (200 for
+stored, 400 for a forged or unreadable body). The producer queue is deliberately not wired to `pg-boss` in the
+web process (the worker owns it); a stored delivery is deferred to `wh.verify` and the reconciler's sweep rather
+than lost. `PAYPAL_WEBHOOK_ID` is still empty, so verification runs the EC-WH-7 configured-off path until
+HUMAN_TODO 2/3 lands; the positive case is asserted in `packages/webhooks` against the real client. The
+Postgres-backed adapter suite (`apps/web/app/api/webhooks/paypal/route.test.ts`, 6 tests) covers byte-exactness,
+the forged/unreadable 400, the redelivery invariant, and header canonicalisation.
 
-**Blocked on** HUMAN_TODO 1a/2/3 for the buyer-side half. The **webhook route is not blocked** and is the
-highest-value unblocked item in this list.
-
----
+## **Still blocked on** HUMAN_TODO 1a/2/3 for the buyer-side half (authorize → capture → refund/void, disputes).
 
 ## 6. P1 - the demo money path reads `.env.local` from disk behind the app's own config (**FIXED**)
 
