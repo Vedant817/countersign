@@ -577,3 +577,10 @@ WP-06s and everything needing live sandbox is not started.
   `bundle_hash` while the untouched one passes it.
   **Measured:** web `typecheck` exit 0, `lint` 0 errors, `format:check` clean, `next build` exit 0, whole repo
   `119 files / 2901 passed | 1 skipped` (4 new tests; `defender-demo.test.ts` now 8).
+
+- **2026-11-13 (IST)** - **8.9 checked: it does not hold (P2).** `packages/webhooks/src` contains only the nine `.ts`
+  sources — there is no declaration emit beside them — and `dist/` holds the sixteen `.d.ts` + `.d.ts.map` files the
+  package's `build` produces. **Measured:** `pnpm --filter @countersign/webhooks build` exit 0;
+  `git status --ignored -- packages/webhooks` shows only `dist/` and `node_modules/` as ignored. Nothing consumes
+  `dist`: `package.json` points `main`, `types` and `exports` at `./src/index.ts`, because every package here is consumed
+  as TypeScript source (vitest, Next, tsx). The audit row is corrected to "checked and not a problem".
