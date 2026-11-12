@@ -1379,6 +1379,60 @@ export const jobs = pgTable(
 )
 
 /* ------------------------------------------------------------------------------------------ */
+/* 27. worker_job_runs (observability, §8.19)                                                      */
+/* ------------------------------------------------------------------------------------------ */
+
+/** The two outcomes a job run can have. An enum in the type, `text` in the column: adding a third is a
+ *  migration, not a silent new value that every reader has to guess at. */
+export const JOB_RUN_OUTCOMES = ['ok', 'error'] as const
+
+export type JobRunOutcome = (typeof JOB_RUN_OUTCOMES)[number]
+
+/**
+ * One row per job run — the worker's heartbeat (spec §8.19, §14).
+ *
+ * ## Why this table exists at all
+ *
+ * `render.yaml`'s `countersign-worker` is `type: worker`, and Render has **no port and therefore no health
+ * check** for a background worker. A worker that died, or whose five-minute reconciler quietly stopped
+ * registering, looks exactly like a healthy deployment: nothing is served, nothing fails, and lost webhooks
+ * simply stop being repaired. `/status` already reported webhook lag, but lag is a *symptom* with no owner;
+ * this table is the missing measurement — "which job last ran, when, and did it succeed" — written by the
+ * process that runs it.
+ *
+ * ## Why one row per run rather than a "last seen" row per job
+ *
+ * A single upserted row per job answers "when did it last succeed" and cannot answer "has it ever
+ * succeeded", "how many times has it failed in a row", or "was it running five minutes ago and is it
+ * running now". Those are the questions that separate a quiet system from a dead one, so rows are kept
+ * and aggregated by `findJobHeartbeats`. `recordJobRun` prunes older than
+ * `WORKER_JOB_RUN_RETENTION_DAYS` on write, which is what keeps the aggregate a single index scan.
+ */
+export const workerJobRuns = pgTable(
+  'worker_job_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /** `WORKER_ID`, so two instances' rows can be told apart (and a restart is visible). */
+    workerId: text('worker_id').notNull(),
+    /** `JobName` from `packages/webhooks` — `wh.reconcile`, `wh.disputes`, `release.reservations`, … */
+    job: text('job').notNull(),
+    outcome: text('outcome', { enum: JOB_RUN_OUTCOMES }).notNull(),
+    startedAt: ts('started_at').notNull(),
+    finishedAt: ts('finished_at').notNull(),
+    durationMs: integer('duration_ms').notNull(),
+    /** The `CsError.code`, or `null` for a success. Never the message: a message can carry PayPal's text. */
+    errorCode: text('error_code'),
+    created_at: createdAt(),
+    updated_at: updatedAt(),
+  },
+  (t) => [
+    index('worker_job_runs_job_finished_idx').on(t.job, t.finishedAt),
+    check('worker_job_runs_finished_not_before_started', sql`${t.finishedAt} >= ${t.startedAt}`),
+    check('worker_job_runs_duration_non_negative', sql`${t.durationMs} >= 0`),
+  ],
+)
+
+/* ------------------------------------------------------------------------------------------ */
 /* Row types                                                                                       */
 /* ------------------------------------------------------------------------------------------ */
 
@@ -1415,6 +1469,7 @@ export type AuditLogRow = Recast<typeof auditLog.$inferSelect, 'id', AuditLogId>
 export type PrivacyRequestRow = Recast<typeof privacyRequests.$inferSelect, 'id', PrivacyRequestId>
 export type JwksKeyRow = typeof jwksKeys.$inferSelect
 export type JobRow = typeof jobs.$inferSelect
+export type WorkerJobRunRow = typeof workerJobRuns.$inferSelect
 
 /** Insert shapes, for `repos/*.ts`. */
 export type NewUser = typeof users.$inferInsert
@@ -1442,6 +1497,7 @@ export type NewDisputeAction = typeof disputeActions.$inferInsert
 export type NewAuditEntry = typeof auditLog.$inferInsert
 export type NewPrivacyRequest = typeof privacyRequests.$inferInsert
 export type NewJwksKey = typeof jwksKeys.$inferInsert
+export type NewWorkerJobRun = typeof workerJobRuns.$inferInsert
 
 /**
  * Every table, keyed by its §7.2 name. Used to pass a schema to `drizzle()` and by
@@ -1474,9 +1530,16 @@ export const schema = {
   privacyRequests,
   jwksKeys,
   jobs,
+  workerJobRuns,
 } as const
 
-/** §7.2 table names, in the order the spec lists them. */
+/**
+ * Table names, in the order the spec lists them.
+ *
+ * The first 26 are §7.2's own list. `worker_job_runs` is appended because §8.19 requires the worker to
+ * report whether it is running, and a Render background worker has no port and therefore no health check —
+ * the table is the only channel it has.
+ */
 export const TABLE_NAMES = [
   'users',
   'paypal_wallets',
@@ -1504,6 +1567,7 @@ export const TABLE_NAMES = [
   'privacy_requests',
   'jwks_keys',
   'jobs',
+  'worker_job_runs',
 ] as const satisfies readonly string[]
 
 export type TableName = (typeof TABLE_NAMES)[number]

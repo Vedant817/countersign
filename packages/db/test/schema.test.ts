@@ -116,8 +116,8 @@ function findTable(name: string): TableLike {
 /* ------------------------------------------------------------------------------------------ */
 
 describe('§7.2 table inventory', () => {
-  it('defines all 26 §7.2 tables, including the pg-boss jobs table', () => {
-    expect(TABLE_NAMES).toHaveLength(26)
+  it('defines the 26 §7.2 tables plus the worker heartbeat, 27 in all', () => {
+    expect(TABLE_NAMES).toHaveLength(27)
     for (const name of [
       'users',
       'paypal_wallets',
@@ -145,6 +145,9 @@ describe('§7.2 table inventory', () => {
       'privacy_requests',
       'jwks_keys',
       'jobs',
+      // §8.19: a Render worker has no port and no health check, so the heartbeat row is the only channel
+      // that can say "this job last ran 4 minutes ago and succeeded".
+      'worker_job_runs',
     ]) {
       expect(TABLE_NAMES).toContain(name)
       // `schema` is keyed by camelCase export; the DB name is what §7.2 specifies.
