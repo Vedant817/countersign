@@ -39,7 +39,7 @@ import { resolvePaypalBase } from './paypal-base'
  * merchant, which is exactly the duplicate-order guard we want for free.
  */
 import { systemClock } from '@countersign/core'
-import { PayPalClient } from '@countersign/paypal'
+import { PayPalClient, type Order } from '@countersign/paypal'
 
 import { agentDemoAllowed } from './agent-session'
 
@@ -186,26 +186,29 @@ export async function rereadDemoOrder(id: string): Promise<DemoOrderResult> {
   return { ok: true, value: toDemoOrder(read.value) }
 }
 
-function toDemoOrder(raw: unknown): DemoOrder {
-  const r = raw as {
-    id?: string
-    status?: string
-    intent?: string
-    create_time?: string
-    custom_id?: string
-    purchase_units?: { amount?: { value?: string; currency_code?: string } }[]
-  }
-  const unit = r.purchase_units?.[0]
+/**
+ * PayPal's order response -> the display record.
+ *
+ * **Typed, not cast.** This used to take `unknown` and read fields through a hand-written `as { … }`
+ * shape (audit 8.8), which is a second, unchecked opinion about PayPal's response sitting beside the
+ * schema `packages/paypal` already validates with (`orderSchema`). The two could drift — and the one
+ * that drifted would be the one nobody wrote a test for. `Order` is what `createOrder`/`getOrder` actually
+ * return, so the compiler now checks these reads.
+ *
+ * The two fallbacks are deliberate and both mean something: `intent` is absent only on a response PayPal
+ * did not label, and the app created the order as `AUTHORIZE`, so that is the honest default. `custom_id`
+ * is read from the purchase unit because that is where this module writes it; the top-level field is not
+ * part of `Order`, and reading it here was how the cast hid the difference.
+ */
+function toDemoOrder(raw: Order): DemoOrder {
+  const unit = raw.purchase_units?.[0]
   return {
-    id: r.id ?? '',
-    status: r.status ?? 'UNKNOWN',
-    intent: r.intent ?? 'AUTHORIZE',
-    customId:
-      typeof r.custom_id === 'string'
-        ? r.custom_id
-        : ((unit as { custom_id?: string } | undefined)?.custom_id ?? null),
+    id: raw.id,
+    status: raw.status,
+    intent: raw.intent ?? 'AUTHORIZE',
+    customId: unit?.custom_id ?? null,
     amountValue: unit?.amount?.value ?? null,
     currency: unit?.amount?.currency_code ?? null,
-    createTime: r.create_time ?? null,
+    createTime: raw.create_time ?? null,
   }
 }

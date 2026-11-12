@@ -1,6 +1,6 @@
 # HUMAN TODO — things only Vedant can do
 
-_Last updated: 26 October 2026_
+_Last updated: 13 November 2026_
 
 Agents keep working on everything that is not blocked by one of these. **Newest request goes at the top.**
 When you complete an item, move it to `docs/DONE_BY_HUMAN.md` with the date.
@@ -44,6 +44,27 @@ What is needed, in one line each:
 Then `packages/orders.createOrderFromDecision` (P0-4) can send the vault id and the run can capture.
 Until then the agent demo reports `order_pending: true` and a sentence saying so, which is the honest
 state rather than a claim.
+
+**Re-confirmed against the live sandbox on 13 Nov 2026 (real output, through our own `PayPalClient`):**
+an order is created fine (`201`, id `9R507478R17897236`, status `CREATED`, links `self, approve, update,
+authorize`), and every money call behind it is refused by PayPal itself:
+
+| Call                                                  | PayPal's answer                                                                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `authorizeOrder`                                      | `422 UNPROCESSABLE_ENTITY` / issue `ORDER_NOT_APPROVED` — "Payer has not yet approved the Order"                         |
+| `captureOrder` (AUTHORIZE intent)                     | `422 UNPROCESSABLE_ENTITY` / issue `ACTION_DOES_NOT_MATCH_INTENT`                                                        |
+| `POST /v2/checkout/orders` with `payment_source.card` | `422` / issue `PAYEE_NOT_ENABLED_FOR_CARD_PROCESSING` — "Payee account is not setup to be able to process card payments" |
+
+So there are **two** independent PayPal-side switches, and either one unblocks a capture path:
+
+1. **Vault** (item 1a above) — then the production order can carry `payment_source.paypal.vault_id`.
+2. **Card processing** — the `PAYEE_NOT_ENABLED_FOR_CARD_PROCESSING` error says the merchant app cannot take
+   card payments at all; enabling it would allow a card-funded order to be captured with no vault and no
+   buyer login. If you would rather demo a card capture than a vaulted wallet, this is the cheaper switch.
+
+Neither is a code task: the client calls are written and tested, and the app refuses rather than faking a
+capture. `listDisputes` answers `200` today with no disputes, and `getDispute`/`getCapture` map PayPal's
+`404 RESOURCE_NOT_FOUND` to `PP_NOT_FOUND` — the disputes half needs a real captured payment first.
 
 ---
 

@@ -523,3 +523,24 @@ WP-06s and everything needing live sandbox is not started.
   - `tests (e2e, playwright)` - `Running 16 tests using 1 worker`, **`16 passed (38.2s)`**. (The earlier red run was a
     migrated-but-unseeded database, so the storefront had no products.)
   `tests (vi-service)` is green with `ruff check` **and** `ruff format --check`, and the local `vi:lint` now runs both.
+
+- **2026-11-13 (IST)** - **§5 driven to the real PayPal answer: the money path is blocked by PayPal, not by us (P1).**
+  Every money call was exercised **through our own `PayPalClient`** against the live sandbox, and the outcome is
+  PayPal's own words:
+  | Call | PayPal's answer |
+  | --- | --- |
+  | `createOrder` (AUTHORIZE, no payment source) | `201`, id `9R507478R17897236`, status `CREATED`, links `self, approve, update, authorize` |
+  | `authorizeOrder` | `422 UNPROCESSABLE_ENTITY` / `ORDER_NOT_APPROVED` - "Payer has not yet approved the Order" |
+  | `captureOrder` on that AUTHORIZE order | `422 UNPROCESSABLE_ENTITY` / `ACTION_DOES_NOT_MATCH_INTENT` |
+  | `createOrder` with `payment_source.card` | `422 UNPROCESSABLE_ENTITY` / `PAYEE_NOT_ENABLED_FOR_CARD_PROCESSING` - "Payee account is not setup to be able to process card payments" |
+  | `listDisputes` | `200`, no disputes |
+  | `getDispute(DP-DOESNOTEXIST)` / `getCapture(…)` | `404 RESOURCE_NOT_FOUND` → `PP_NOT_FOUND` (the mapping is right) |
+  So the two remaining PayPal capabilities are **switches in the PayPal dashboard, not code**: Vault (HUMAN_TODO 1a)
+  or card processing. Until one lands, authorize/capture/refund/void/disputes cannot be completed - and the app
+  refuses loudly rather than inventing a capture. The evidence and both switches are written into
+  `docs/HUMAN_TODO.md` item 1a.
+  **Also fixed here:** audit 8.8 - `toDemoOrder` took `unknown` and re-declared PayPal's order shape beside the
+  schema `packages/paypal` already validates with. It now takes `Order`, so `custom_id` and the amount are
+  compiler-checked reads (the cast had also been reading a top-level `custom_id` that `Order` does not carry).
+  **Measured:** `pnpm --filter @countersign/web typecheck` exit 0, `apps/web/lib` tests `71 passed | 1 skipped`,
+  `prettier` clean. The two throwaway probes were deleted after the run (output above is the record).
