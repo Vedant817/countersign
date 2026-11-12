@@ -1,0 +1,77 @@
+[
+  {
+    "start": 4.637,
+    "end": 8.825,
+    "text": "Shopping agents can spend money, but a card gives them your full authority."
+  },
+  {
+    "start": 8.825,
+    "end": 12.262,
+    "text": "Countersign replaces that with a signed spending mandate."
+  },
+  {
+    "start": 12.262,
+    "end": 20.662,
+    "text": "On the agent chat, the buyer states intent in plain language: buy the cheapest trail shoes you can find, under one hundred fifty dollars."
+  },
+  {
+    "start": 20.662,
+    "end": 26.2,
+    "text": "The intent compiler turns that into explicit, signed constraints the buyer can review."
+  },
+  {
+    "start": 26.2,
+    "end": 31.112,
+    "text": "When the agent tries to check out, the Gate evaluates the purchase against the mandate."
+  },
+  {
+    "start": 31.112,
+    "end": 37.85,
+    "text": "For an allowed, in-budget item, the Gate returns ALLOW and creates a real PayPal sandbox order."
+  },
+  {
+    "start": 37.85,
+    "end": 46.437,
+    "text": "The order is shown with its PayPal order ID and status CREATED and unpaid \u2014 a real third-party record, not a database mock."
+  },
+  {
+    "start": 46.437,
+    "end": 48.762,
+    "text": "We can re-read it directly from PayPal."
+  },
+  {
+    "start": 48.762,
+    "end": 55.35,
+    "text": "If a listing tries to break the rules \u2014 for example an injected or out-of-scope price \u2014 the Gate blocks it."
+  },
+  {
+    "start": 55.35,
+    "end": 58.5,
+    "text": "The agent cannot spend outside the signed mandate."
+  },
+  {
+    "start": 58.5,
+    "end": 67.062,
+    "text": "When a dispute is raised, the Dispute Defender runs a deterministic rule table, not a model, to decide whether to contest or refund."
+  },
+  {
+    "start": 67.062,
+    "end": 79.937,
+    "text": "Here are two simulated dispute cases processed by the production pipeline: one unauthorized charge is contested with a cited evidence plan, and one agent-fault case is refunded because the agent bought the wrong thing."
+  },
+  {
+    "start": 79.937,
+    "end": 84.625,
+    "text": "The contested case produces an evidence packet PDF with a QR code."
+  },
+  {
+    "start": 84.625,
+    "end": 98.337,
+    "text": "Scanning it opens the public verifier, which recomputes checks from the packet itself and reports each result honestly \u2014 including what is simulated and what is skipped because no live signed chain is present in this demo fixture."
+  },
+  {
+    "start": 98.337,
+    "end": 106.437,
+    "text": "Countersign makes agent payments provable: signed intent, enforced limits, real PayPal records, and evidence you can verify."
+  }
+]

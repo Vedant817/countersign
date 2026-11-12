@@ -16,7 +16,7 @@ without anyone asking the buyer to remember what they authorised.
 ## Demo
 
 A recorded walkthrough of the local stack is in [`docs/demo/countersign-demo.mp4`](docs/demo/countersign-demo.mp4)
-(≈1:47, 1080p, narrated). What is real and what is simulated in it is listed in
+(1:47, 1080p, narrated, one continuous take). What is real and what is simulated in it is listed in
 [`docs/demo/DEMO_NOTES.md`](docs/demo/DEMO_NOTES.md); the short version: the Gate decision and the PayPal
 sandbox order are real, the two disputes and the packet they produce are fixtures.
 
