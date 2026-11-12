@@ -165,7 +165,10 @@ function toDemoOrder(raw: unknown): DemoOrder {
     id: r.id ?? '',
     status: r.status ?? 'UNKNOWN',
     intent: r.intent ?? 'AUTHORIZE',
-    customId: typeof r.custom_id === 'string' ? r.custom_id : (unit as { custom_id?: string } | undefined)?.custom_id ?? null,
+    customId:
+      typeof r.custom_id === 'string'
+        ? r.custom_id
+        : ((unit as { custom_id?: string } | undefined)?.custom_id ?? null),
     amountValue: unit?.amount?.value ?? null,
     currency: unit?.amount?.currency_code ?? null,
     createTime: r.create_time ?? null,

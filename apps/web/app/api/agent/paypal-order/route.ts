@@ -22,7 +22,10 @@ const idSchema = z.string().regex(/^[A-Z0-9]{17}$/, 'A PayPal order id is 17 cha
 export async function GET(request: Request): Promise<NextResponse> {
   if (!demoOrderPossible()) {
     return NextResponse.json(
-      { error: 'The demo order path is off here: it needs COUNTERSIGN_AGENT_DEMO=1 and sandbox credentials.' },
+      {
+        error:
+          'The demo order path is off here: it needs COUNTERSIGN_AGENT_DEMO=1 and sandbox credentials.',
+      },
       { status: 403 },
     )
   }
@@ -42,7 +45,10 @@ export async function GET(request: Request): Promise<NextResponse> {
         status: read.value.status,
         intent: read.value.intent,
         custom_id: read.value.customId,
-        amount: read.value.amountValue === null ? null : `${read.value.amountValue} ${read.value.currency ?? ''}`.trim(),
+        amount:
+          read.value.amountValue === null
+            ? null
+            : `${read.value.amountValue} ${read.value.currency ?? ''}`.trim(),
         create_time: read.value.createTime,
       },
       read_at: new Date().toISOString(),

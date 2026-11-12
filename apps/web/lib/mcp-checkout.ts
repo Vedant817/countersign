@@ -51,6 +51,7 @@ import { orchestratorStoreFromRepos } from '@countersign/orchestrator'
 
 import { createDemoOrder } from './demo-order'
 import { gateRuntime } from './gate-runtime'
+import { merchantIdentity } from './merchant'
 
 /** What the merchant MCP's `submit_checkout` answers. Mirrors §8.9 plus two honesty fields. */
 export interface CheckoutSubmission {
@@ -141,12 +142,13 @@ export async function submitCheckout(
   let paypalOrderId: string | null = null
   let orderNote = ''
   if (decision.decision === 'ALLOW') {
+    const identity = merchantIdentity()
     const order = await createDemoOrder({
       decisionId: decision.id,
       attemptId,
       amountMinor: session.value.total_minor,
       currency: session.value.currency,
-      payeeName: MERCHANT_NAME,
+      payeeName: identity.ok ? identity.value.name : 'the merchant',
     })
     if (order.ok) {
       paypalOrderId = order.value.id
