@@ -150,6 +150,50 @@ export const CRON_SPECS: readonly CronSpec[] = Object.freeze([
   },
 ])
 
+/**
+ * The cadence of a cron expression in seconds, for the heartbeat thresholds (§8.19).
+ *
+ * ## Why this is a parser and not another column
+ *
+ * `CronSpec` already carries `every` in words ("5 minutes"), and a second field holding the same fact in
+ * seconds would be a second place to forget to update. So the number is *derived* from the expression that
+ * pg-boss will actually run — the one string that cannot drift from itself.
+ *
+ * It handles exactly the three shapes this table uses, and returns `null` for anything else rather than
+ * guessing: a cadence nobody can state is a cadence nobody should be judged against. The three shapes are
+ * a step of n minutes (written without its leading star here, because a literal step expression
+ * would close this comment), every minute, and a fixed minute of a fixed hour (one day).
+ */
+export function cadenceSeconds(expression: string): number | null {
+  const fields = expression.trim().split(/\s+/)
+  if (fields.length !== 5) return null
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields
+
+  // Only a wildcard in all three date fields is "every day". A weekday range (`1-5`) is five days a
+  // week, not one, so it is deliberately *not* read as daily: a wrong 24-hour cadence would judge a
+  // weekday-only job as "ok" for a whole weekend and "stalled" every Monday morning.
+  const daily = dayOfMonth === '*' && month === '*' && dayOfWeek === '*'
+  if (minute === '*' && hour === '*') return 60
+  const step = /^\*\/(\d+)$/.exec(minute ?? '')
+  if (step && hour === '*' && daily) return Number(step[1]) * 60
+  if (/^\d+$/.test(minute ?? '') && /^\d+$/.test(hour ?? '') && daily) return 24 * 60 * 60
+  return null
+}
+
+/** What the heartbeat needs: every cron's job and its own interval. */
+export function jobCadences(
+  crons: readonly CronSpec[] = CRON_SPECS,
+): { readonly job: JobName; readonly cadenceSec: number }[] {
+  return crons.map((spec) => ({
+    job: spec.job,
+    // `null` means the shape was not recognised; the fallback is the 5-minute promise from §8.12 rather
+    // than "never", so an unparsed expression is reported as behind rather than as healthy for ever.
+    cadenceSec: cadenceSeconds(spec.cron) ?? 5 * 60,
+  }))
+}
+
+/** The job names that have no cron and are enqueued by other code instead. */
+
 /** The job names that have no cron and are enqueued by other code instead. */
 export const EVENT_DRIVEN_JOBS: readonly JobName[] = Object.freeze([JOB_PROCESS])
 

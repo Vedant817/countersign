@@ -107,6 +107,34 @@ describe('startWorker — boot', () => {
     expect(started.error.code).toBe('CS_INTERNAL')
   })
 
+  it('§8.19 the run a handler performs is recorded through the heartbeat sink startWorker was given', async () => {
+    // The wrapper is applied inside startWorker, not by each handler, so this is the test that proves it is
+    // applied at all. heartbeat.test.ts proves what the wrapper records; without this one, a refactor that
+    // stopped passing `handlers` to `registerJobs` would leave the table empty and every test still green.
+    const boss = fakeBoss()
+    const recorded: { job: string; outcome: string; errorCode: string | null | undefined }[] = []
+    const started = await startWorker({
+      webhooks: workerHarness().deps,
+      boss,
+      crons: ONE_CRON,
+      heartbeats: {
+        async record(event) {
+          recorded.push({ job: event.job, outcome: event.outcome, errorCode: event.errorCode })
+          return { ok: true, value: event }
+        },
+      },
+    })
+    if (!started.ok) throw new Error(started.error.message)
+
+    const handler = boss.handlers.get(JOB_RECONCILE)
+    expect(handler, 'the reconciler handler was not registered').toBeDefined()
+    await handler!(null)
+
+    expect(recorded).toEqual([{ job: JOB_RECONCILE, outcome: 'ok', errorCode: null }])
+    // And the id on the started worker is the id in the row, so an operator reading one can find the other.
+    expect(started.value.workerId).not.toBe('')
+  })
+
   it('WORKER-1 stop() is idempotent, so a second SIGTERM does not turn a clean drain into exit 1', async () => {
     const boss = fakeBoss()
     const started = await startWorker({

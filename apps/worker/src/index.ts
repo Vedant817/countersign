@@ -52,6 +52,7 @@ import {
 } from '@countersign/core'
 import {
   drizzleStore,
+  findJobHeartbeats,
   findStaleAttempts,
   listEntries,
   reconcileIn,
@@ -83,7 +84,14 @@ import {
   type PgBossLike,
   type RegistrationReport,
 } from './job-runner'
-import { CRON_SPECS, isPlausibleCron, type CronSpec } from './schedule'
+import { buildJobHealths, startHealthServer, type HealthServer } from './health'
+import {
+  dbHeartbeatSink,
+  withHeartbeats,
+  workerId as workerIdFromEnv,
+  type HeartbeatSink,
+} from './heartbeat'
+import { CRON_SPECS, isPlausibleCron, jobCadences, type CronSpec } from './schedule'
 
 export { dbWebhookAudit, dbWebhookStore, isReconcileCandidate }
 
@@ -128,6 +136,13 @@ export {
 /** A started worker. `stop()` is idempotent, so a second `SIGTERM` is harmless. */
 export interface Worker {
   readonly boss: PgBossLike
+  /**
+   * The identity written to `worker_job_runs.worker_id` — `WORKER_ID` or `hostname-pid`.
+   *
+   * On the started worker rather than kept internal because the health server's body names it: an operator
+   * reading a heartbeat row and a `curl /health` has to be able to tell they are the same process.
+   */
+  readonly workerId: string
   /** Handlers and schedules that were registered, and the ones that failed. */
   readonly registration: Awaited<ReturnType<typeof registerJobs>>
   stop(): Promise<void>
@@ -155,6 +170,15 @@ export interface WorkerDeps {
   /** §7.2: the nightly "balances must equal the sum of entries" check. */
   readonly reconcileBudget?: JobHandler
   readonly logger?: Logger
+  /**
+   * §8.19: where finished runs are recorded. Defaults to `worker_job_runs`.
+   *
+   * A port so `startWorker` can be tested without a database — and so the heartbeat wrapper can be asserted
+   * to have recorded exactly what the handler did, including the case where it threw.
+   */
+  readonly heartbeats?: HeartbeatSink
+  /** Overrides `WORKER_ID`. A test needs a stable, readable id. */
+  readonly workerId?: string
   /** Overrides the schedule table. A test can run one cron; production uses {@link CRON_SPECS}. */
   readonly crons?: readonly CronSpec[]
   /** Overrides the pg-boss adapter, so a test never loads the module. */
@@ -215,6 +239,8 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
     }
   }
 
+  const instanceId = deps.workerId ?? workerIdFromEnv()
+
   const boss =
     deps.boss ?? (await createPgBossQueue({ connectionString: env().DATABASE_URL, logger }))
   // Every optional handler is forwarded explicitly. A `RunnerDeps` member the boot path silently dropped
@@ -226,6 +252,20 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
     ...(deps.hooks ? { hooks: deps.hooks } : {}),
     ...(deps.releaseReservations ? { releaseReservations: deps.releaseReservations } : {}),
     ...(deps.reconcileBudget ? { reconcileBudget: deps.reconcileBudget } : {}),
+  })
+
+  /*
+   * §8.19: every handler is wrapped so its run is recorded, before anything is registered.
+   *
+   * The wrapper is applied to the whole table rather than to one job because the failure it exists to catch is
+   * "the reconciler stopped", and a heartbeat that only covers `wh.process` would go on reporting a healthy
+   * worker while `wh.reconcile` was dead. It is also applied here rather than inside `createJobRunner` so the
+   * handler table stays testable without a database — see `heartbeat.ts`.
+   */
+  const handlers = withHeartbeats(runner, deps.heartbeats ?? dbHeartbeatSink({ logger }), {
+    workerId: instanceId,
+    clock: deps.webhooks.clock,
+    logger,
   })
 
   // The queue is opened first, because in pg-boss 12 both `work()` and `schedule()` need an open connection and
@@ -251,7 +291,7 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
     }
   }
 
-  const registration: RegistrationReport = await registerJobs(boss, runner, crons)
+  const registration: RegistrationReport = await registerJobs(boss, handlers, crons)
   if (registration.errors.length > 0) {
     // Every refusal is reported by name. "The five-minute sweep is not running" is the whole diagnosis, and it
     // is invisible from the outside — state just stops being repaired.
@@ -290,6 +330,7 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
     ok: true,
     value: {
       boss,
+      workerId: instanceId,
       registration,
       async stop(): Promise<void> {
         if (stopped) return
@@ -397,15 +438,63 @@ export async function main(): Promise<number> {
   }
 
   const worker = started.value
+
+  /*
+   * §8.19: an optional health listener, off unless `WORKER_HEALTH_PORT` is set.
+   *
+   * A Render `type: worker` has no port and therefore no health check, so this is not how the platform learns
+   * the worker is alive — `worker_job_runs` read by `/status` is. It exists for the operator and the external
+   * monitor: one `curl` that answers "which jobs ran, and when did each last succeed" without a psql session.
+   *
+   * It is opt-in because a listener nobody asked for is a liability, and because the bind is a side effect a
+   * test would have to clean up. A bad value is exit 78 (`EX_CONFIG`): a deployment that asked for a health
+   * endpoint and cannot have one should say so at boot rather than run without it.
+   */
+  let health: HealthServer | undefined
+  const healthPort = process.env['WORKER_HEALTH_PORT']
+  if (healthPort !== undefined && healthPort.trim() !== '') {
+    const port = Number(healthPort)
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      console.error(`[worker] WORKER_HEALTH_PORT is not a port number: ${healthPort}`)
+      return 78
+    }
+    const expected = jobCadences(deps.crons ?? CRON_SPECS)
+    try {
+      health = await startHealthServer({
+        port,
+        workerId: worker.workerId,
+        report: async () => {
+          const rows = await findJobHeartbeats()
+          // A `Result` thrown here becomes the 503 body's code, which is the honest answer: the endpoint
+          // cannot say whether the worker is healthy if it cannot read the heartbeat table.
+          if (!rows.ok) throw rows.error
+          return buildJobHealths({
+            heartbeats: rows.value,
+            expected,
+            nowSec: Math.floor(Date.now() / 1000),
+          })
+        },
+        logger: loggerChild('worker-health'),
+      })
+      console.info(`[worker] health endpoint on ${health.url}`)
+    } catch (cause) {
+      console.error('[worker] could not start the health endpoint:', cause)
+      return 78
+    }
+  }
+
   const shutdown = (signal: string): void => {
     console.info(`[worker] ${signal} received, draining`)
-    void worker.stop().then(
-      () => process.exit(0),
-      (cause: unknown) => {
+    void (async () => {
+      try {
+        await worker.stop()
+        await health?.close()
+        process.exit(0)
+      } catch (cause) {
         console.error('[worker] shutdown failed:', cause)
         process.exit(1)
-      },
-    )
+      }
+    })()
   }
   process.once('SIGTERM', shutdown)
   process.once('SIGINT', shutdown)

@@ -26,6 +26,8 @@ import {
   type JobName,
 } from '@countersign/webhooks'
 
+import { JOB_CADENCE_SEC } from '@countersign/privacy'
+
 import {
   CRON_SPECS,
   CRON_SPECS as SPECS,
@@ -34,8 +36,10 @@ import {
   HANDLED_JOBS,
   NIGHTLY_02_17_UTC,
   TWO_MINUTES,
+  cadenceSeconds,
   cronFor,
   isPlausibleCron,
+  jobCadences,
 } from '../src/schedule'
 
 describe('the schedule table', () => {
@@ -164,5 +168,68 @@ describe('cronFor', () => {
   it('SCHEDULE-2 an unscheduled job answers undefined rather than throwing', () => {
     const known: JobName = JOB_PROCESS
     expect(cronFor(known)).toBeUndefined()
+  })
+})
+
+describe('cadenceSeconds', () => {
+  it('reads the 5-minute step, which is the cadence §8.12 promises', () => {
+    expect(cadenceSeconds(FIVE_MINUTES)).toBe(300)
+    expect(cadenceSeconds(TWO_MINUTES)).toBe(120)
+  })
+
+  it('reads a fixed nightly hour as one day, not as five minutes', () => {
+    // The whole reason this parser exists: a nightly job judged against §14's 5-minute reconciler target
+    // would be "lagging" for 23 hours of every day, and a red page nobody believes is worse than no page.
+    expect(cadenceSeconds(NIGHTLY_02_17_UTC)).toBe(24 * 60 * 60)
+  })
+
+  it('reads every-minute as 60 seconds', () => {
+    expect(cadenceSeconds('* * * * *')).toBe(60)
+  })
+
+  it('refuses to guess at an expression it does not understand', () => {
+    expect(cadenceSeconds('0 2 * * 1-5')).toBeNull()
+    expect(cadenceSeconds('*/5 * * *')).toBeNull()
+    expect(cadenceSeconds('')).toBeNull()
+  })
+
+  it('covers every cron this worker actually schedules', () => {
+    // A new cron with an unparsed shape would fall back to 5 minutes inside jobCadences and be judged
+    // against a threshold nobody chose. This turns that silent fallback into a failing test.
+    for (const spec of CRON_SPECS) {
+      expect(cadenceSeconds(spec.cron), spec.job).not.toBeNull()
+    }
+  })
+})
+
+describe('jobCadences', () => {
+  it('pairs every scheduled job with its own interval', () => {
+    const cadences = jobCadences()
+    expect(cadences.map((c) => c.job)).toEqual(CRON_SPECS.map((s) => s.job))
+    expect(cadences.find((c) => c.job === JOB_RECONCILE)!.cadenceSec).toBe(300)
+    expect(cadences.find((c) => c.job === JOB_DISPUTES)!.cadenceSec).toBe(120)
+    expect(cadences.find((c) => c.job === JOB_BUDGET_RECONCILE)!.cadenceSec).toBe(24 * 60 * 60)
+  })
+
+  it('falls back to the 5-minute promise for an unparsed expression, not to "never"', () => {
+    const cadences = jobCadences([
+      { job: JOB_RECONCILE, cron: '0 2 * * 1-5', every: 'weekdays', because: 'test' },
+    ])
+    expect(cadences[0]!.cadenceSec).toBe(300)
+  })
+})
+
+describe('the cadence table /status uses', () => {
+  it('agrees with the privacy package, so the web page cannot drift from the schedule', () => {
+    // `apps/web` cannot import this module (that would pull pg-boss into the Next bundle), so
+    // `JOB_CADENCE_SEC` in `@countersign/privacy` is the copy /status reads. This is the test that makes the
+    // copy honest: change a cron here and forget the table, and this fails.
+    for (const spec of CRON_SPECS) {
+      expect(JOB_CADENCE_SEC[spec.job], spec.job).toBe(cadenceSeconds(spec.cron))
+    }
+  })
+
+  it('has no entry for the event-driven job, which has no cadence to state', () => {
+    expect(JOB_CADENCE_SEC['wh.process']).toBeUndefined()
   })
 })

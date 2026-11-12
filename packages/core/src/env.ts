@@ -250,6 +250,27 @@ export const envSchema = z
     RETENTION_DAYS_EVIDENCE: z.coerce.number().int().min(1).max(3650).default(540),
 
     SENTRY_DSN: z.string().optional(),
+
+    /**
+     * §8.19: the background worker's opt-in health port.
+     *
+     * **Optional, and that is the point.** Render runs the worker as `type: worker`, which has no port and no
+     * health check; the primary liveness signal is `worker_job_runs` read by the web `/status`. This variable
+     * exists for the operator who wants a `curl` against the worker itself, and it is off until they ask for it
+     * because a listener nobody configured is a listener nobody is watching.
+     *
+     * Declared here rather than read ad hoc so a typo (`WORKER_HEALTH_PORTS`) is caught by the boot check and
+     * by `ENV_KEYS`, instead of silently leaving the endpoint unbound.
+     */
+    WORKER_HEALTH_PORT: z.coerce.number().int().min(1).max(65_535).optional(),
+    /**
+     * The worker's identity in `worker_job_runs.worker_id`.
+     *
+     * Optional and unbounded on purpose: `apps/worker/src/heartbeat.ts` falls back to `hostname-pid` and
+     * treats an empty value as absent, so an operator who leaves the example's `WORKER_ID=` in place gets
+     * the fallback rather than a boot failure about a cosmetic setting.
+     */
+    WORKER_ID: z.string().optional(),
   })
   // NOT `.strict()`. See `parseEnv` for why strictness was removed and what replaced it — the
   // behaviour `.strict()` gave us is preserved where it matters and dropped where it was noise.
