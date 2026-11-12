@@ -55,7 +55,9 @@ jobs:
         with:
           fetch-depth: 0 # full history: a secret committed and removed later is still a leak
       - name: gitleaks (full history)
-        uses: gitleaks/gitleaks-action@v2
+        # v3, not v2: GitHub has deprecated Node 20 for Actions, and v2 is the Node 20 release. Same
+        # inputs, same behaviour.
+        uses: gitleaks/gitleaks-action@v3
         env:
           # The action refuses to scan a pull request without it ("GITHUB_TOKEN is now required to
           # scan pull requests"), which is why the first PR-triggered run of this workflow failed on
@@ -63,6 +65,18 @@ jobs:
           # the action's documented setup; nothing about what is scanned changes.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+          # Pinned, and this is not cosmetic. The action's hard-coded default is 8.24.3, which does not
+          # apply the top-level `[[allowlists]]` path entries in `.gitleaks.toml` while scanning git
+          # history — so the first run of this branch reported 24 leaks, every one of them in a file the
+          # config already allowlists with a written justification (`.env.example`, the CI workflows'
+          # DATABASE_URL placeholders, the sandbox fixture JWKs, `decision-record.ts`'s example JWK, the
+          # test-vector files). A green `pnpm secret-scan` locally (gitleaks 8.30.1) meant the scan and
+          # CI were running different scanners, which is the defect: a gate that reports 24 false
+          # positives trains a reviewer to ignore it.
+          #
+          # Keep this in step with the version a developer has on PATH. 8.30.1 is what the local gate
+          # was run with when this was written.
+          GITLEAKS_VERSION: '8.30.1'
       - name: assert .env files are ignored except .env.example
         run: |
           set -euo pipefail
@@ -427,6 +441,12 @@ jobs:
           uv sync --frozen --extra dev
       - name: migrate
         run: pnpm db:migrate
+      - name: seed the catalog
+        # The storefront reads products from `merchant_products` whenever DATABASE_URL is set
+        # (`shopCatalogMode() === 'database'`), so a migrated-but-unseeded database serves an empty shop:
+        # every storefront assertion fails on a missing product link, which is what the first CI run of this
+        # job reported (9 of 16 tests, all of them waiting for a heading or a product that was never there).
+        run: pnpm db:seed
       - name: install chromium
         run: pnpm --filter @countersign/web exec playwright install --with-deps chromium
       - name: e2e

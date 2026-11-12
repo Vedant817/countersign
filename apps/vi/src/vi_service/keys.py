@@ -164,9 +164,7 @@ def derive_signing_key(kek_b64: str, role: str) -> ec.EllipticCurvePrivateKey:
 
     kek = base64.b64decode(kek_b64, validate=True)
     for counter in range(64):
-        candidate = int.from_bytes(
-            _hkdf_sha256(kek, f"{label}|{counter}"), "big"
-        )
+        candidate = int.from_bytes(_hkdf_sha256(kek, f"{label}|{counter}"), "big")
         if 1 <= candidate < _P256_ORDER:
             return ec.derive_private_key(candidate, ec.SECP256R1())
     raise ValueError("could not derive a P-256 scalar from the KEK in 64 attempts")

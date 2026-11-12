@@ -135,14 +135,8 @@ def test_P0_a_different_kek_gives_a_different_issuer_key() -> None:
     first = derive_signing_key(kek, "ISSUER")
     second = derive_signing_key(other, "ISSUER")
 
-    first_jwk = {
-        member: getattr(first.private_numbers().public_numbers, member)
-        for member in ("x", "y")
-    }
-    second_jwk = {
-        member: getattr(second.private_numbers().public_numbers, member)
-        for member in ("x", "y")
-    }
+    first_jwk = {member: getattr(first.private_numbers().public_numbers, member) for member in ("x", "y")}
+    second_jwk = {member: getattr(second.private_numbers().public_numbers, member) for member in ("x", "y")}
     assert first_jwk != second_jwk
 
 

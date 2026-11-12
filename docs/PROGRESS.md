@@ -489,3 +489,28 @@ WP-06s and everything needing live sandbox is not started.
   keyed Gate reasons by `CsError.code` alone, and the Gate emits one reason per failed check — two checks can fail
   with the same code, so React de-duplicated them and **dropped a reason the buyer should have read**. Both lists now
   key on code + position, and the re-run is clean (no browser warning) with 16 passed again.
+
+- **2026-11-13 (IST)** - **CI run 43312234630 triaged: three red jobs, three causes, all fixed on `prod/real-users`.**
+  The first run of the new gates failed `secret scan`, `tests (vi-service)` and `tests (e2e, playwright)`;
+  `build`, `static`, all three node shards, `db-migrations`, `compiler-determinism` and the VI pin passed.
+  - **`tests (vi-service)`** failed `ruff format --check`. `apps/vi/src/vi_service/keys.py` and
+    `apps/vi/tests/test_keys.py` were never formatted; `ruff format` rewrote 4 + 10 lines. The local gate
+    only ran `ruff check`, so it could not see it: `vi:lint` is now `ruff check && ruff format --check`.
+    **Measured:** `pnpm vi:lint` exit 0 (`22 files already formatted`), `pnpm vi:test` `212 passed`.
+  - **`secret scan`** reported **24 leaks** over 198 commits with gitleaks **8.24.3** — the version
+    `gitleaks-action@v2` hard-codes — while a local `pnpm secret-scan` (gitleaks **8.30.1**) reported none.
+    Every one of the 24 fingerprints is in a file `.gitleaks.toml` already allowlists with a written
+    justification: `.env.example`, the CI workflows' `DATABASE_URL` placeholders, `docker-compose.yml`,
+    the sandbox fixture JWKs (`packages/gate/test/fixtures/*`, `packages/verifier/test/fixtures/chain.json`),
+    `packages/gate/src/decision-record.ts`'s example JWK, and four test files. **No credential, so nothing to
+    rotate** (`docs/HUMAN_TODO.md` unchanged). The defect was two different scanners: the action's 8.24.3 does
+    not apply the top-level `[[allowlists]]` path entries during a history scan. Fixed by moving the action to
+    `v3` (Node 24) and pinning `GITLEAKS_VERSION: '8.30.1'`, with the reason recorded in the workflow.
+    **Measured:** `pnpm secret-scan` exit 0 — `342 commits scanned … no leaks found`.
+  - **`tests (e2e, playwright)`** failed 9 of 16, every failure a missing heading or product link. Cause: the
+    storefront reads `merchant_products` whenever `DATABASE_URL` is set (`shopCatalogMode() === 'database'`),
+    and the job ran `db:migrate` but never `db:seed`, so the shop was empty. A `seed the catalog` step now runs
+    `pnpm db:seed`. (The local run passed because this workstation's database was already seeded — which is
+    exactly why the gap was invisible locally. The next CI run is the test of the fix.)
+  **Measured locally before re-dispatch:** `format:check` clean, whole repo `118 files / 2894 passed | 1 skipped`,
+  `vi:lint` and `vi:test` green, `secret-scan` green.
