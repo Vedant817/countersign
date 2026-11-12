@@ -12,9 +12,12 @@
  * contain the string `[object Object]`. The second assertion is the one that would have failed before
  * the fix, whatever object got smuggled into the view next.
  */
-import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 
-import { demoCases } from './defender-demo'
+import { describe, expect, it } from 'vitest'
+import type { LanguageModel as AiLanguageModel } from 'ai'
+
+import { defenderDraftPort, demoCasePdf, demoCases } from './defender-demo'
 
 const PUBLIC_BASE_URL = 'https://merchant.example.test'
 
@@ -51,5 +54,60 @@ describe('the dispute demo view', () => {
       expect(c.dispute.amount).toMatch(/^\$[\d,]+\.\d{2}$/)
       expect(c.dispute.amount.startsWith('$$')).toBe(false)
     }
+  })
+})
+
+describe('the render cache', () => {
+  it('serves one render per case, so the page and the download route cannot disagree', async () => {
+    // Two reads, one pipeline. The second call must not recompute: a recompute would produce a *different*
+    // PDF (the clock moved), and the digest the page printed would no longer be the digest of the bytes the
+    // download route serves — which is exactly what the QR on the packet verifies.
+    const [first] = await demoCases(PUBLIC_BASE_URL)
+    const [again] = await demoCases(PUBLIC_BASE_URL)
+    expect(first).toBeDefined()
+    expect(again).toBe(first)
+
+    const pdf = await demoCasePdf('unauthorised', PUBLIC_BASE_URL)
+    expect(pdf).not.toBeNull()
+    expect(first?.pdf).not.toBeNull()
+
+    // The property stated as a digest, not as object identity: what the page reports is what the route
+    // serves, byte for byte.
+    const served = createHash('sha256').update(pdf!).digest('hex')
+    expect(served).toBe(first?.pdf?.sha256)
+  })
+})
+
+describe('the drafter model adapter', () => {
+  it('aborts a model call that never answers, instead of hanging the page (§8.6)', async () => {
+    // The property under test: the port hands the AI SDK a deadline, and the SDK hands the provider's
+    // `doGenerate` the signal. A port that omitted `abortSignal` would leave this promise pending forever
+    // and the test would fail on vitest's own timeout — which is the same failure a real reader would see
+    // as a page that never renders.
+    let sawSignal = false
+    const hanging = {
+      specificationVersion: 'v3',
+      provider: 'test',
+      modelId: 'never-answers',
+      supportedUrls: {},
+      doGenerate: async (options: { abortSignal?: AbortSignal }) => {
+        sawSignal = options.abortSignal !== undefined
+        return await new Promise<never>((_resolve, reject) => {
+          options.abortSignal?.addEventListener('abort', () =>
+            reject(new Error('aborted by the drafter deadline')),
+          )
+        })
+      },
+    } as unknown as AiLanguageModel
+
+    const port = defenderDraftPort(hanging, 25)
+    const startedAt = Date.now()
+    await expect(port.generateText({ system: 's', prompt: 'p' })).rejects.toThrow(/aborted/)
+    const elapsedMs = Date.now() - startedAt
+
+    expect(sawSignal, 'the provider was never given an AbortSignal').toBe(true)
+    expect(elapsedMs).toBeGreaterThanOrEqual(20)
+    // Not "eventually": a deadline that fires in the next hour is not a deadline for a page request.
+    expect(elapsedMs).toBeLessThan(2_000)
   })
 })

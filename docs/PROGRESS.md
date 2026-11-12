@@ -455,3 +455,22 @@ WP-06s and everything needing live sandbox is not started.
   model) declares no LLM vars. The `GATE_SIGNING_KEY` comment now says **Ed25519** (base64 32 bytes), matching
   `gate-runtime.ts`, not P-256.
   **Measured:** `prettier` parses the file unchanged; `pnpm format:check` clean.
+
+- **2026-11-13 (IST)** - **Dispute demo: a cache that expires and a model call that cannot hang (P2, `prod/real-users` §8.2/§8.6).**
+  `renderDefenderCase` cached each case in a module `Map` forever, and the render bakes `nowSec` into the
+  response-due date, the packet's `filed_at`/`created_at` and the PDF bytes themselves - so a long-running process
+  kept serving the day it booted. The cache is now `{ atSec, rendered }` with a one-hour TTL
+  (`CACHE_TTL_SEC`): the clock is read **before** the freshness check, a stale entry is dropped rather than
+  refreshed in place, and `demoVerifierRows` reads through the same rule so a page and a QR scan cannot be
+  served a mixed pair. A second reader arriving while a render is in flight shares it
+  (`inflight`), which also means a hung provider is awaited once rather than once per request.
+  `defenderDraftPort` now hands the AI SDK `abortSignal: AbortSignal.timeout(15_000)` on every attempt
+  (a fresh signal for the repair turn), and `draft()` already converts a port error into `LLM_UNAVAILABLE` and
+  falls back to the deterministic template - so a provider that never answers costs the page the wait and
+  nothing else.
+  **Measured, and falsified:** `apps/web/lib/defender-demo.test.ts` is `4 passed`, including a test that
+  drives a model whose `doGenerate` never settles and asserts the promise rejects within 2 s; removing the
+  `abortSignal` line made that test fail with `Test timed out in 20000ms` (output above), then it was
+  restored and the suite was green again. The cache test asserts the served PDF's SHA-256 equals the digest
+  the page printed. Whole repo: `118 files / 2894 passed | 1 skipped`; web `tsc` clean, `eslint` 0 errors,
+  `format:check` clean, `next build` exit 0.

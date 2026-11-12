@@ -48,6 +48,7 @@ import {
   plainNotes,
   type Draft,
   type DraftSource,
+  type LanguageModel as DrafterModel,
   type EvidenceBundle,
   type LiabilityDecision,
   type PacketView,
@@ -65,7 +66,7 @@ import type {
   OrderRow,
   ShipmentRow,
 } from '@countersign/db'
-import { generateText } from 'ai'
+import { generateText, type LanguageModel as AiLanguageModel } from 'ai'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { bundleHashHex, customIdForBundle } from '@countersign/verifier'
@@ -466,7 +467,13 @@ function demoDeps(world: CaseWorld['world'], publicBaseUrl: string, nowSec: numb
 /* The pipeline                                                                                */
 /* ------------------------------------------------------------------------------------------ */
 
-/** One rendered case, cached per process so the page and the PDF route show the same draft. */
+/**
+ * One rendered case.
+ *
+ * Not a plain `{ view, pdf, ... }` record: the object is cached (see below) and the page, the download
+ * route and the verifier all read the *same* instance, so the draft and the digest the QR verifies are
+ * one object rather than two computations that could disagree.
+ */
 interface RenderedCase {
   readonly view: DefenderCaseView
   readonly pdf?: Uint8Array
@@ -476,7 +483,49 @@ interface RenderedCase {
   readonly disputeRow: DisputeRow
 }
 
-const cache = new Map<DefenderCaseId, RenderedCase>()
+/**
+ * How long a rendered case may be served before it is recomputed, in seconds.
+ *
+ * A render bakes the clock into three places: the response-due date on the page, the `filed_at`/`created_at`
+ * on the packet row, and the bytes of the PDF itself (and therefore its digest). A process that rendered once
+ * and cached forever would show a response-due date from the day it booted, and a digest of a PDF that no
+ * longer matches what it would print now - the exact defect in `docs/PROD_AUDIT.md` §8.2.
+ *
+ * One hour is long enough that the page and the download route still agree - they must, because the QR
+ * verifies the digest the page printed - and short enough that a week-long process does not serve last
+ * week's dates. When a case is stale it is recomputed, and a reader never sees a mixed pair.
+ */
+const CACHE_TTL_SEC = 60 * 60
+
+interface CacheEntry {
+  /** When this entry was rendered, in the same clock the view's dates come from. */
+  readonly atSec: number
+  readonly rendered: RenderedCase
+}
+
+const cache = new Map<DefenderCaseId, CacheEntry>()
+
+/**
+ * One render per case at a time.
+ *
+ * Two readers arriving together - the page and a judge's QR scan - share the work instead of each running
+ * the pipeline (and, when a model is configured, each calling the provider). It also means a provider that
+ * hangs is awaited once, not once per request.
+ */
+const inflight = new Map<DefenderCaseId, Promise<RenderedCase>>()
+
+/** The live entry for a case, or `null` when it is absent or older than {@link CACHE_TTL_SEC}. */
+function cachedCase(id: DefenderCaseId, nowSec: number): RenderedCase | null {
+  const entry = cache.get(id)
+  if (entry === undefined) return null
+  if (nowSec - entry.atSec >= CACHE_TTL_SEC) {
+    // Dropped rather than refreshed in place: a reader holding the old object must not be able to keep
+    // serving it, and the next caller recomputes.
+    cache.delete(id)
+    return null
+  }
+  return entry.rendered
+}
 
 /**
  * The packet font, read from the defender package's assets.
@@ -507,15 +556,76 @@ function packetFontBytes(): Uint8Array {
   )
 }
 
-/** Compute the whole pipeline for one case. Exported for the PDF route; the page uses `demoCases`. */
+/**
+ * How long one model call for a dispute note may take, in milliseconds.
+ *
+ * §8.6: `/disputes` is a server-rendered page, and a provider that accepts the connection and then never
+ * answers would hold the request open until the platform's own timeout - which reads as a broken app rather
+ * than a slow model. `draft()` already treats any error from the port as `LLM_UNAVAILABLE` and falls back to
+ * the deterministic template (EC-LLM-1), so a deadline here costs the page the wait and nothing else: the
+ * reader still gets a packet, and the transcript says which author wrote the note.
+ *
+ * 15 s per call, and the drafter makes at most two (one repair turn), so the worst case before the template
+ * takes over is bounded at twice this.
+ */
+export const DEFENDER_DRAFT_TIMEOUT_MS = 15_000
+
+/**
+ * The adapter from the AI SDK's model to the port `draft()` asks for.
+ *
+ * Exported, with the deadline as a defaulted parameter, so a test can drive a model that never answers and
+ * assert the request was **aborted** rather than merely hoped about. "We pass an AbortSignal" is not evidence
+ * that the provider honours it; a test that watches the promise settle is.
+ */
+export function defenderDraftPort(
+  model: AiLanguageModel,
+  timeoutMs: number = DEFENDER_DRAFT_TIMEOUT_MS,
+): DrafterModel {
+  return {
+    generateText: async (request) => {
+      const out = await generateText({
+        model,
+        system: request.system,
+        prompt: request.prompt,
+        // A fresh signal per attempt: the repair turn is a second call and gets the whole budget, not
+        // whatever is left of the first one's.
+        abortSignal: AbortSignal.timeout(timeoutMs),
+      })
+      return { text: out.text }
+    },
+  }
+}
+
+/**
+ * Compute the whole pipeline for one case, or return the cached render while it is fresh.
+ *
+ * Exported for the PDF route; the page uses `demoCases`. The clock is read **before** the cache check,
+ * because freshness is a question about now.
+ */
 export async function renderDefenderCase(
   id: DefenderCaseId,
   publicBaseUrl: string,
 ): Promise<RenderedCase> {
-  const cached = cache.get(id)
-  if (cached !== undefined) return cached
-
   const nowSec = systemClock.nowSec()
+  const cached = cachedCase(id, nowSec)
+  if (cached !== null) return cached
+
+  const running = inflight.get(id)
+  if (running !== undefined) return running
+
+  const pending = renderUncached(id, publicBaseUrl, nowSec).finally(() => {
+    inflight.delete(id)
+  })
+  inflight.set(id, pending)
+  return pending
+}
+
+/** The pipeline itself. Called through {@link renderDefenderCase}, which owns the clock and the cache. */
+async function renderUncached(
+  id: DefenderCaseId,
+  publicBaseUrl: string,
+  nowSec: number,
+): Promise<RenderedCase> {
   const world = caseWorld(id, nowSec)
   const deps = demoDeps(world.world, publicBaseUrl, nowSec)
   const row = world.world.rows.disputes.get(world.disputeId)
@@ -572,7 +682,7 @@ export async function renderDefenderCase(
       bundle: world.bundle,
       disputeRow: row,
     }
-    cache.set(id, out)
+    cache.set(id, { atSec: nowSec, rendered: out })
     return out
   }
 
@@ -592,18 +702,8 @@ export async function renderDefenderCase(
   let result: Draft | null = null
   const llm = languageModel()
   if (llm.ok) {
-    const port = {
-      generateText: async (request: { system: string; prompt: string }) => {
-        const out = await generateText({
-          model: llm.value,
-          system: request.system,
-          prompt: request.prompt,
-        })
-        return { text: out.text }
-      },
-    }
     const attempt = await draft(draftInput, {
-      llm: port,
+      llm: defenderDraftPort(llm.value),
       onLog: (line) => console.info(`[defender-demo/drafter] ${line}`),
     })
     if (attempt.ok) {
@@ -718,7 +818,7 @@ export async function renderDefenderCase(
     bundle,
     disputeRow: row,
   }
-  cache.set(id, out)
+  cache.set(id, { atSec: nowSec, rendered: out })
   return out
 }
 
@@ -737,13 +837,14 @@ export async function demoVerifierRows(packetId: string): Promise<{
 } | null> {
   const caseId = demoCaseForPacketId(packetId)
   if (caseId === null) return null
-  // Rendering is idempotent and cached; awaiting it here guarantees the rows exist even when a judge
-  // scans the QR before ever opening /disputes.
-  await renderDefenderCase(caseId, process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000')
-  const rendered = cache.get(caseId)
-  if (rendered === undefined) return null
-  const at = (sec: number) => new Date(sec * 1000)
   const nowSec = systemClock.nowSec()
+  // Rendering is idempotent and cached; awaiting it here guarantees the rows exist even when a judge
+  // scans the QR before ever opening /disputes. The lookup goes through the same freshness rule as the
+  // render, so a stale entry cannot be half-served: one clock reading, one entry.
+  await renderDefenderCase(caseId, process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000')
+  const rendered = cachedCase(caseId, systemClock.nowSec())
+  if (rendered === null) return null
+  const at = (sec: number) => new Date(sec * 1000)
   const bundleHash = bundleHashHex(rendered.bundle as unknown as Readonly<Record<string, unknown>>)
   return {
     packet: {
