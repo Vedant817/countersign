@@ -1,0 +1,15 @@
+# Countersign demo narration (draft, ~2:30 target)
+
+Shopping agents can spend money, but a card gives them your full authority. Countersign replaces that with a signed spending mandate.
+
+On the agent chat, the buyer states intent in plain language: buy the cheapest trail shoes you can find, under one hundred fifty dollars. The intent compiler turns that into explicit, signed constraints the buyer can review.
+
+When the agent tries to check out, the Gate evaluates the purchase against the mandate. For an allowed, in-budget item, the Gate returns ALLOW and creates a real PayPal sandbox order. The order is shown with its PayPal order ID and status CREATED and unpaid — a real third-party record, not a database mock. We can re-read it directly from PayPal.
+
+If a listing tries to break the rules — for example an injected or out-of-scope price — the Gate blocks it. The agent cannot spend outside the signed mandate.
+
+When a dispute is raised, the Dispute Defender runs a deterministic rule table, not a model, to decide whether to contest or refund. Here are two simulated dispute cases processed by the production pipeline: one unauthorized charge is contested with a cited evidence plan, and one agent-fault case is refunded because the agent bought the wrong thing.
+
+The contested case produces an evidence packet PDF with a QR code. Scanning it opens the public verifier, which recomputes checks from the packet itself and reports each result honestly — including what is simulated and what is skipped because no live signed chain is present in this demo fixture.
+
+Countersign makes agent payments provable: signed intent, enforced limits, real PayPal records, and evidence you can verify.

@@ -25,7 +25,7 @@
  * route is rendered as a turn-level error, because a demo that silently stops is worse than one that says
  * why.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface SessionView {
   user_id: string
@@ -461,6 +461,8 @@ function TurnView({ turn }: { turn: Turn }) {
         </div>
       ) : null}
 
+      {!blocked && gate?.orderId ? <OrderPanel orderId={gate.orderId} /> : null}
+
       {turn.pending ? <p className="text-sm text-ink-faint">Agent is working…</p> : null}
       {turn.failure !== null ? (
         <p role="alert" className="text-sm text-blocked">
@@ -544,4 +546,128 @@ function EventRow({ event }: { event: ShopEventView }) {
     )
   }
   return null
+}
+
+/**
+ * The order panel — the demo money path's proof surface.
+ *
+ * Shows the PayPal sandbox order id the Gate's ALLOW produced and re-reads it **from PayPal** (the
+ * `/api/agent/paypal-order` route, which calls `GET /v2/checkout/orders/{id}` live). The read is
+ * automatic once on mount and the button repeats it: the first read means the panel is never a claim
+ * without a source, and the button is there so a viewer can watch the record be fetched again. What
+ * the panel says comes from PayPal's response, not from our state — if the two disagreed, PayPal's
+ * answer is the one shown.
+ *
+ * The status is whatever PayPal returned (`CREATED` for the demo path). Nothing here says captured,
+ * authorized or paid unless PayPal's own status string said it.
+ */
+interface PayPalOrderRead {
+  order: {
+    id: string
+    status: string
+    intent: string
+    custom_id: string | null
+    amount: string | null
+    create_time: string | null
+  }
+  read_at: string
+  source: string
+}
+
+function OrderPanel({ orderId }: { orderId: string }) {
+  const [read, setRead] = useState<PayPalOrderRead | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  // The read is keyed by order id: a StrictMode double-mount re-fetches rather than double-counts.
+  const started = useRef<string | null>(null)
+
+  const reread = useCallback(async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const response = await fetch(`/api/agent/paypal-order?id=${encodeURIComponent(orderId)}`)
+      const body = (await response.json()) as PayPalOrderRead & { error?: string }
+      if (!response.ok) {
+        setError(body.error ?? `The re-read answered HTTP ${response.status}.`)
+        return
+      }
+      setRead(body)
+    } catch {
+      setError('The re-read could not reach the server.')
+    } finally {
+      setBusy(false)
+    }
+  }, [orderId])
+
+  useEffect(() => {
+    if (started.current === orderId) return
+    started.current = orderId
+    void reread()
+  }, [orderId, reread])
+
+  return (
+    <div
+      data-testid="paypal-order-panel"
+      className="rounded-card border border-rule bg-paper-raised p-5"
+    >
+      <p className="font-mono text-xs uppercase tracking-widest text-ink-faint">
+        PayPal sandbox order — re-read from PayPal
+      </p>
+      <p className="mt-2 font-mono text-lg font-semibold" data-testid="paypal-order-id">
+        {orderId}
+      </p>
+      {read !== null ? (
+        <dl className="mt-3 space-y-1 text-sm">
+          <div className="flex gap-2">
+            <dt className="w-28 shrink-0 text-ink-soft">status</dt>
+            <dd className="font-mono" data-testid="paypal-order-status">
+              {read.order.status}
+            </dd>
+          </div>
+          {read.order.amount !== null ? (
+            <div className="flex gap-2">
+              <dt className="w-28 shrink-0 text-ink-soft">amount</dt>
+              <dd className="font-mono">{read.order.amount}</dd>
+            </div>
+          ) : null}
+          {read.order.custom_id !== null ? (
+            <div className="flex gap-2">
+              <dt className="w-28 shrink-0 text-ink-soft">custom_id</dt>
+              <dd className="break-all font-mono" data-testid="paypal-order-custom-id">
+                {read.order.custom_id}
+              </dd>
+            </div>
+          ) : null}
+          <div className="flex gap-2">
+            <dt className="w-28 shrink-0 text-ink-soft">read at</dt>
+            <dd className="font-mono text-xs text-ink-faint">{read.read_at}</dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-3 text-sm text-ink-soft">
+          {error === null ? 'Re-reading the order from PayPal…' : null}
+        </p>
+      )}
+      {error !== null ? (
+        <p role="alert" className="mt-2 text-sm text-blocked">
+          {error}
+        </p>
+      ) : null}
+      <p className="mt-3 text-xs text-ink-soft">
+        The order is real and unpaid: it was created from the Gate&rsquo;s decision and carries that
+        decision id in its <code className="font-mono">custom_id</code>. Capturing it needs a buyer
+        present, which this demo does not have.
+      </p>
+      <button
+        type="button"
+        onClick={() => {
+          void reread()
+        }}
+        disabled={busy}
+        className="mt-3 rounded-card border border-rule px-3 py-1.5 text-sm font-semibold disabled:opacity-50"
+      >
+        {busy ? 'Re-reading…' : 'Re-read from PayPal'}
+      </button>
+    </div>
+  )
 }

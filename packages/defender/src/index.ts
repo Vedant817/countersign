@@ -186,3 +186,41 @@ export { executeStrategy } from './strategist-actions'
 // original by relative path, which is a good mitigation and still a second implementation. One export
 // line removes the duplication rather than testing for its absence.
 export { publicPacketUrl } from './citation-check'
+
+// --- the surfaces the S-19 demo page composes -----------------------------------------------------
+//
+// Appended so `/disputes` (apps/web) can run the Defender end to end — router → planner → drafter →
+// PDF — through the package's public API. The package's `exports` map allows only `"."`, so without
+// these re-exports the page would have to deep-import `src/…`, which is a boundary violation this
+// line exists to prevent. Everything re-exported here already existed and is tested inside the
+// package (`test/drafter.test.ts`, `test/evidence-doc.test.ts`, `test/ingest.test.ts`); this block
+// only widens who may call it, and changes nothing about how it behaves.
+export {
+  draft,
+  plainNotes,
+  templateNote,
+  type Draft,
+  type DraftInput,
+  type DraftDeps,
+  type DraftSource,
+  type LanguageModel,
+} from './drafter'
+export { checkCitations, claimSourcesFor, type Citation, type ClaimSource } from './citation-check'
+export {
+  renderPacketPdf,
+  type PacketError,
+  type PacketView,
+  type RenderDeps,
+  type RenderedPacket,
+} from './evidence-doc'
+export {
+  bundleHashFor,
+  createInMemoryDefenderWorld,
+  defineDefenderDeps,
+  derivedDisputeId,
+  type DefenderWorldSeed,
+  type EvidenceBundle,
+  type InMemoryDefenderWorld,
+  type PacketArtefacts,
+} from './ingest'
+export type { EvidencePlanItem as DemoEvidencePlanItem } from './types'

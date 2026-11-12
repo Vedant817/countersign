@@ -19,12 +19,13 @@ import 'server-only'
  *
  * ## What it deliberately does not do
  *
- * **It does not create a PayPal order.** An `ALLOW` here is a permission, not a transaction, and the
- * order path needs a vaulted buyer (`payment_source.paypal.vault_id`) which this deployment does not have
- * yet — HUMAN_TODO item 2. The response says so explicitly (`order_pending: true` and a sentence naming
- * what is missing) rather than leaving a caller to infer it from a null id, because "allowed" and
- * "bought" are the two facts this whole project exists to keep apart. The order path is P0-4's, and
- * `packages/orders.createOrderFromDecision` is where it will land.
+ * **It does not create the production order path.** The production order needs a vaulted buyer
+ * (`payment_source.paypal.vault_id`) which this deployment does not have yet — HUMAN_TODO item 1a.
+ * What it *does* do when the demo flag and sandbox credentials are present is create the
+ * **no-payment-source sandbox order** (`lib/demo-order.ts`) — real, re-readable by id, carrying the
+ * decision id in `custom_id`, and never captured. With the flag off (any deployment, and every CI run)
+ * the response says so explicitly (`order_pending: true` and a sentence naming what is missing), because
+ * "allowed" and "bought" are the two facts this whole project exists to keep apart.
  *
  * ## Why the composition lives here and not in `packages/gate`
  *
@@ -48,7 +49,9 @@ import * as repository from '@countersign/db'
 import { evaluate, type GateCheck, type GateDecision } from '@countersign/gate'
 import { orchestratorStoreFromRepos } from '@countersign/orchestrator'
 
+import { createDemoOrder } from './demo-order'
 import { gateRuntime } from './gate-runtime'
+import { merchantIdentity } from './merchant'
 
 /** What the merchant MCP's `submit_checkout` answers. Mirrors §8.9 plus two honesty fields. */
 export interface CheckoutSubmission {
@@ -60,9 +63,9 @@ export interface CheckoutSubmission {
     readonly userMessage: string
   }[]
   readonly checks: readonly GateCheck[]
-  /** Always `null` today: order creation needs the vaulted-buyer runtime. Present so the field cannot drift. */
+  /** Null unless a real sandbox order was created for the ALLOW (the demo order path, `lib/demo-order.ts`). */
   readonly order_id: string | null
-  /** `true` when the Gate allowed the purchase and the order path is not composed on this deployment. */
+  /** `true` when the Gate allowed the purchase and **no** PayPal order exists — the order path did not run. */
   readonly order_pending: boolean
   /** A sentence for a human, naming what happens next. Never a substitute for `status`. */
   readonly message: string
@@ -128,6 +131,36 @@ export async function submitCheckout(
   })
   if (!recorded.ok) return recorded
 
+  /**
+   * The demo money path: on an `ALLOW` with sandbox credentials, create the **real PayPal sandbox
+   * order** (`lib/demo-order.ts`). Production order creation needs a vaulted buyer, which this
+   * deployment does not have, so the order is the no-payment-source `CREATED` shape — real, re-readable,
+   * carrying `cs1:<decision id>` in its `custom_id`, and never captured. When the order cannot be
+   * created (no credentials, PayPal down), the answer stays the honest permission-only shape it has
+   * always been; a failed side effect must not turn an ALLOW into a BLOCK.
+   */
+  let paypalOrderId: string | null = null
+  let orderNote = ''
+  if (decision.decision === 'ALLOW') {
+    const identity = merchantIdentity()
+    const order = await createDemoOrder({
+      decisionId: decision.id,
+      attemptId,
+      amountMinor: session.value.total_minor,
+      currency: session.value.currency,
+      payeeName: identity.ok ? identity.value.name : 'the merchant',
+    })
+    if (order.ok) {
+      paypalOrderId = order.value.id
+      orderNote =
+        `PayPal sandbox order ${order.value.id} was created from this decision (status ` +
+        `${order.value.status}; it carries the decision id in its custom_id). It is not ` +
+        'authorized or captured - that needs a buyer present, which this demo does not have.'
+    } else {
+      orderNote = `A PayPal order was not created: ${order.reason}.`
+    }
+  }
+
   return {
     ok: true,
     value: {
@@ -139,9 +172,9 @@ export async function submitCheckout(
         userMessage: reason.userMessage,
       })),
       checks: decision.checks,
-      order_id: null,
-      order_pending: decision.decision === 'ALLOW',
-      message: messageFor(decision),
+      order_id: paypalOrderId,
+      order_pending: decision.decision === 'ALLOW' && paypalOrderId === null,
+      message: paypalOrderId === null ? messageFor(decision, orderNote) : orderNote,
       amount_minor: session.value.total_minor.toString(),
       currency: session.value.currency,
       payee: session.value.merchant_id,
@@ -212,17 +245,18 @@ export async function readOrderStatus(orderId: string): Promise<Result<OrderStat
  *
  * A `BLOCK` always names the Gate's own `userMessage` — the registry's wording, not a paraphrase — so the
  * UI cannot drift from the reason the Gate recorded. An `ALLOW` is described as what it is: a permission
- * with no order behind it on this deployment.
+ * with no order behind it when the demo order path did not run (off, or PayPal unreachable) — the caller
+ * appends the order note when an order *was* created, so this sentence is only ever the fallback.
  */
-function messageFor(decision: GateDecision): string {
+function messageFor(decision: GateDecision, orderNote: string): string {
   if (decision.decision === 'BLOCK' || decision.decision === 'REVIEW') {
     const first = decision.reasons[0]
     return first === undefined
       ? 'The purchase was refused before payment.'
       : `${first.userMessage} Nothing was charged.`
   }
-  return (
-    'Your mandate allowed this purchase. The order itself is created by the order orchestrator, which is ' +
-    `not composed on this deployment yet, so no PayPal order exists. The permission is recorded as ${decision.id}.`
-  )
+  const base =
+    'Your mandate allowed this purchase. No PayPal order was created: the order orchestrator is not ' +
+    `composed on this deployment yet. The permission is recorded as ${decision.id}.`
+  return orderNote === '' ? base : `${base} ${orderNote}`
 }

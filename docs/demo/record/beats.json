@@ -1,0 +1,14 @@
+{
+  "mandate_intent": 12.262,
+  "mandate_signed": 20.662,
+  "checkout": 26.2,
+  "allow": 31.112,
+  "re_read": 46.437,
+  "block": 48.762,
+  "hold": 55.35,
+  "defender": 58.5,
+  "disputes": 67.062,
+  "packet": 79.937,
+  "verifier": 84.625,
+  "close": 98.337
+}
