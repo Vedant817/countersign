@@ -474,3 +474,18 @@ WP-06s and everything needing live sandbox is not started.
   restored and the suite was green again. The cache test asserts the served PDF's SHA-256 equals the digest
   the page printed. Whole repo: `118 files / 2894 passed | 1 skipped`; web `tsc` clean, `eslint` 0 errors,
   `format:check` clean, `next build` exit 0.
+
+- **2026-11-13 (IST)** - **The browser suite is now a CI gate, and it found a real bug (P2, `prod/real-users` §8.12/§8.14).**
+  `docs/PROD_AUDIT.md` §8.12 claimed no CI job runs the Python tests. That was **wrong**: `.github/workflows/ci.yml`
+  already has `test-python` (ruff check, ruff format --check, pytest, and the VI pin assertion) on `ubuntu-latest`
+  beside `static`/`test-node`/`build`. What was actually missing was **Playwright**: `apps/web` carries
+  `test:e2e` and `@playwright/test`, and nothing ran them. A new `test-e2e` job now does — Postgres 17 service,
+  `uv sync` for the vi the config boots, `pnpm db:migrate`, `playwright install --with-deps chromium`, then the suite —
+  and it is in `all-gates-green`'s `needs` list, so it is required rather than advisory.
+  **Measured, not asserted:** the suite was run locally first (`COUNTERSIGN_WEB_PORT=3210 COUNTERSIGN_VI_PORT=8010`)
+  and answered **16 passed in 32.0 s**, covering the agent chat's real mandate → Gate ALLOW, the device-sign lab,
+  the storefront price lock and the mobile journey.
+  **And it caught something:** the run printed `Encountered two children with the same key, CS_INTERNAL`. The chat
+  keyed Gate reasons by `CsError.code` alone, and the Gate emits one reason per failed check — two checks can fail
+  with the same code, so React de-duplicated them and **dropped a reason the buyer should have read**. Both lists now
+  key on code + position, and the re-run is clean (no browser warning) with 16 passed again.

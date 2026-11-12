@@ -371,12 +371,93 @@ jobs:
           echo "ok: every money column is an integer"
 
   # ---------------------------------------------------------------------------------------------
+  # The browser suite. It is the only gate that proves the *wiring* rather than the units: the
+  # agent chat really provisions a mandate through vi, the device-sign lab really stores a
+  # non-extractable key, the storefront really locks a price and counts down.
+  #
+  # It ran nowhere before this job. `apps/web/package.json` has had `test:e2e` and `@playwright/test`
+  # since the beginning, and `playwright.config.ts` starts its own vi (uvicorn) and its own `next dev`
+  # — so the suite is self-contained apart from two things a runner does not have: a Postgres to migrate
+  # and a Chromium to drive.
+  #
+  # Measured on a laptop before it was wired in: 16 passed in 36.8 s, against Postgres 16 and the pinned
+  # uv environment. A cold runner adds the browser download and the first `next dev` compile, hence 30.
+  # ---------------------------------------------------------------------------------------------
+  test-e2e:
+    name: tests (e2e, playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      db:
+        image: postgres:17
+        env:
+          POSTGRES_USER: countersign
+          POSTGRES_PASSWORD: countersign
+          POSTGRES_DB: countersign
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U countersign -d countersign"
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Same URL `playwright.config.ts` builds for the `next dev` child, and the same credentials the
+      # `db-migrations` job uses. The storefront reads the catalog from these tables; with no database
+      # the shop reports `unavailable` and the storefront tests pass for the wrong reason.
+      DATABASE_URL: postgres://countersign:countersign@localhost:5432/countersign
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.12.22'
+          enable-cache: true
+      - name: sync the pinned Verifiable Intent project
+        # `playwright.config.ts` starts vi with `<apps/vi>/.venv/bin/python -m uvicorn …`, so the
+        # environment must exist before the browser is launched — otherwise the failure is a webServer
+        # timeout that reads like a slow page.
+        working-directory: apps/vi
+        run: |
+          uv python pin 3.13
+          uv sync --frozen --extra dev
+      - name: migrate
+        run: pnpm db:migrate
+      - name: install chromium
+        run: pnpm --filter @countersign/web exec playwright install --with-deps chromium
+      - name: e2e
+        # `CI=1` is set by the runner, and `playwright.config.ts` reads it: with CI set it refuses to
+        # reuse an existing dev server, so a stale process can never answer for this run.
+        run: pnpm --filter @countersign/web test:e2e
+      - name: upload the playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------------------------
   # Everything must pass. Required, not advisory — see AGENTS.md rule 1.
   # ---------------------------------------------------------------------------------------------
   all-gates-green:
     name: all gates green
     if: always()
-    needs: [secret-scan, static, test-node, test-python, compiler-determinism, build, db-migrations]
+    needs:
+      [
+        secret-scan,
+        static,
+        test-node,
+        test-python,
+        test-e2e,
+        compiler-determinism,
+        build,
+        db-migrations,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: fail if any job failed

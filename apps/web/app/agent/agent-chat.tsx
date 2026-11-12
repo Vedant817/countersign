@@ -458,6 +458,10 @@ function TurnView({ turn }: { turn: Turn }) {
           <h3 className="text-lg font-semibold text-blocked">
             Your limits held. Here is what it tried.
           </h3>
+          {/* Keyed by code AND position: the Gate emits one reason per failed check, and two checks can
+              fail with the same `CsError.code` (two amount bounds, say). React de-duplicates by key, so
+              keying on `code` alone silently dropped the second reason - the console warning
+              "Encountered two children with the same key" that the e2e run surfaced. */}
           <p className="mt-2 text-sm text-ink-soft">
             The agent asked the merchant to charge
             {gate?.amountMinor === null || gate?.amountMinor === undefined
@@ -470,8 +474,8 @@ function TurnView({ turn }: { turn: Turn }) {
             .
           </p>
           <ul className="mt-3 space-y-2">
-            {(gate?.reasons ?? []).map((reason) => (
-              <li key={reason.code} className="rounded-card bg-paper-raised p-3">
+            {(gate?.reasons ?? []).map((reason, index) => (
+              <li key={`${reason.code}-${index}`} className="rounded-card bg-paper-raised p-3">
                 <p className="font-mono text-xs text-blocked">{reason.code}</p>
                 <p className="mt-1">{reason.userMessage}</p>
               </li>
@@ -576,8 +580,8 @@ function EventRow({ event }: { event: ShopEventView }) {
         <p className={`font-semibold ${allowed ? 'text-signed' : 'text-blocked'}`}>
           Gate: {gate?.status ?? 'unknown'}
         </p>
-        {(gate?.reasons ?? []).map((reason) => (
-          <p key={reason.code} className="mt-1 text-ink-soft">
+        {(gate?.reasons ?? []).map((reason, index) => (
+          <p key={`${reason.code}-${index}`} className="mt-1 text-ink-soft">
             {reason.userMessage}
           </p>
         ))}
