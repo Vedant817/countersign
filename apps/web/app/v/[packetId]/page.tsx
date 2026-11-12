@@ -60,6 +60,8 @@ import {
 import { ViClient } from '@countersign/vi-client'
 
 import { missingVerifierEnv, verifierUnavailableDetail } from './config'
+import DemoVerifier from './demo-verifier'
+import { demoCaseForPacketId } from '@/lib/defender-demo'
 import {
   assertRedactionHolds,
   buildVerifierReport,
@@ -202,6 +204,12 @@ export default async function VerifierPage({ params }: PageProps) {
   // this deployment is configured with; checking it after `verifierDeps()` made `/v/not-a-packet` a
   // 500 on an unconfigured host, which reads as "the evidence was withdrawn".
   if (!/^pkt_[0-9A-HJKMNP-TV-Z]{26}$/.test(packetId)) notFound()
+
+  // The two demo-fixture packet ids route to the demo verifier: the same pipeline, fixture rows and
+  // no JWKS, so a scanned QR from the SIMULATED /disputes packet verifies honestly (see Beat 8).
+  if (demoCaseForPacketId(packetId) !== null) {
+    return <DemoVerifier packetId={packetId} />
+  }
 
   // §6's configuration, checked rather than discovered by throwing. Missing configuration is a known
   // state — a judge running this locally with no database — and it earns a sentence, not Next's
