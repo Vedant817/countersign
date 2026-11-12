@@ -10,8 +10,43 @@ code then pulls every one of them down to a number the buyer actually wrote. The
 the agent cannot exceed and a merchant can verify, plus a tamper-evident record that decides a dispute
 without anyone asking the buyer to remember what they authorised.
 
-> **Live demo:** _pending_ — deployment is [H-11](docs/HUMAN_TODO.md) in progress. The badge above is the
-> honest state of CI; see `docs/CI-FAILURES.md` for the three open failure groups.
+> **No hosted deployment yet** (that is [H-11](docs/HUMAN_TODO.md)). Everything below runs locally, and the
+> demo video is recorded from that local stack: [`docs/demo/countersign-demo.mp4`](docs/demo/countersign-demo.mp4).
+
+## Demo
+
+A recorded walkthrough of the local stack is in [`docs/demo/countersign-demo.mp4`](docs/demo/countersign-demo.mp4)
+(≈1:47, 1080p, narrated). What is real and what is simulated in it is listed in
+[`docs/demo/DEMO_NOTES.md`](docs/demo/DEMO_NOTES.md); the short version: the Gate decision and the PayPal
+sandbox order are real, the two disputes and the packet they produce are fixtures.
+
+Run the same thing locally:
+
+```sh
+cp .env.example .env.local      # then fill in PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox)
+COUNTERSIGN_AGENT_DEMO=1 DEMO_MODE=1 \
+  COUNTERSIGN_WEB_PORT=3210 COUNTERSIGN_VI_PORT=8010 \
+  pnpm dev:local
+```
+
+`COUNTERSIGN_AGENT_DEMO=1` (plus a non-production `NODE_ENV`) is what enables the agent demo, the signing
+lab and the dispute fixtures: they mint sample identities and spend a demo mandate, so a deployed
+application must not serve them. The web app is then on <http://localhost:3210> and the verifiable-intent
+service on <http://localhost:8010>. Port 8000 is left alone by default because other projects use it.
+
+### Judge quick start
+
+Four screens, in this order, with no login:
+
+| #   | Where                               | What to look at                                                                                                                                                                                                                                                                              |
+| --- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `/agent`                            | Create a mandate ("Buy the cheapest trail shoes you can find, under $150", cap $150), then run the turn. The Gate returns **ALLOW** and the order panel shows a **real PayPal sandbox order id**, status `CREATED`, and a **Re-read from PayPal** button that fetches the order from PayPal. |
+| 2   | `/agent`                            | Press **Try the injected listing**. The listing claims the cap was raised; the Gate **BLOCK**s it and the mandate is unchanged.                                                                                                                                                              |
+| 3   | `/disputes`                         | Two **SIMULATED** disputes through the production Defender pipeline: an unauthorised charge is **contested** with a cited evidence plan, an agent-fault case is **refunded**. Both say what is fixture and what is pipeline.                                                                 |
+| 4   | `/v/pkt_F1RSTCASE10000000000000000` | The public verifier for the contested packet: offline checks recomputed from the bundle, signature/chain checks **SKIPPED** with reasons, banner marking the packet SIMULATED.                                                                                                               |
+
+`/status` probes every dependency and names the one that is short. `/judge` is the two-minute version of the
+same tour. Neither requires secrets beyond the sandbox pair above.
 
 ## Try it in 60 seconds
 
@@ -48,12 +83,11 @@ read-back is rendered from the mandate, and `packages/compiler` is what decides 
 
 ## Judge Mode
 
-`/judge` is intended to run four scenarios end-to-end on the sandbox with live logs — a happy purchase, a
-blocked injection, a fraud claim won with evidence, and an agent-fault honest refund — with no login and no
-secrets required.
-
-**Status: the page exists; the scenarios do not yet run.** This is P0-10 and it is the fastest thing a judge
-can be given, so it is next after the sandbox credentials land (`docs/HUMAN_TODO.md` §2).
+`/judge` is a two-screen guided tour: sign a sample mandate, lock a merchant's price quote, and inspect what
+each one does and does not prove. It links to the signing lab and the storefront, and states its own limits on
+the page. The four _automated_ scenarios (happy purchase, blocked injection, won dispute, honest refund) are not
+a runner yet — the manual tour in [Demo](#demo) is what exists today, and each of its four beats is a real
+screen rather than a mock.
 
 ## What works today
 
@@ -65,8 +99,9 @@ can be given, so it is next after the sandbox credentials land (`docs/HUMAN_TODO
 | Mandate signing + verifier          | Working. Ed25519 / SD-JWT / JCS, with a standalone `verify.py` a third party can run.              |
 | Storefront (`/shop`)                | Working. 24 products from PostgreSQL, price-quote checkout.                                        |
 | `/status`                           | Working. Probes every dependency for real and names the one that is short.                         |
-| Vault onboarding                    | Not yet. Blocked on sandbox credentials.                                                           |
-| Judge Mode, merchant + disputes UIs | Not yet.                                                                                           |
+| Vault onboarding                    | Not yet. Blocked on sandbox buyer credentials.                                                     |
+| Disputes UI (`/disputes`)           | Working on fixture disputes; the pipeline behind it is production code. See [Demo](#demo).         |
+| Merchant + webhook order operations | Not yet. No capture, so no webhooks or chargebacks are exercised.                                  |
 
 ## The numbers, with their denominators
 
@@ -174,19 +209,31 @@ Where [`FIX_PROMPT.md`](FIX_PROMPT.md) conflicts with it, the brief wins — rec
 Stated plainly because a judge should not have to discover them, and because the alternative is a
 flattering README that stops being true the moment somebody tries it.
 
-- **No real PayPal purchase has been demonstrated yet.** The sandbox credentials that exist cover OAuth and
-  the token exchange; the buyer, merchant, webhook and payer ids are outstanding. `/status` names the
-  missing dependency rather than implying readiness. This is the single largest gap.
-- **The intent compiler is non-deterministic.** The same sentence gives a signable mandate about nine times
-  in ten and a question the rest. The clamp is deterministic; the model is not.
-- **No deployment yet**, so there is no public URL and no CI badge that is green.
-- **The agent does not exist.** `packages/agent` is a stub, so "agentic commerce" is currently a claim about
-  architecture rather than a demonstrable flow.
+- **One PayPal order, and it is unpaid.** On a Gate **ALLOW** the agent demo creates a real sandbox order
+  (`POST /v2/checkout/orders`, no payment source) and re-reads it with `GET /v2/checkout/orders/{id}` — that
+  is the order id on screen. It stays **CREATED**: capture needs a vaulted buyer, and the sandbox buyer
+  credentials (`PAYPAL_BUYER_EMAIL` / `PAYPAL_BUYER_PASSWORD` / `PAYPAL_MERCHANT_ID`) are still empty, so
+  authorize, capture, webhooks and chargebacks are not exercised. Nothing anywhere claims a capture.
+- **Disputes are fixtures; the Defender is not.** `/disputes` feeds two hand-written disputes through the
+  production pipeline (router, planner, drafter, citation checker, packet renderer). PayPal dispute ids,
+  capture ids and the packet's signed chain are simulated, and both pages and the verifier banner say
+  **SIMULATED** on screen. There is no live `provide-evidence` call.
+- **The verifier on a fixture packet checks what it can.** `/v/pkt_F1RSTCASE10000000000000000` recomputes the
+  bundle digest and `custom_id` from the packet, and reports signature/chain checks as **SKIPPED** because the
+  fixture carries no signed chain and the demo store publishes no JWKS. It is not a live verification, and it
+  does not offer a "Verify now" button.
+- **The drafter may fall back to a template.** The note is written by a model and then checked by a
+  deterministic citation checker; if the model endpoint is rate-limited or unreachable, the deterministic
+  template is filed instead and the UI says which one produced the note.
 - **VI keys are ephemeral** in the local lab — restarting invalidates earlier signatures, which is
   incompatible with the 540-day evidence retention the dispute path assumes.
+- **The compiler is deterministic for money.** The parser reads every amount from the buyer's own words; a
+  model may be consulted only when the sentence names a limit but no product the store sells, and never for an
+  amount (`docs/verification/P0-7.md`, D-049).
+- **No deployment yet**, so there is no public URL; the video above is the evidence that the flow runs.
 - **Physical shipping is quoted in USD** for the configured destinations. Currency mismatches are refused,
   never silently converted, and regional PayPal feature availability is separate from delivery coverage.
-- **The name collides.** `countersign.vercel.app` is an unrelated legal-drafting product; the deployed URL
-  will not, and the page title will carry "Countersign for PayPal agent payments".
+- **The name collides.** `countersign.vercel.app` is an unrelated legal-drafting product; this project is not
+  deployed there and nothing in the repo or the demo points at it.
 
 License: [Apache-2.0](LICENSE). Sponsor products have separate terms.

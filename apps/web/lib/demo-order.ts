@@ -55,7 +55,10 @@ export interface DemoOrder {
 import fs from 'node:fs'
 import path from 'node:path'
 
-/** Fallback: read PayPal creds from root .env.local if the server process didn't inherit them. */
+/** Fallback: read PayPal creds from root .env.local if the server process didn't inherit them.
+ *
+ * Same file the dev launcher reads (`scripts/dev-local.mjs`), used only to fill a gap the demo money
+ * path would otherwise fail on. Values are never logged, and the normal path is `process.env`. */
 function paypalCreds(): { id: string; secret: string; base: string } {
   let id = process.env['PAYPAL_CLIENT_ID'] ?? ''
   let secret = process.env['PAYPAL_CLIENT_SECRET'] ?? ''
@@ -72,10 +75,14 @@ function paypalCreds(): { id: string; secret: string; base: string } {
         const text = fs.readFileSync(p, 'utf8')
         for (const line of text.split(/\r?\n/)) {
           const m = line.match(/^([A-Z0-9_]+)=(.*)$/)
-          if (!m) continue
-          if (m[1] === 'PAYPAL_CLIENT_ID' && id === '') id = m[2].trim()
-          if (m[1] === 'PAYPAL_CLIENT_SECRET' && secret === '') secret = m[2].trim()
-          if (m[1] === 'PAYPAL_API_BASE' && base === 'https://api-m.sandbox.paypal.com') base = m[2].trim() || base
+          if (m === null) continue
+          const key = m[1] ?? ''
+          const value = (m[2] ?? '').trim()
+          if (key === 'PAYPAL_CLIENT_ID' && id === '') id = value
+          if (key === 'PAYPAL_CLIENT_SECRET' && secret === '') secret = value
+          if (key === 'PAYPAL_API_BASE' && base === 'https://api-m.sandbox.paypal.com') {
+            base = value === '' ? base : value
+          }
         }
         if (id !== '' && secret !== '') break
       }

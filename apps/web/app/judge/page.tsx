@@ -13,8 +13,9 @@ export default function JudgePage() {
         Try it. Inspect what it proves.
       </h1>
       <p className="mt-5 max-w-3xl text-lg text-ink-soft">
-        Start with the buyer’s signature, then inspect a merchant’s price quote. These two working
-        demonstrations do not place a PayPal order.
+        Start with the buyer’s signature, then inspect a merchant’s price quote. Then run the agent:
+        its Gate decision creates a real PayPal sandbox order, shown with PayPal’s own order id and
+        status.
       </p>
       <ol className="mt-10 grid gap-6 md:grid-cols-2">
         <li className="rounded-card border border-rule bg-paper-raised p-6">
@@ -62,12 +63,15 @@ export default function JudgePage() {
         </h2>
         <ul className="mt-4 list-disc space-y-3 pl-5 text-ink-soft">
           <li>
-            A purchase linked to a buyer’s real sandbox wallet, registered agent and signed mandate.
+            A purchase linked to a buyer’s real sandbox wallet. Today the Gate creates a real
+            sandbox order (no payment source) and re-reads it from PayPal; capture needs a vaulted
+            buyer.
           </li>
           <li>Persisted permission and budget checks connected to order creation.</li>
           <li>
-            Merchant order operations and an evidence workspace connected to actual sandbox
-            disputes.
+            Merchant order operations, webhooks and chargebacks, and an evidence workspace connected
+            to actual sandbox disputes. The dispute screens run on fixtures; the pipeline is
+            production code.
           </li>
           <li>
             An automated scenario runner for purchase, blocked deviation, dispute evidence and
