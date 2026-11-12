@@ -446,3 +446,12 @@ WP-06s and everything needing live sandbox is not started.
   model path works end to end, not just that a key is present.
   **Measured:** `pnpm --filter @countersign/web typecheck` clean, `eslint` 0 errors, `format:check` clean,
   web tests `152 passed | 7 skipped`, `next build` exit 0.
+
+- **2026-11-13 (IST)** - **Deploy config: real model configuration and the right key type (P2, `prod/real-users` §8.10/8.11).**
+  `render.yaml` pinned `LLM_MAIN_MODEL: gpt-6.1-sol` / `LLM_CHEAP_MODEL: gpt-6-luna` - illustrative spec names, not
+  real ids for any provider - so a Render deploy with `OPENAI_API_KEY` set would have called a model that does
+  not exist. Both are now `sync: false` (operator sets a real id for the configured provider), `OPENAI_BASE_URL`
+  and the `MODAL_PROXY_TOKEN_ID`/`MODAL_PROXY_TOKEN_SECRET` pair are declared, and the worker (which never calls a
+  model) declares no LLM vars. The `GATE_SIGNING_KEY` comment now says **Ed25519** (base64 32 bytes), matching
+  `gate-runtime.ts`, not P-256.
+  **Measured:** `prettier` parses the file unchanged; `pnpm format:check` clean.

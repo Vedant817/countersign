@@ -63,10 +63,20 @@ services:
         value: https://mcp.sandbox.paypal.com/http
       - key: PAYPAL_MCP_MODE
         value: remote # week-1 check C3(b) may switch this to `local`
+      # The model id is configuration, not a constant (docs/DECISIONS.md): it must be a real id for the
+      # provider in OPENAI_BASE_URL. The code falls back to gpt-4o-mini only when a model is unset, so a
+      # placeholder here would name a model that does not exist on the configured provider.
       - key: LLM_MAIN_MODEL
-        value: gpt-6.1-sol
+        sync: false
       - key: LLM_CHEAP_MODEL
-        value: gpt-6-luna
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false # provider base URL; defaults to OpenAI only if left unset
+      # Required only when OPENAI_BASE_URL is a `.direct` Modal host; harmless otherwise.
+      - key: MODAL_PROXY_TOKEN_ID
+        sync: false
+      - key: MODAL_PROXY_TOKEN_SECRET
+        sync: false
       - key: CHECKOUT_PRICE_LOCK_SECONDS
         value: '900'
       - key: FEATURE_BRYNTUM
@@ -126,7 +136,7 @@ services:
       - key: GATE_KID
         sync: false
       - key: GATE_SIGNING_KEY
-        sync: false # P-256 private JWK. Gate decision records are signed with it.
+        sync: false # Ed25519 private key (base64 32 bytes). Gate decision records are signed with it.
       - key: VI_SERVICE_URL
         fromService:
           type: web
@@ -207,10 +217,7 @@ services:
         value: https://mcp.sandbox.paypal.com/http
       - key: PAYPAL_MCP_MODE
         value: remote
-      - key: LLM_MAIN_MODEL
-        value: gpt-6.1-sol
-      - key: LLM_CHEAP_MODEL
-        value: gpt-6-luna
+      # The worker runs the webhook/ledger jobs only; it never calls a model, so it declares no LLM vars.
       - key: VI_CLOCK_SKEW_SECONDS
         value: '300'
       - key: RETENTION_DAYS_OPERATIONAL
