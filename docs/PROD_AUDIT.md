@@ -336,6 +336,16 @@ Verified by: `packages/db/test/repos.worker.live.test.ts` (6 tests against a rea
 - **Fixtures in production code** — `packages/paypal/test/fixtures/` is the only fixture directory and is
   outside `src/`.
 - **Float money** — `scripts/check-money-discipline.mjs` passes.
+- **Fresh demo/stub/hardcoded pass, 2026-11-13** — `TODO|FIXME|HACK|not implemented|unimplemented|coming
+  soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/` sources: zero hits in
+  production code paths (the only matches are tests, doc comments explaining decisions, and HTML input
+  placeholders). The one apparent gap — `WebhookStore.events.findById` "not implemented in
+  `@countersign/db`" in the web route — is honest and production-safe: the route's process never calls it
+  (every lookup there is by `paypal_event_id`), while `apps/worker`'s store serves the same member
+  through the package's parameterised `readRows` escape hatch, so `wh.process` (`jobs.ts:195`) works.
+  All eight API routes were re-read: each validates the wire shape and maps `CsError` to a real status
+  and message (`toBody`), and the SSE writer closes a failed stream with an error frame instead of
+  hanging.
 
 ---
 
