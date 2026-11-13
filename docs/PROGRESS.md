@@ -48,7 +48,7 @@ buildable now.
 | WP-17b | Agent chat UI (S-10) | D | 13 | review | `P0-6` | S-10 renders transcript, tool stream, mandate chip, inline Gate results and injection badges; BLOCK copy is "Your limits held. Here is what it tried." Playwright E2E not yet written |
 | WP-17c | Shop UI (S-11…S-13) | D | 09 | done | `66d78bc` | E2E ✅ 3 |
 | WP-17d | Merchant UI (S-14…S-16, S-19) | E | 11, 10 | todo | | E2E |
-| WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | todo | | E2E + table fallback |
+| WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | wip | `88aa3b8` | S-17 approval surface + route + 45 tests ✅ · S-18 verifier E2E + table fallback open |
 | WP-17f | Landing, status, design polish | A | 17a–e | wip | `d0fe7ea` | Landing/nav/judge/status/`/regions` copy reworked, 360 px layout fixed, 14 E2E green; Lighthouse ≥ 90 a11y not yet measured |
 | WP-18 | Public verifier `/v/[packetId]` | B | 03, 15d | done | `774e8a4` | AT-M18 ✅ 226 |
 | WP-19 | Privacy, logging, audit, status | A | 02, 12 | wip | `e3b3174` | AT-M19.1 ✅ 58 offline (merge `0878bd3`, `/status` wiring `3013725`); AT-M19.2 is `packages/core`'s logger · remaining: the worker job that executes `planSweep` |
@@ -729,3 +729,30 @@ output above.
   **Still open (deploy-time, EC-ENV-3):** `scripts/sandbox-bootstrap.ts` does not exist, so the EC-ENV-3
   "sandbox data reset" recovery has no script; that needs the public deployment + real sandbox personas
   (HUMAN_TODO), not a nightly fix.
+- **2026-11-13 (IST)** - **S-17 closed: a merchant can open an assessed dispute and approve or decline it
+  (`98f9024`, `df6f496`, `88aa3b8`).** The 2-minute sweep assessed disputes and the queue showed the stored
+  verdict, but nothing let a merchant act on one. `/disputes/[id]` now reads the stored decision
+  (`lib/dispute-detail.ts`) - never re-deriving the verdict - and shows the rule, the facts it compared, the
+  rationale, the deadline, the evidence PayPal will accept and the packet that would be filed. The click is
+  `POST /api/disputes/[id]/decision`, which runs `fileDispute` synchronously in the request that carries it
+  so the merchant reads the disposition rather than "queued": for a CONTEST posture that is the real
+  `renderPdf`/`provideEvidence` path, and for REFUND it is `orders.defenderRefundsFromOrders`. `filer.ts`
+  now stamps `AWAITING_MERCHANT_APPROVAL` on every exit that reports `awaitingApproval: true` (the state
+  existed in §3.3 and was never written, so a waiting case still read `NEW` in the queue).
+  **The guards that keep one click from becoming two PayPal actions:** a case past approval
+  (`FILED`/`OFFERED`/`ACCEPTED`/`CLOSED_*`) is refused with `CS_CONFLICT` and no PayPal call; the buyer on
+  the disputed order cannot approve or decline (`findDisputeBuyerUserId`); a decline records only an
+  `audit_log` row and changes no state; the filer's own idempotency-key conflict is reported as "already
+  recorded", not as a fault; and a real PayPal 404 is propagated as 404 rather than dressed as success.
+  Every decision writes one hash-chained `audit_log` row whose id is derived from the case, decision and
+  click time, so a replay does not write a second row and two clicks never collide. The route authorises on
+  the existing `cs_session` cookie and re-reads the user row; a same-origin guard (`lib/same-origin.ts`)
+  refuses a cross-origin `POST` before it reads a body, and the route reads `HTTP_STATUS_BY_ERROR_CODE` so a
+  `PP_NOT_FOUND` is a 404 the merchant can read rather than a 500.
+  **Measured:** 45 new tests (20 `dispute-approval`, 8 `same-origin`, 17 route) - approve, decline,
+  double-click conflict, already-filed, unauthenticated, buyer self-dealing, PayPal 404, status mapping;
+  repo `typecheck` exit 0; `lint` 0 errors (14 pre-existing warnings); `format:check` clean; `secret-scan`
+  no leaks; full `pnpm test` 133 files / 3049 passed, 1 skipped; CI run 43355493094 green on `prod/real-users`.
+  **Caveats:** there is still no merchant sign-in (the route trusts the buyer-persona `cs_session` that only
+  `/api/agent/session` mints), and a live `provideEvidence` still returns PayPal's 404 because no real captured
+  payment → dispute exists (HUMAN_TODO 1a/2) — never a fabricated filed packet.

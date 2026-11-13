@@ -195,13 +195,13 @@ Verified live in this session: `createDemoOrder` (no payment source) → real sa
 
 Not reachable from the app:
 
-| Capability                         | Library                                               | App call site                                                                                    |
-| ---------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| authorize / capture                | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none                                                                                             |
-| refund / void                      | `refundCapture`, `voidAuthorization` ✅               | none                                                                                             |
-| webhooks (verify + ingest)         | `packages/webhooks` ✅ + `apps/worker` ✅             | **`apps/web/app/api/webhooks/paypal/route.ts` — DONE 2026-11-13**                                |
-| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅    | **`/disputes` reads real rows + `wh.disputes` assesses (item 8); filing awaits the §8.15 click** |
-| reconciler crons                   | `apps/worker/src/schedule.ts` ✅                      | `render.yaml` defines the worker; never run here                                                 |
+| Capability                         | Library                                               | App call site                                                                                                                                                               |
+| ---------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| authorize / capture                | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none                                                                                                                                                                        |
+| refund / void                      | `refundCapture`, `voidAuthorization` ✅               | none                                                                                                                                                                        |
+| webhooks (verify + ingest)         | `packages/webhooks` ✅ + `apps/worker` ✅             | **`apps/web/app/api/webhooks/paypal/route.ts` — DONE 2026-11-13**                                                                                                           |
+| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅    | **`/disputes` reads real rows + `wh.disputes` assesses (item 8); the §8.15 click exists (`/disputes/[id]`, S-17), but a live `provideEvidence` still needs a real dispute** |
+| reconciler crons                   | `apps/worker/src/schedule.ts` ✅                      | `render.yaml` defines the worker; never run here                                                                                                                            |
 
 **Webhook ingest (fixed 2026-11-13).** `POST /api/webhooks/paypal` now stores PayPal's exact bytes, verifies
 through `PayPalClient`, marks the row `PENDING`/`VERIFIED`/`FAILED`, and acknowledges per §8.12 (200 for
@@ -377,10 +377,18 @@ soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/`
    with `awaitingApproval: true` and zero PayPal calls for every posture — the verdict, rule and posture are
    recorded in `disputes.liability` / `router_trace`, which is exactly what the page above renders. A real
    dispute is now assessed within two minutes of the sweep storing it.
-   **Still open:** the PDF renderer (`renderPdf`/`artefacts`) and the real refund port
-   (`orders.defenderRefundsFromOrders`) are intentionally unwired — both sit behind §8.15's merchant
-   approval click, which has no surface yet (S-17 approval workspace). The refunds port refuses loudly
-   (`DEF_WRONG_STATE`) rather than no-op, so a wiring change without its refund path fails visibly.
+   ✅ **approval surface done 2026-11-13 (S-17)** — `/disputes/[id]` shows the stored verdict, rule, facts,
+   rationale, deadline, evidence and packet; `POST /api/disputes/[id]/decision` runs the real filer on
+   approve (`renderPdf`/`provideEvidence` for CONTEST, `orders.defenderRefundsFromOrders` for REFUND) and
+   records only an `audit_log` row on decline. Every action is audited in a per-case hash chain; a second
+   click is refused without a PayPal call; the buyer on the order cannot approve; a real PayPal 404 reaches
+   the merchant as 404. Covered by 45 unit/route tests (`dispute-approval`, `same-origin`, `decision/route`).
+   **Caveat:** there is still no merchant sign-in — the route authorises on the existing `cs_session` cookie,
+   which today only `/api/agent/session` mints as a _buyer_ persona. A real deployment needs a merchant login
+   before a merchant can click (item 6).
+   **Still open:** only a **real dispute** (HUMAN_TODO 1a/2: a captured payment and the Disputes
+   product/simulator) stands between this and a real filed packet; `provideEvidence` on an absent id still
+   returns PayPal's own 404, never a fabricated success.
    **Live probe, 2026-11-13 (`scripts/paypal-dispute-probe.mts`, real sandbox through our own client):**
    `getDispute` on an absent id → PayPal 404 `RESOURCE_NOT_FOUND` → our `PP_NOT_FOUND` (debug id
    `ca59a12dcccf7`); `listDisputes({})` → 200, 0 items; `provideEvidence` multipart on the absent id →
