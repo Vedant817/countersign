@@ -16,7 +16,7 @@
  * deterministic router in §8.15 and is `null` until it has run — a case with no liability has not been
  * assessed, which is different from having been assessed as `UNPROVABLE`.
  */
-import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
 
 import type { CsError, DisputeId, Money, PacketId, Result } from '@countersign/core'
 
@@ -181,6 +181,45 @@ export function findDisputesByDefenseState(
       return rows as DisputeRow[]
     },
     { table: 'disputes', states },
+  )
+}
+
+/**
+ * The rows `ingestAndDefend` still owes a verdict: `liability` is null (the router has not spoken)
+ * and `defense_state` is still in one of the two pre-assessment states.
+ *
+ * ## Why the two-state filter rather than just "liability is null"
+ *
+ * `AWAITING_MERCHANT_APPROVAL`, `FILED`, `OFFERED` and `ACCEPTED` all sit *after* §8.15's verdict —
+ * `fileDispute` writes `setLiability` before it records the posture — so a row in any of them cannot
+ * have a null liability unless a migration or a hand-edit broke it. Re-defending such a row would
+ * spend a PayPal read to re-decide a decision that is already recorded. The closed set is the honest
+ * query: it names the states a genuinely unassessed row can be in, and anything else is a broken row
+ * that deserves to be noticed rather than silently swept up.
+ *
+ * Ordered by §8.15's own urgency — the seller deadline, rows with none last — so the bounded batch a
+ * worker takes per tick is the batch a human would take.
+ */
+export function findDisputesNeedingAssessment(
+  limit: number,
+  exec?: Exec,
+): Promise<Result<DisputeRow[], CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select()
+        .from(disputes)
+        .where(
+          and(isNull(disputes.liability), inArray(disputes.defense_state, ['NEW', 'ANALYSED'])),
+        )
+        // Drizzle has no `nulls last` builder, and Postgres's default for ASC is NULLS FIRST — a
+        // row with no deadline would jump the queue for the wrong reason. The fragment names column
+        // identifiers only; user values never enter this template.
+        .orderBy(sql`${disputes.seller_response_due_date} asc nulls last`, asc(disputes.created_at))
+        .limit(limit)
+      return rows as DisputeRow[]
+    },
+    { table: 'disputes', op: 'find_needing_assessment', limit },
   )
 }
 
@@ -495,6 +534,31 @@ export function findLatestPacketForDispute(
       return rows[0] as EvidencePacketRow | undefined
     },
     { table: 'evidence_packets', disputeId },
+  )
+}
+
+/**
+ * **Every** packet version for a dispute, newest first.
+ *
+ * `findLatestPacketForDispute` answers the public verifier's question, but EC-DSP-10's idempotency
+ * check is "is there already a packet with *this* bundle hash" — and the latest packet alone cannot
+ * answer it, because an earlier version may already carry the hash a re-file just computed. The
+ * whole history is what `DefenderStore.packets.forDispute` contracts to read.
+ */
+export function listEvidencePacketsForDispute(
+  disputeId: DisputeId,
+  exec?: Exec,
+): Promise<Result<EvidencePacketRow[], CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select()
+        .from(evidencePackets)
+        .where(eq(evidencePackets.dispute_id, disputeId))
+        .orderBy(desc(evidencePackets.version))
+      return rows as EvidencePacketRow[]
+    },
+    { table: 'evidence_packets', disputeId, op: 'list_versions' },
   )
 }
 
