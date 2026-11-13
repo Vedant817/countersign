@@ -24,6 +24,7 @@ import {
   readSession,
   rememberUser,
   sessionCookieOptions,
+  startSession,
 } from './session'
 import type { CookieStoreLike } from './session'
 
@@ -117,6 +118,35 @@ describe('the session cookie', () => {
     expect(read.ok).toBe(true)
     if (!read.ok) return
     expect(read.value.userId).toBeUndefined()
+  })
+
+  it('anchors a sign-in with a login timestamp, so an old cookie fails closed', async () => {
+    const store = jar()
+    await rememberUser({ userId: USER }, store)
+    const read = await readSession(store)
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.value.loginAtSec).toBeTypeOf('number')
+  })
+
+  it('rotates the seal on sign-in rather than reusing the cookie the browser arrived with', async () => {
+    const store = jar()
+    await rememberUser({ userId: 'usr_01HZX0000000000000000OTHER' as never }, store)
+    const before = store.raw.get(SESSION_COOKIE)
+    expect(before).toBeTypeOf('string')
+
+    const started = await startSession({ userId: USER }, store)
+    expect(started.ok).toBe(true)
+    const after = store.raw.get(SESSION_COOKIE)
+    expect(after).toBeTypeOf('string')
+    // A rotation is a new seal, not the same bytes under a new name.
+    expect(after).not.toBe(before)
+
+    const read = await readSession(store)
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.value.userId).toBe(USER as string)
+    expect(read.value.loginAtSec).toBeTypeOf('number')
   })
 })
 

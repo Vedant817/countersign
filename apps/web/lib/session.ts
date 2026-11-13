@@ -40,6 +40,16 @@ export const SESSION_COOKIE = 'cs_session'
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
 
 /**
+ * The absolute lifetime of a sign-in — D-059.
+ *
+ * The cookie's `ttl` is a *cookie* lifetime: it is reissued on every response that touches the session,
+ * so a session that is used daily would otherwise live forever. This is the wall clock that ends it
+ * regardless of activity. Twelve hours is one working day: long enough that a merchant does not sign in
+ * per dispute, short enough that a stolen laptop is not a permanent merchant session.
+ */
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12
+
+/**
  * The session's contents: one user id, and when it was last written.
  *
  * Nothing else belongs here. A second field is a second thing that can disagree with the row it names — an
@@ -49,6 +59,8 @@ export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
 export interface SessionData {
   /** `users.id` this request acts as. Absent means "not signed in". */
   userId?: string
+  /** Epoch seconds this sign-in began. Absent means "this cookie is not a sign-in" (D-059). */
+  loginAtSec?: number
   /** Epoch seconds of the last write, so a session's age is visible without decoding the cookie twice. */
   seenAtSec?: number
 }
@@ -158,6 +170,10 @@ export async function currentUserId(
  *
  * Called once, right after a user row is created or resolved, so the *next* request is that user's and not a
  * new stranger. Returns the session it wrote so a caller can carry on with it in the same request.
+ *
+ * A session minted this way is a sign-in: it gets a `loginAtSec` anchor, and the absolute-lifetime check in
+ * `lib/auth.ts` reads it. A session that has no anchor is not a sign-in, which is what lets a pre-D-059
+ * cookie and a forged one both fail closed rather than being treated as an old but valid login.
  */
 export async function rememberUser(
   input: { userId: UserId },
@@ -165,10 +181,40 @@ export async function rememberUser(
 ): Promise<Result<Session, CsError>> {
   const session = await readSession(store)
   if (!session.ok) return session
+  const nowSec = Math.floor(Date.now() / 1000)
   session.value.userId = input.userId
-  session.value.seenAtSec = Math.floor(Date.now() / 1000)
+  session.value.loginAtSec = nowSec
+  session.value.seenAtSec = nowSec
   await session.value.save()
   return session
+}
+
+/**
+ * Start a fresh sign-in: destroy whatever session this browser held, then write a new one.
+ *
+ * ## Why destruction is the first step, not an optimisation
+ *
+ * A sign-in is a privilege change, and a privilege change that reuses the cookie it was given is a session
+ * fixation: an attacker who can plant a cookie before the merchant signs in keeps the authenticated cookie
+ * afterwards. iron-session refuses to `save()` data written back into a destroyed session (it would restore
+ * the cookie `destroy()` just cleared), so the fresh session is read from the now-empty jar rather than
+ * written into the destroyed object. The seal is new either way; this makes the replacement explicit.
+ */
+export async function startSession(
+  input: { userId: UserId },
+  store?: CookieStoreLike,
+): Promise<Result<Session, CsError>> {
+  const previous = await readSession(store)
+  if (!previous.ok) return previous
+  previous.value.destroy()
+  const fresh = await readSession(store)
+  if (!fresh.ok) return fresh
+  const nowSec = Math.floor(Date.now() / 1000)
+  fresh.value.userId = input.userId
+  fresh.value.loginAtSec = nowSec
+  fresh.value.seenAtSec = nowSec
+  await fresh.value.save()
+  return fresh
 }
 
 /**
