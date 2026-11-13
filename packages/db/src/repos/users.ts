@@ -36,6 +36,47 @@ export function findUserById(id: UserId, exec?: Exec): Promise<Result<UserRow, C
   )
 }
 
+/** The account with this email, or `undefined` — "no such account" is an answer, not a fault. */
+export async function findUserByEmail(
+  email: string,
+  exec?: Exec,
+): Promise<Result<UserRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db()).select().from(users).where(eq(users.email, email)).limit(1)
+      return rows[0] as UserRow | undefined
+    },
+    { table: 'users' },
+  )
+}
+
+/**
+ * Set (or clear, with `null`) a password hash.
+ *
+ * Written as a repository rather than a raw `db().update(users)` in the seed or a script because the
+ * audit rule for this project is that the package's tables are written through the package (AGENTS.md
+ * rule 9's neighbour): a caller that bypasses it cannot be reviewed in one place.
+ */
+export function setPasswordHash(
+  id: UserId,
+  passwordHash: string | null,
+  exec?: Exec,
+): Promise<Result<UserRow, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .update(users)
+        .set({ password_hash: passwordHash, updated_at: new Date() })
+        .where(eq(users.id, id))
+        .returning()
+      const row = rows[0]
+      if (!row) throw new Error(`No users row for ${id}`)
+      return row as UserRow
+    },
+    { table: 'users', id },
+  )
+}
+
 /** `undefined` rather than an error: "no such user" is an expected answer, not a failure. */
 export async function findUserByPersona(
   persona: string,

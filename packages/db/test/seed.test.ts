@@ -164,6 +164,7 @@ describe('AT-M2.2 seed composition', () => {
       injections: 3,
       lastUnits: 2,
       digital: 1,
+      merchantPasswordSet: false,
     })
     expect(summary).toContain('idempotent')
     expect(summary).toContain(SEED_WALLET_ID)

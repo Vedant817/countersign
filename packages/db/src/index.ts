@@ -23,6 +23,7 @@
 export * from './client'
 export * from './schema'
 export * from './repos'
+export { burnPasswordCheck, hashPassword, verifyPassword } from './password'
 
 export {
   INJECTION_PAYLOADS,

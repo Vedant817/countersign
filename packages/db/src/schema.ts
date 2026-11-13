@@ -361,6 +361,15 @@ export const users = pgTable('users', {
   persona: text('persona').notNull(),
   display_name: text('display_name').notNull(),
   email: text('email').notNull(),
+  /**
+   * A `scrypt` password hash, or `null` for an account that cannot sign in with a password.
+   *
+   * `null` is the honest default for the seeded BUYER and JUDGE personas: they have no password, and a
+   * blank string would be a hash of the empty password - a login that succeeds with no secret at all.
+   * Only the MERCHANT persona is given one, and only from `MERCHANT_PASSWORD` at seed time (D-059), so a
+   * deployment that never sets that variable has no password login and says so rather than accepting one.
+   */
+  password_hash: text('password_hash'),
   /** ISO 3166-1 alpha-2. Drives the flat shipping fee (spec §8.9) and the DPDP notice. */
   country: char('country', { length: 2 }).notNull(),
   /** §12.13 DPDP/GDPR notice acknowledgement; null means not yet shown. */

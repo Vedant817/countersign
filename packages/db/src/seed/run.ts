@@ -44,7 +44,9 @@ import { formatMoney } from '@countersign/core'
 
 import { closeDb, db, withTx, type Exec } from '../client'
 import { devices, paypalWallets, users, walletCaps, type JsonValue } from '../schema'
+import { setPasswordHash } from '../repos/users'
 import { upsertProduct } from '../repos/products'
+import { hashPassword } from '../password'
 import { repo } from '../repos'
 
 import {
@@ -95,6 +97,8 @@ export interface SeedSummary {
   readonly injections: number
   readonly lastUnits: number
   readonly digital: number
+  /** Whether `MERCHANT_PASSWORD` was set, so the merchant has a password login (D-059). */
+  readonly merchantPasswordSet: boolean
 }
 
 /**
@@ -133,6 +137,17 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
       { table: 'users', id: persona.id },
     )
     if (!written.ok) throw written.error
+  }
+
+  // D-059: the merchant is the only persona with a password, and only when the operator supplied one.
+  // An unset `MERCHANT_PASSWORD` deliberately leaves `password_hash` alone: clearing it on a re-run
+  // would sign the merchant out of their own deployment because a shell variable was forgotten.
+  const merchantPassword = process.env['MERCHANT_PASSWORD']?.trim() ?? ''
+  const merchantPasswordSet = merchantPassword.length > 0
+  if (merchantPasswordSet) {
+    const hashed = await hashPassword(merchantPassword)
+    const stored = await setPasswordHash(MERCHANT.id, hashed, e)
+    if (!stored.ok) throw stored.error
   }
 
   const device = await repo(
@@ -234,6 +249,7 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
     ).length,
     lastUnits: SEED_PRODUCTS.filter((p) => p.stock === 1).length,
     digital: SEED_PRODUCTS.filter((p) => p.digital).length,
+    merchantPasswordSet,
   }
 }
 
@@ -250,7 +266,8 @@ export function renderSummary(s: SeedSummary): string {
     'db:seed complete (idempotent — running it again changes nothing)',
     '',
     `  users        ${s.users}  (${SEED_PERSONAS.map((p) => `${p.displayName} [${p.persona}]`).join(', ')})`,
-    `  devices      ${s.devices}  (placeholder JWK — WP-05 replaces it at enrolment)`,
+    `  merchant     ${s.merchantPasswordSet ? 'password sign-in configured' : 'NO password - set MERCHANT_PASSWORD and re-run to enable /login'}`,
+    `  devices      ${s.devices}  (placeholder JWK - WP-05 replaces it at enrolment)`,
     `  wallets      ${s.wallets}  (placeholder vault token — S-02 onboarding replaces it)`,
     `  wallet_caps  ${s.walletCaps}  (${SEED_WALLET_CAP.period} cap ${money} on ${SEED_WALLET_ID})`,
     `  products     ${s.products}  currencies: ${s.currencies.join(', ')}`,

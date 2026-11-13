@@ -25,6 +25,7 @@ export const SECRET_ENV_KEYS = [
   'PAYPAL_ACCESS_TOKEN',
   'PAYPAL_WEBHOOK_ID',
   'PAYPAL_BUYER_PASSWORD',
+  'MERCHANT_PASSWORD',
   'SESSION_SECRET',
   'VI_SERVICE_TOKEN',
   'VI_KEK',
@@ -121,6 +122,17 @@ export const envSchema = z
 
     DATABASE_URL: z.string().min(1),
     SESSION_SECRET: z.string().min(32, 'iron-session needs 32+ characters'),
+
+    /**
+     * The merchant's password, read **only** by `pnpm db:seed` (D-059).
+     *
+     * It is optional and an empty value is treated as unset: a deployment with no `MERCHANT_PASSWORD` has
+     * no password login at all, and the seed leaves `users.password_hash` null rather than storing a hash of
+     * the empty string. It is declared here so a typo (`MERCHANT_PASS`) is caught by the same near-miss check
+     * as every other variable, and so `/status` can say whether sign-in is configured rather than leaving an
+     * operator to read the seed script.
+     */
+    MERCHANT_PASSWORD: z.string().optional(),
 
     /**
      * EC-ENV-1. A demo that accidentally takes real money is the worst failure available, so `live`

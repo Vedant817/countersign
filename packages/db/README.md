@@ -12,6 +12,14 @@ pnpm db:seed      # personas, wallet cap, 24 products  (idempotent: re-running c
 pnpm --filter @countersign/db test    # no DATABASE_URL required
 ```
 
+## Merchant password (D-059)
+
+`users.password_hash` holds a `scrypt` hash (`hashPassword` / `verifyPassword` in `src/password.ts`),
+or `null` for an account that cannot sign in. `pnpm db:seed` sets the Northwind merchant's hash from
+`MERCHANT_PASSWORD` when that variable is present, and leaves the column untouched when it is not — a
+re-seed with the variable unset does not sign the merchant out. `findUserByEmail` and `setPasswordHash`
+are the only repository surface the login route needs; the plaintext is never stored or logged.
+
 ---
 
 ## What this package owns
