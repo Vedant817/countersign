@@ -10,7 +10,7 @@
  * A FILED case is the second test: the page must say there is nothing left to approve and must not render
  * the buttons, because approving a filed case would be a second PayPal action.
  */
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { eq, inArray } from 'drizzle-orm'
 
 import { auditLog, db, disputeActions, disputes, evidencePackets } from '@countersign/db'
@@ -76,7 +76,7 @@ async function removeDispute(seed: Seed): Promise<void> {
 
 /** A signed-in caller. The only session this app mints today is the buyer persona, which is enough for a
  * decline on an unlinked dispute: separation of duty only refuses the buyer named on the order. */
-async function signIn(page: import('@playwright/test').Page): Promise<void> {
+async function signIn(page: Page): Promise<void> {
   const response = await page.request.post('/api/agent/session', {
     data: { intent: 'Buy the cheapest trail shoes you can find, under 150', cap_minor: '5000' },
   })
