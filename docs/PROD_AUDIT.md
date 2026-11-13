@@ -370,6 +370,14 @@ Verified by: `packages/db/test/repos.worker.live.test.ts` (6 tests against a rea
    (`orders.defenderRefundsFromOrders`) are intentionally unwired — both sit behind §8.15's merchant
    approval click, which has no surface yet (S-17 approval workspace). The refunds port refuses loudly
    (`DEF_WRONG_STATE`) rather than no-op, so a wiring change without its refund path fails visibly.
+   **Live probe, 2026-11-13 (`scripts/paypal-dispute-probe.mts`, real sandbox through our own client):**
+   `getDispute` on an absent id → PayPal 404 `RESOURCE_NOT_FOUND` → our `PP_NOT_FOUND` (debug id
+   `ca59a12dcccf7`); `listDisputes({})` → 200, 0 items; `provideEvidence` multipart on the absent id →
+   PayPal 404 `RESOURCE_NOT_FOUND` (debug id `ca59a12e2280b`) — so the whole filing request path (auth,
+   multipart, endpoint, error mapping) is proven live; only a **real dispute** (HUMAN_TODO 1a/2: a
+   captured payment and the Disputes product/simulator) and the **merchant approval click** (no surface
+   yet) stand between this and a real filed packet. The filer's own upload path is covered by 72 tests
+   against the real client; its fixtures are honestly doc-derived, not captured (H-01 open).
 9. **[P1]** LLM path configurable, with graceful configured-off behaviour everywhere.
 10. **[P1]** edge cases: every §12 row, including PayPal 5xx/timeouts, duplicate webhooks, concurrent
     checkouts on one budget, revoked mandate mid-checkout, refund after chargeback, tampered packets,
