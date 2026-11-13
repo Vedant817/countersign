@@ -372,9 +372,10 @@ soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/`
    the same-origin guard, and `/disputes`, `/disputes/[id]` and `/api/disputes/[id]/decision` require
    `users.persona === 'MERCHANT'`: anonymous is a redirect (pages) or `401` (API), a signed-in buyer is
    `403`. The password is provisioned only from `MERCHANT_PASSWORD` by `pnpm db:seed`; with it unset the
-   column stays null and every login is refused, so there is no fake or dev login. Tests: 21 auth unit, 5
-   rate-limit, 3 session rotation/expiry, 10 login/logout route, 3 live-DB user/password, and 5 browser
-   tests (sign in and decline, filed case, anonymous redirect, buyer 403, sign out).
+   column stays null and every login is refused, so there is no fake or dev login. Tests: 53
+   unit/live (password hash, user lookup, auth decision, rate limit, rotation/expiry, login/logout
+   routes) and the full 25-test Playwright suite (sign in and decline, filed case, anonymous redirect,
+   buyer 403, sign out).
    **Still open in item 6:** buyer accounts are still the demo persona minted by `/api/agent/session`
    (behind `COUNTERSIGN_AGENT_DEMO=1`), and "scoped to its own disputes" is `persona === 'MERCHANT'`
    because `orders` has no `merchant_id` column. The money half remains blocked on HUMAN_TODO 1a/2.
