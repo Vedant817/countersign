@@ -1627,6 +1627,20 @@ async function finish(run: Run, done: Done): Promise<Result<FileOutcome, CsError
   const actionName = actionNameFor(done)
   let actionRow: FileOutcome['actionRow']
 
+  // §3.3's `AWAITING_MERCHANT_APPROVAL` was declared and never written, so a case the router had
+  // assessed and was waiting on a click for still read `NEW` in the queue — the one column whose whole
+  // purpose is to tell a merchant "this one is waiting on you". Every exit that reports
+  // `awaitingApproval: true` is exactly that state, so the stamp happens here, next to the action row it
+  // belongs with, rather than at each of the six call sites that set the flag.
+  if (done.awaitingApproval && row.defense_state !== 'AWAITING_MERCHANT_APPROVAL') {
+    const stamped = await deps.store.disputes.setDefenseState(
+      row.id,
+      'AWAITING_MERCHANT_APPROVAL',
+      at,
+    )
+    if (!stamped.ok) return stamped
+  }
+
   if (actionName !== null && done.token !== undefined) {
     const baseKey =
       done.refund?.requestId ?? disputeActionRequestId(row.id, done.token, done.version ?? 1)

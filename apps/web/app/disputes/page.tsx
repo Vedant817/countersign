@@ -22,6 +22,7 @@
  * what the single-writer rule exists to prevent.
  */
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { headers } from 'next/headers'
 
 import { formatIstHuman, formatMoney, money } from '@countersign/core'
@@ -69,7 +70,11 @@ function QueueRow({ row }: { row: DisputeQueueRow }) {
   return (
     <li className="rounded-card border border-rule bg-paper-raised p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="font-mono text-sm font-semibold">{row.paypalDisputeId}</h2>
+        <h2 className="font-mono text-sm font-semibold">
+          <Link className="underline" href={`/disputes/${row.id}`}>
+            {row.paypalDisputeId}
+          </Link>
+        </h2>
         <span
           className={`rounded-card border px-3 py-1 font-mono text-xs font-bold uppercase tracking-widest ${stateTone(row.defenseState)}`}
         >
