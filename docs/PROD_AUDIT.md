@@ -337,7 +337,7 @@ Verified by: `packages/db/test/repos.worker.live.test.ts` (6 tests against a rea
   outside `src/`.
 - **Float money** — `scripts/check-money-discipline.mjs` passes.
 - **Fresh demo/stub/hardcoded pass, 2026-11-13** — `TODO|FIXME|HACK|not implemented|unimplemented|coming
-  soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/` sources: zero hits in
+soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/` sources: zero hits in
   production code paths (the only matches are tests, doc comments explaining decisions, and HTML input
   placeholders). The one apparent gap — `WebhookStore.events.findById` "not implemented in
   `@countersign/db`" in the web route — is honest and production-safe: the route's process never calls it
