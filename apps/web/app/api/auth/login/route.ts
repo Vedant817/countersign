@@ -36,7 +36,7 @@ import { appendAudit } from '@countersign/db'
 
 import { authenticate, startSession } from '@/lib/auth'
 import { safeNextPath } from '@/lib/next-path'
-import { checkLoginRateLimit, loginRateLimitKey } from '@/lib/rate-limit'
+import { checkLoginRateLimit, loginRateLimitKey, type RateLimitVerdict } from '@/lib/rate-limit'
 import { requireSameOrigin } from '@/lib/same-origin'
 
 export const dynamic = 'force-dynamic'
@@ -89,7 +89,16 @@ export async function POST(request: Request): Promise<Response> {
 
   const address = clientAddress(request)
   const limitKey = loginRateLimitKey(parsed.data.email, address)
-  const verdict = checkLoginRateLimit(limitKey)
+  let verdict: RateLimitVerdict
+  try {
+    verdict = await checkLoginRateLimit(limitKey)
+  } catch {
+    console.error('Login rate limit check failed; failing closed.')
+    return NextResponse.json(
+      { error: 'Sign-in is temporarily unavailable. Try again shortly.' },
+      { status: 503 },
+    )
+  }
   if (!verdict.allowed) {
     return NextResponse.json(
       toBody(

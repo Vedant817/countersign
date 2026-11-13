@@ -30,7 +30,7 @@ import { appendAudit } from '@countersign/db'
 
 import { normalizeEmail, registerBuyer, SIGNUP_MIN_PASSWORD, startSession } from '@/lib/auth'
 import { safeNextPath } from '@/lib/next-path'
-import { checkLoginRateLimit, loginRateLimitKey } from '@/lib/rate-limit'
+import { checkLoginRateLimit, loginRateLimitKey, type RateLimitVerdict } from '@/lib/rate-limit'
 import { requireSameOrigin } from '@/lib/same-origin'
 
 export const dynamic = 'force-dynamic'
@@ -104,7 +104,16 @@ export async function POST(request: Request): Promise<Response> {
   const address = clientAddress(request)
   // The same bucket as a login attempt: a sign-up is a credential operation too, and an unthrottled one is
   // a way to fill `users` with rows and to spend scrypt on someone else's CPU.
-  const verdict = checkLoginRateLimit(loginRateLimitKey(parsed.data.email, address))
+  let verdict: RateLimitVerdict
+  try {
+    verdict = await checkLoginRateLimit(loginRateLimitKey(parsed.data.email, address))
+  } catch {
+    console.error('Login rate limit check failed; failing closed.')
+    return NextResponse.json(
+      { error: 'Sign-in is temporarily unavailable. Try again shortly.' },
+      { status: 503 },
+    )
+  }
   if (!verdict.allowed) {
     return NextResponse.json(
       toBody(
