@@ -17,11 +17,6 @@ on:
     # happens at the start of an IST working day rather than the middle of one.
     - cron: '30 18 * * *'
   workflow_dispatch:
-    inputs:
-      scenario:
-        description: 'Run a single Judge Mode scenario (J1..J4). Blank = all.'
-        required: false
-        type: string
 
 concurrency:
   group: sandbox-nightly
@@ -141,20 +136,8 @@ jobs:
           PAYPAL_API_BASE: https://api-m.sandbox.paypal.com
         run: pnpm --filter @countersign/paypal test:sandbox
 
-      - name: run judge mode
-        env:
-          FEATURE_JUDGE_MODE: 'true'
-          # Each scenario gets its own namespace so a re-run cannot collide with the previous run's
-          # unique constraints (spec §8.20: "idempotent per judge session, namespaced IDs").
-          JUDGE_RUN_NAMESPACE: nightly-${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          SCENARIO="${{ inputs.scenario }}"
-          if [ -n "$SCENARIO" ]; then
-            pnpm judge --scenario "$SCENARIO"
-          else
-            pnpm judge
-          fi
+      - name: run the eval corpora (no model, no network)
+        run: pnpm --filter @countersign/evals eval:nightly
 
       - name: publish eval report
         if: always()
@@ -199,12 +182,10 @@ jobs:
           cache: pnpm
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - name: red-team corpus
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: red-team corpus (offline, no model, no network)
         run: |
           set -euo pipefail
-          pnpm --filter @countersign/evals eval:all
+          pnpm --filter @countersign/evals eval:nightly -- --out reports/evals
       - name: assert 0% attack success at the Gate
         run: |
           set -euo pipefail

@@ -15,7 +15,8 @@
     "test": "vitest run",
     "eval:live": "tsx src/run.ts",
     "eval:compiler": "tsx src/run.ts --compiler-only",
-    "eval:injection": "tsx src/run.ts --injection-only"
+    "eval:injection": "tsx src/run.ts --injection-only",
+    "eval:nightly": "tsx src/nightly.ts"
   },
   "dependencies": {
     "@countersign/core": "workspace:*",

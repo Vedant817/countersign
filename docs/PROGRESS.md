@@ -707,4 +707,25 @@ output above.
   idempotency, verdict writes). Worker suite 164 passed; defender 655 passed; orchestrator 54 passed; db 86
   passed; repo `typecheck` exit 0; `secret-scan` no leaks; CI run 43346163957 dispatched on `prod/real-users`.
   **Still open (both behind §8.15's approval click):** the PDF renderer and artefacts, and the real refund
-  port wiring — the refunds port refuses loudly until an approval surface exists.
+  port wiring — the refunds port refuses loudly until an approval surface exists.- **2026-11-13 (IST)** - **The nightly sandbox workflow can now actually run (audit 8.15).**
+  `.github/workflows/sandbox-nightly.yml` invoked `pnpm judge` and `pnpm --filter @countersign/evals
+  eval:all`, neither of which existed, and copied `reports/eval-report.json` / read
+  `reports/evals/injection.json` that nothing wrote - so the nightly could only ever fail, and the SLOs it
+  is the evidence for were unverifiable. The fix is an offline runner, `packages/evals/src/nightly.ts`
+  (`eval:nightly`), that compiles both corpora in-process (no model, no network - the same deterministic
+  `compileOffline` path the P0-7 gate uses), writes `report.json` (§14 compiler score) and
+  `injection.json` (`gate_bypass_rate` = breach fraction; an empty corpus is a full breach, never a clean
+  0), and exits non-zero below the 98% floor or on any breach. A relative `--out` resolves against the git
+  root (pnpm runs package scripts with cwd = the package dir), so `reports/evals` lands at the repo root
+  where the workflow's `node -e` assertion reads it. Added `scripts/summarise-evals.mjs` (the workflow's
+  human-line summariser, also missing). The judge step and the injection job now run `eval:nightly`, and
+  the dead `scenario` dispatch input is gone. The entry point is guarded by an `import.meta.url`
+  main-module check so importing the module has no side effects.
+  **Measured:** repo `typecheck` exit 0; `pnpm lint` 0 errors (14 pre-existing `no-console` warnings in
+  throwaway debug scripts); `format:check` clean; evals 33 passed (4 new: report shape + floor,
+  `gate_bypass_rate` arithmetic, `gitRoot`/`resolveOutDir` resolution); end to end `eval:nightly --out
+  reports/evals` → `167/167 (100%)` compiler, `0/50` breaches, `gate_bypass_rate=0`, and the workflow's
+  `node -e` assertion reads `gate_bypass_rate=0 breaches=0 total=50` from the written file.
+  **Still open (deploy-time, EC-ENV-3):** `scripts/sandbox-bootstrap.ts` does not exist, so the EC-ENV-3
+  "sandbox data reset" recovery has no script; that needs the public deployment + real sandbox personas
+  (HUMAN_TODO), not a nightly fix.
