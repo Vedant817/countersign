@@ -25,8 +25,9 @@
  *
  * ## Local only
  *
- * The same `COUNTERSIGN_AGENT_DEMO=1` gate as the session route. This endpoint mints a bearer and spends a
- * mandate; it is not a production surface.
+ * The same `COUNTERSIGN_AGENT_DEMO=1` gate as the session route, plus a buyer sign-in (D-060). The gate
+ * mints a bearer and spends a mandate; it is not a production surface, and the sign-in is what decides
+ * whose mandate it spends.
  */
 import {
   csError,
@@ -48,7 +49,8 @@ import { z } from 'zod'
 
 import { merchantMcpUrl } from '@/app/api/mcp/[transport]/endpoint'
 import { sessionMandatePort, sessionSigner, agentDemoAllowed } from '@/lib/agent-session'
-import { currentUserId, guardRunUser } from '@/lib/session'
+import { requireBuyer } from '@/lib/auth'
+import { guardRunUser, requireOwnedAgent, requireOwnedMandate } from '@/lib/session'
 import { languageModel } from '@/lib/llm'
 import { MCP_TOKEN_TTL_SECONDS, mintAgentToken } from '@/lib/mcp-token'
 
@@ -99,16 +101,36 @@ export async function POST(request: Request): Promise<Response> {
   }
   const body = parsed.data
 
-  // Per-user isolation (audit §4): when this browser has a session, the run belongs to that buyer and to no
-  // other. A body that names a different user is refused before a mandate is read, let alone spent — the
-  // mandate id in the body is otherwise a handle to someone else's budget.
-  const session = await currentUserId()
-  if (!session.ok) {
-    return NextResponse.json(toBody(session.error), { status: 503 })
+  // Per-user isolation (audit §4, D-060). The buyer is the session's, and the body has no say: `user_id`
+  // is still accepted because the client already has it from the session route, but it is compared to the
+  // row rather than believed, and a body naming anyone else is refused before a mandate is read.
+  const buyer = await requireBuyer()
+  if (!buyer.ok) {
+    return NextResponse.json(toBody(buyer.error), {
+      status: buyer.error.code === 'CS_UNAUTHENTICATED' ? 401 : 403,
+    })
   }
-  const allowed = guardRunUser(session.value, body.user_id)
+
+  const allowed = guardRunUser(buyer.value.id, body.user_id)
   if (!allowed.ok) {
-    return NextResponse.json(toBody(allowed.error), { status: 403 })
+    return NextResponse.json(toBody(allowed.error), {
+      status: allowed.error.code === 'CS_UNAUTHENTICATED' ? 401 : 403,
+    })
+  }
+
+  // A mandate id in a body is a handle to a budget, so it is checked against this buyer's own rows before
+  // anything is minted. The refusal is the same 404 as an id that never existed: a caller who does not own
+  // the mandate does not get to learn that it is real.
+  const ownedMandate = await requireOwnedMandate(buyer.value.id, body.mandate_id)
+  if (!ownedMandate.ok) {
+    return NextResponse.json(toBody(ownedMandate.error), { status: 404 })
+  }
+
+  // The agent bearer is minted below, so the agent key is checked by the same rule first: a bearer for an
+  // agent this buyer has no mandate under is a credential for a key they do not hold.
+  const ownedAgent = await requireOwnedAgent(buyer.value.id, body.agent_id)
+  if (!ownedAgent.ok) {
+    return NextResponse.json(toBody(ownedAgent.error), { status: 404 })
   }
 
   const token = await mintAgentToken({ agentId: body.agent_id })

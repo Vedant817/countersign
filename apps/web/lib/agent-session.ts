@@ -11,6 +11,11 @@ import 'server-only'
  * Gate reads. What is **fixture-like** is only the custody of the device key (`./demo-device.ts` explains
  * that) and the intent, which the caller supplies instead of a compiler run.
  *
+ * **The buyer is not created here (D-060).** `provisionAgentSession` requires the id of a row that already
+ * exists — one a person created by signing up — and refuses anything else. Before this it minted a fresh
+ * `usr_…` for a request with no cookie, so a browser could hold an identity nobody had authenticated for
+ * and `user_id` in a request body was the only thing saying whose budget it was.
+ *
  * The alternative — a hand-written `MandateRow` — was rejected on purpose. A fabricated mandate would
  * make the whole demo a mock of itself, and the one thing this project cannot afford is a demo that
  * proves nothing about the code.
@@ -58,7 +63,6 @@ import {
   type UserId,
   type WalletId,
 } from '@countersign/core'
-import type { UserRow } from '@countersign/db'
 import * as repository from '@countersign/db'
 import { db, jwksKeys } from '@countersign/db'
 import { contentWords } from '@countersign/agent'
@@ -114,31 +118,31 @@ export interface ProvisionInput {
   readonly intent: string
   /** The per-purchase cap in minor units. */
   readonly capMinor: bigint
-  /** Display name for the demo buyer. */
-  readonly displayName?: string
   /**
-   * Reuse this buyer instead of minting a new one.
+   * Whose mandate this is — a buyer that already exists, resolved by the caller from the session.
    *
-   * The session route passes the id from the request's cookie, which is what turns "a fresh user per request"
-   * into "one buyer per browser" (audit §4). It reuses **identity only**: the mandate, the device key and the
-   * agent key are new every call, because a second mandate with the same cap is the point — reusing the
-   * mandate would make the second run fail with `GATE_BUDGET_EXCEEDED` for a reason a viewer would misread as
-   * a bug.
+   * **Required, and not defaulted.** This used to be optional: with no cookie the provisioner minted a
+   * fresh `usr_…` (`demo.buyer.<id>@example.test`), which is how a browser got an identity without a
+   * credential (audit §4, D-060). A default here would be the same door under a different name, so the
+   * type refuses to compile a call that does not name the buyer it is acting for.
    *
    * A cookie that names a row which is gone (a restored database, or a forged id shaped like a real one)
    * refuses with `CS_NOT_FOUND` rather than silently minting a stranger: a session that quietly becomes a
    * different person is the bug this parameter exists to remove.
    */
-  readonly userId?: UserId
+  readonly userId: UserId
 }
 
 /**
- * Provision one demo session.
+ * Provision one buyer session: a real mandate, a real agent key, a real L2 — for a buyer who signed in.
  *
- * A fresh session per call is deliberate: each run gets its own mandate and budget, so a demo can be
- * replayed without the previous run's reservation changing this one's answer. The cost is a handful of
- * rows per run, and the alternative — reusing a mandate — would make the second run fail with
- * `GATE_BUDGET_EXCEEDED` for a reason a viewer would misread as a bug.
+ * A fresh mandate per call is deliberate: each run gets its own mandate and budget, so a buyer can ask for
+ * a second cap without the first reservation changing the answer. The cost is a handful of rows per run,
+ * and the alternative — reusing a mandate — would make the second run fail with `GATE_BUDGET_EXCEEDED`
+ * for a reason a viewer would misread as a bug.
+ *
+ * **The buyer is never created here (D-060).** The caller resolved the id from the session, and this
+ * function refuses one that names no row rather than minting an account to match it.
  */
 export async function provisionAgentSession(
   input: ProvisionInput,
@@ -165,26 +169,34 @@ export async function provisionAgentSession(
 
   const vi = createViClient(config)
   const nowMs = systemClock.nowMs()
-  // A session that names a buyer keeps it; anything else mints one (audit §4). Resolved before any write, so
-  // a stale cookie cannot leave half a session behind.
-  const reuse = input.userId
-  let existingUser: UserRow | undefined
-  if (reuse !== undefined) {
-    const found = await repository.findUserById(reuse)
-    if (!found.ok) return found
-    if (found.value === undefined) {
-      return err(
-        csError(
-          'CS_NOT_FOUND',
-          'This session names a buyer that does not exist on this deployment.',
-          undefined,
-          { userMessage: 'Your session expired. Start again to get a new one.' },
-        ),
-      )
-    }
-    existingUser = found.value
+  // Resolved before any write, so a stale cookie cannot leave half a session behind.
+  const found = await repository.findUserById(input.userId)
+  if (!found.ok) return found
+  const existingUser = found.value
+  if (existingUser === undefined) {
+    return err(
+      csError(
+        'CS_NOT_FOUND',
+        'This session names a buyer that does not exist on this deployment.',
+        undefined,
+        { userMessage: 'Your session expired. Sign in again to get a new one.' },
+      ),
+    )
   }
-  const userId = reuse ?? (newId('usr') as UserId)
+  // A merchant or a judge is not a buyer: the mandate is the buyer's authority to spend, and signing one
+  // against another persona's row would make the Gate's check 1 report a user who never approved it.
+  if (existingUser.persona !== 'BUYER') {
+    return err(
+      csError(
+        'CS_FORBIDDEN',
+        `The signed-in account is a ${existingUser.persona}; a mandate belongs to a buyer.`,
+        undefined,
+        { userMessage: 'Sign in with the buyer account to create a mandate.' },
+      ),
+    )
+  }
+
+  const userId = existingUser.id as UserId
   const walletId = newId('wal') as WalletId
   const deviceId = newId('dev') as DeviceId
   const agentId = newId('agt') as AgentId
@@ -211,26 +223,18 @@ export async function provisionAgentSession(
     }
   }
 
-  // --- 1. The buyer, the wallet and the device key ------------------------------------------------
-  const user =
-    existingUser !== undefined
-      ? ok(existingUser)
-      : await repository.createUser({
-          id: userId,
-          persona: 'BUYER',
-          display_name: input.displayName ?? 'Demo buyer',
-          email: `demo.buyer.${userId.slice(-8)}@example.test`,
-          country: 'US',
-        })
-  if (!user.ok) return user
-
+  // --- 1. The wallet and the device key ------------------------------------------------------------
+  //
+  // The buyer row already exists and was read above: D-060 removed the "mint a user if the cookie is
+  // absent" branch, which is what let a browser hold an identity nobody had authenticated for.
+  //
   // A returning buyer keeps its **wallet**: `paypal_wallets_payment_token_id_key` is UNIQUE and this demo's
   // placeholder token is derived from the user id, so a second insert for the same buyer is a unique violation
   // rather than a second instrument. What is per mandate is the **device**: `demo-device.ts` mints a fresh P-256
   // key each call and never persists the private half, so a stored device row could not sign a second L2 —
   // and `l1_credentials` is UNIQUE (device_id, wallet_id), which a new device beside the reused wallet satisfies
   // exactly. (Reusing the device would have meant re-issuing its L1 from a row that no longer holds the key.)
-  const wallets = reuse === undefined ? ok([]) : await repository.findWalletsByUser(userId)
+  const wallets = await repository.findWalletsByUser(userId)
   if (!wallets.ok) return wallets
   const wallet =
     wallets.value.length > 0
@@ -242,11 +246,12 @@ export async function provisionAgentSession(
           // cannot mistake it for one, and so an order path that needs a real vault_id fails loudly.
           payment_token_id: `DEMO-NOT-A-VAULT-TOKEN-${userId.slice(-8)}`,
           payer_id: `DEMO-PAYER-${userId.slice(-8)}`,
-          payer_email: `demo.buyer.${userId.slice(-8)}@example.test`,
+          // The buyer's own address, not a fabricated `demo.buyer.…@example.test`: the wallet's payer email
+          // is what a dispute and a receipt address, and an account now has a real one.
+          payer_email: existingUser.email,
         })
   if (!wallet.ok) return wallet
-  // The mandate, the L1 and the wallet cap all name the row that was resolved, which is the existing one for a
-  // returning buyer rather than the id this call generated.
+  // The mandate, the L1 and the wallet cap all name the row that was resolved above.
   const resolvedWalletId = wallet.value.id as WalletId
 
   const deviceKey = await createDemoDeviceKey()

@@ -1,10 +1,10 @@
 /**
- * `POST /api/agent/session` — provision one demo buyer for S-10.
+ * `POST /api/agent/session` — provision one buyer's mandate for S-10.
  *
- * This is the local demo's onboarding step: it creates a buyer, a wallet, a server-side device key, an
- * agent key minted by vi, a real L1/L2 chain and a mandate — then returns the ids the run route needs.
- * Every artefact is real except the custody of the device key (`lib/demo-device.ts` explains exactly what
- * that means); see `lib/agent-session.ts` for the pipeline.
+ * This is the buyer's onboarding step once they have an account: it creates a wallet, a server-side device
+ * key, an agent key minted by vi, a real L1/L2 chain and a mandate — then returns the ids the run route
+ * needs. Every artefact is real except the custody of the device key (`lib/demo-device.ts` explains exactly
+ * what that means); see `lib/agent-session.ts` for the pipeline.
  *
  * ## Why the request takes an intent and a cap
  *
@@ -13,17 +13,19 @@
  * caller could also choose the merchant, the currency or the expiry would be a demo of a form, not of a
  * mandate.
  *
- * ## One buyer per browser, not one per request
+ * ## Whose mandate it is (D-060)
  *
- * The session cookie is read first and handed to `provisionAgentSession` as `userId`, so a second turn (or a
- * reload, or a second mandate with a different cap) is the **same buyer** with a new mandate — not a new
- * stranger. `lib/session.ts` owns the cookie; this route only decides whose it is.
+ * The session decides, and the body does not get a vote. `requireBuyer` reads the cookie, re-reads the
+ * `users` row and answers `401` for an anonymous caller or `403` for a merchant; the id it returns is the
+ * one handed to the provisioner. There is no longer a path here that mints a buyer — the previous version
+ * created a fresh `usr_…` for a request with no cookie, which is how a browser held an identity nobody had
+ * authenticated for.
  *
  * ## Refusals
  *
  * `COUNTERSIGN_AGENT_DEMO=1` and a non-production `NODE_ENV` are required. Without them this answers 403
  * with a sentence, the same way the signing lab does — sample identities must never be issuable by a
- * deployed application.
+ * deployed application. That gate is now the *second* lock on this door; the first is a real account.
  */
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -32,7 +34,7 @@ import { csError, formatMoney, money, toBody } from '@countersign/core'
 import { readbackSummaryLine } from '@countersign/agent'
 
 import { agentDemoAllowed, provisionAgentSession } from '@/lib/agent-session'
-import { currentUserId, rememberUser } from '@/lib/session'
+import { requireBuyer } from '@/lib/auth'
 
 /** §8.0's "bound every wire input": a cap of 10,000,000.00 is $10M, far past any demo sentence. */
 const MAX_CAP_MINOR = 1_000_000_000n
@@ -100,17 +102,20 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
-  // The cookie decides whether this is a returning buyer. A session that names a row which no longer
-  // exists is refused by the provisioner rather than quietly replaced by a stranger.
-  const session = await currentUserId()
-  if (!session.ok) {
-    return NextResponse.json(toBody(session.error), { status: 503 })
+  // The cookie decides whose mandate this is, and the row behind it decides whether it may be one
+  // (D-060). A session that names a row which no longer exists is `currentUser`'s "not signed in", so it
+  // lands on the 401 below rather than minting a stranger.
+  const buyer = await requireBuyer()
+  if (!buyer.ok) {
+    return NextResponse.json(toBody(buyer.error), {
+      status: buyer.error.code === 'CS_UNAUTHENTICATED' ? 401 : 403,
+    })
   }
 
   const provisioned = await provisionAgentSession({
     intent: parsed.data.intent,
     capMinor,
-    userId: session.value,
+    userId: buyer.value.id,
   })
   if (!provisioned.ok) {
     return NextResponse.json(toBody(provisioned.error), {
@@ -121,11 +126,6 @@ export async function POST(request: Request): Promise<Response> {
             ? 404
             : 503,
     })
-  }
-
-  const remembered = await rememberUser({ userId: provisioned.value.userId })
-  if (!remembered.ok) {
-    return NextResponse.json(toBody(remembered.error), { status: 503 })
   }
 
   return NextResponse.json({

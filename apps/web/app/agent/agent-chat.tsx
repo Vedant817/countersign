@@ -29,6 +29,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { formatMoney, isCurrency, money } from '@countersign/core'
 
+import { SignOutButton } from '../disputes/logout-button'
+
 interface SessionView {
   user_id: string
   mandate_id: string
@@ -113,7 +115,7 @@ function amountLabel(minor: string, currency: string | null): string {
   return minor
 }
 
-export function AgentChat() {
+export function AgentChat({ displayName, email }: { displayName: string; email: string }) {
   const [intent, setIntent] = useState('Buy running shoes under $50')
   const [capMinor, setCapMinor] = useState('5000')
   const [session, setSession] = useState<SessionView | null>(null)
@@ -246,7 +248,17 @@ export function AgentChat() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-10">
       <header>
-        <p className="font-mono text-xs uppercase tracking-widest text-signed">S-10 · Agent chat</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <p className="font-mono text-xs uppercase tracking-widest text-signed">
+            S-10 · Agent chat
+          </p>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-xs text-ink-faint">
+              {displayName} · {email}
+            </span>
+            <SignOutButton to="/buyer-login" />
+          </div>
+        </div>
         <h1 className="mt-4 text-3xl font-semibold tracking-tight sm:text-4xl">
           Ask the agent to buy something. Watch what stops it.
         </h1>

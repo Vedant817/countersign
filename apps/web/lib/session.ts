@@ -31,7 +31,17 @@ import 'server-only'
 import { getIronSession, type IronSession } from 'iron-session'
 import { cookies } from 'next/headers'
 
-import { csError, err, ok, type CsError, type Result, type UserId } from '@countersign/core'
+import {
+  csError,
+  err,
+  ok,
+  type AgentId,
+  type CsError,
+  type MandateId,
+  type Result,
+  type UserId,
+} from '@countersign/core'
+import { findMandatesByUser } from '@countersign/db'
 
 /** Short, product-named, and not a vendor name: the value is ciphertext, not an identifier anyone reads. */
 export const SESSION_COOKIE = 'cs_session'
@@ -166,14 +176,19 @@ export async function currentUserId(
 }
 
 /**
- * Bind this session to a user.
+ * Bind this session to a user without a password check.
  *
- * Called once, right after a user row is created or resolved, so the *next* request is that user's and not a
- * new stranger. Returns the session it wrote so a caller can carry on with it in the same request.
+ * ## Why this is not on the sign-in path any more (D-060)
  *
- * A session minted this way is a sign-in: it gets a `loginAtSec` anchor, and the absolute-lifetime check in
- * `lib/auth.ts` reads it. A session that has no anchor is not a sign-in, which is what lets a pre-D-059
- * cookie and a forged one both fail closed rather than being treated as an old but valid login.
+ * `rememberUser` writes a session for a `users.id` with no credential behind it. It was written for
+ * `/api/agent/session`, which minted a buyer on the spot and then bound the browser to it — so the cookie
+ * said "signed in" for an account nobody had authenticated for. That call site is gone: `startSession` is
+ * the only thing a password sign-in writes.
+ *
+ * It stays exported, and tested, because it is the honest primitive underneath `startSession` — the write
+ * without the rotation, which is what a future non-password sign-in (a passkey, an OAuth round trip) will
+ * need once it has verified something. It is deliberately **not** what any route calls today, and a grep for
+ * it is the check that a new caller has to justify.
  */
 export async function rememberUser(
   input: { userId: UserId },
@@ -218,23 +233,28 @@ export async function startSession(
 }
 
 /**
- * The per-user rule for an agent run (audit §4).
+ * The per-user rule for an agent run (audit §4, D-060).
  *
- * A run spends a mandate, and a mandate id in a request body is a handle to a budget — so when this browser has
- * a session, the run belongs to that buyer and to no other. A body naming a different user is refused **before**
- * the mandate is read.
+ * A run spends a mandate, and a mandate id in a request body is a handle to a budget — so the run belongs
+ * to the signed-in buyer and to nobody else. **There is no anonymous branch any more.** D-057 allowed one
+ * because the demo gate (`COUNTERSIGN_AGENT_DEMO=1` plus a non-production `NODE_ENV`) was thought to be the
+ * lock on the door; it is not, because the gate is a process-wide flag rather than a per-request identity,
+ * and the acceptance script's plain `fetch` was never a reason to leave a hole in the product's rule.
  *
- * An anonymous request is allowed through, and that is deliberate rather than an oversight: the agent demo is
- * already gated on `COUNTERSIGN_AGENT_DEMO=1` plus a non-production `NODE_ENV` (`agentDemoAllowed()`), and the
- * acceptance script drives the run route with plain `fetch` and no cookie jar. What this guard removes is the
- * hole that mattered — one browser acting as another user — not the demo's own single-user surface. On a
- * deployment with real accounts, the `session === undefined` branch is where a login requirement goes.
+ * The route now derives the buyer from the session and this function only compares; the `requestedUserId`
+ * is what the caller claimed, and the answer is the same `403` whether it names a stranger or nothing.
  */
 export function guardRunUser(
   sessionUserId: UserId | undefined,
   requestedUserId: string,
 ): Result<true, CsError> {
-  if (sessionUserId === undefined) return ok(true)
+  if (sessionUserId === undefined) {
+    return err(
+      csError('CS_UNAUTHENTICATED', 'A buyer sign-in is required to run the agent.', undefined, {
+        userMessage: 'Sign in as the buyer first.',
+      }),
+    )
+  }
   if (sessionUserId === (requestedUserId as UserId)) return ok(true)
   return err(
     csError(
@@ -244,6 +264,67 @@ export function guardRunUser(
       { userMessage: 'That mandate does not belong to this browser.' },
     ),
   )
+}
+
+/**
+ * The mandate-ownership rule for an agent run (D-060).
+ *
+ * Comparing the body's `user_id` to the cookie is not enough: the body also carries a `mandate_id`, and a
+ * mandate is what holds the money. A buyer who names their own id and another buyer's mandate id would
+ * pass `guardRunUser` and then spend someone else's budget, so the mandate is checked against the buyer's
+ * own rows before anything is minted.
+ *
+ * The answer is `CS_NOT_FOUND` rather than `CS_FORBIDDEN`, deliberately: a mandate id that exists under
+ * another buyer and one that never existed are the same fact to a caller who does not own it, and a
+ * `403` would confirm the id is real.
+ */
+export async function requireOwnedMandate(
+  userId: UserId,
+  mandateId: string,
+): Promise<Result<{ readonly id: MandateId }, CsError>> {
+  const owned = await findMandatesByUser(userId as string)
+  if (!owned.ok) return owned
+  const match = owned.value.find((row) => row.id === mandateId)
+  if (match === undefined) {
+    return err(
+      csError(
+        'CS_NOT_FOUND',
+        `No mandate ${mandateId} belongs to ${userId}.`,
+        { mandate_id: mandateId },
+        { userMessage: 'That mandate does not belong to this account.' },
+      ),
+    )
+  }
+  return ok({ id: match.id as MandateId })
+}
+
+/**
+ * The agent id on a mandate, or the refusal that says it is not this buyer's.
+ *
+ * The run route mints a bearer for `agent_id` before it ever loads the mandate, so the agent has to be
+ * checked against the same ownership rule rather than trusted from the body: a bearer minted for another
+ * buyer's agent key is a credential for a key this buyer does not hold. The check is "does this buyer have
+ * a mandate under that agent" rather than a lookup of the agent row, because `agents` has no owner column
+ * the session could be compared to without a second query — the mandate is the ownership record.
+ */
+export async function requireOwnedAgent(
+  userId: UserId,
+  agentId: string,
+): Promise<Result<{ readonly id: AgentId }, CsError>> {
+  const owned = await findMandatesByUser(userId as string)
+  if (!owned.ok) return owned
+  const match = owned.value.find((row) => row.agent_id === agentId)
+  if (match === undefined) {
+    return err(
+      csError(
+        'CS_NOT_FOUND',
+        `No agent ${agentId} belongs to ${userId}.`,
+        { agent_id: agentId },
+        { userMessage: 'That agent does not belong to this account.' },
+      ),
+    )
+  }
+  return ok({ id: match.agent_id as AgentId })
 }
 
 /** Drop the session. The cookie is cleared by iron-session; the rows are not touched. */
