@@ -11,7 +11,10 @@
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 
+import { HTTP_STATUS_BY_ERROR_CODE, toBody } from '@countersign/core'
+
 import { agentDemoAllowed } from '@/lib/agent-session'
+import { requireMerchant } from '@/lib/auth'
 import { demoCasePdf, type DefenderCaseId } from '@/lib/defender-demo'
 
 const CASE_IDS: readonly DefenderCaseId[] = ['unauthorised', 'agent-fault']
@@ -29,6 +32,15 @@ export async function GET(request: Request): Promise<NextResponse> {
       },
       { status: 403 },
     )
+  }
+  // The path is `/api/disputes/*`, and the rule for that path is the merchant role (D-059). The demo gate
+  // above is a second lock: it closes the fixture path on a deployment, and this closes it to a non-merchant
+  // on a demo. A judge running the demo signs in as the merchant first.
+  const merchant = await requireMerchant()
+  if (!merchant.ok) {
+    return NextResponse.json(toBody(merchant.error), {
+      status: HTTP_STATUS_BY_ERROR_CODE[merchant.error.code],
+    })
   }
   const caseParam = new URL(request.url).searchParams.get('case') ?? ''
   if (!isCaseId(caseParam)) {

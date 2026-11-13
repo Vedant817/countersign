@@ -24,18 +24,11 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import {
-  csError,
-  HTTP_STATUS_BY_ERROR_CODE,
-  toBody,
-  type CsError,
-  type UserId,
-} from '@countersign/core'
-import { findUserById } from '@countersign/db'
+import { csError, HTTP_STATUS_BY_ERROR_CODE, toBody, type CsError } from '@countersign/core'
 
 import { decideDispute } from '@/lib/dispute-approval'
+import { requireMerchant } from '@/lib/auth'
 import { requireSameOrigin } from '@/lib/same-origin'
-import { currentUserId } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
 
@@ -100,48 +93,20 @@ export async function POST(request: Request, context: DecisionRouteContext): Pro
     )
   }
 
-  // --- authorisation: the existing session, and nothing else ---------------------------------------
-  // A session is a pointer to a row, not a cache of authority (`lib/session.ts`). So the id is read here
-  // and the *row* is read next: a cookie naming a user that no longer exists is not permission, and a
-  // cookie that could not be decrypted is "not signed in", not a server fault.
-  const session = await currentUserId()
-  if (!session.ok) return NextResponse.json(toBody(session.error), { status: 503 })
-  if (session.value === undefined) {
-    return NextResponse.json(
-      toBody(
-        csError(
-          'CS_UNAUTHENTICATED',
-          'Approving a dispute needs a signed-in merchant.',
-          undefined,
-          { userMessage: 'Sign in before approving or declining a dispute.' },
-        ),
-      ),
-      { status: 401 },
-    )
-  }
-
-  const user = await findUserById(session.value)
-  if (!user.ok) return NextResponse.json(toBody(user.error), { status: statusFor(user.error) })
-  if (user.value === undefined) {
-    return NextResponse.json(
-      toBody(
-        csError(
-          'CS_UNAUTHENTICATED',
-          `The session names ${session.value as string}, which has no users row.`,
-          undefined,
-          {
-            userMessage: 'Your session refers to an account that no longer exists. Sign in again.',
-          },
-        ),
-      ),
-      { status: 401 },
-    )
+  // --- authorisation: the merchant role, read from the row -------------------------------------------
+  // A session is a pointer to a row, not a cache of authority (`lib/session.ts`), and the persona on that
+  // row is what this route checks (`lib/auth.ts`). So a cookie naming a user that no longer exists is not
+  // permission, a buyer session is a 403 rather than a silent pass, and a cookie that could not be
+  // decrypted is "not signed in" (401) rather than a server fault.
+  const merchant = await requireMerchant()
+  if (!merchant.ok) {
+    return NextResponse.json(toBody(merchant.error), { status: statusFor(merchant.error) })
   }
 
   const outcome = await decideDispute({
     disputeId: id,
     decision: parsed.data.decision,
-    actorUserId: session.value as UserId,
+    actorUserId: merchant.value.id,
     ...(parsed.data.note === undefined ? {} : { note: parsed.data.note }),
   })
   if (!outcome.ok) {

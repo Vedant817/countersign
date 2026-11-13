@@ -14,16 +14,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { csError, err, ok } from '@countersign/core'
-import type * as DbModule from '@countersign/db'
 
-const session = vi.hoisted(() => ({ currentUserId: vi.fn() }))
-vi.mock('@/lib/session', () => ({ currentUserId: session.currentUserId }))
-
-const db = vi.hoisted(() => ({ findUserById: vi.fn() }))
-vi.mock('@countersign/db', async (importOriginal) => ({
-  ...(await importOriginal<typeof DbModule>()),
-  ...db,
-}))
+const auth = vi.hoisted(() => ({ requireMerchant: vi.fn() }))
+vi.mock('@/lib/auth', () => ({ requireMerchant: auth.requireMerchant }))
 
 const approval = vi.hoisted(() => ({ decideDispute: vi.fn() }))
 vi.mock('@/lib/dispute-approval', () => ({ decideDispute: approval.decideDispute }))
@@ -69,8 +62,14 @@ async function read(response: Response): Promise<{
 
 beforeEach(() => {
   vi.clearAllMocks()
-  session.currentUserId.mockResolvedValue(ok('usr_merchant'))
-  db.findUserById.mockResolvedValue(ok({ id: 'usr_merchant' }))
+  auth.requireMerchant.mockResolvedValue(
+    ok({
+      id: 'usr_merchant',
+      persona: 'MERCHANT',
+      displayName: 'Northwind',
+      email: 'm@example.test',
+    }),
+  )
   approval.decideDispute.mockResolvedValue(ok(OUTCOME))
 })
 
@@ -98,16 +97,36 @@ describe('POST /api/disputes/[id]/decision', () => {
   })
 
   it('refuses an anonymous caller with 401 before any decision is attempted', async () => {
-    session.currentUserId.mockResolvedValue(ok(undefined))
+    auth.requireMerchant.mockResolvedValue(
+      err(csError('CS_UNAUTHENTICATED', 'A merchant sign-in is required for this route.')),
+    )
     const response = await POST(req({ decision: 'approve' }), CONTEXT)
     const { status, body } = await read(response)
     expect(status).toBe(401)
     expect(body.error?.code).toBe('CS_UNAUTHENTICATED')
+    expect(approval.decideDispute).not.toHaveBeenCalled()
+  })
+
+  it('refuses a signed-in buyer with 403, so a non-merchant cannot decide a case', async () => {
+    auth.requireMerchant.mockResolvedValue(
+      err(
+        csError(
+          'CS_FORBIDDEN',
+          'The signed-in account is a BUYER, and disputes belong to the merchant.',
+        ),
+      ),
+    )
+    const response = await POST(req({ decision: 'approve' }), CONTEXT)
+    const { status, body } = await read(response)
+    expect(status).toBe(403)
+    expect(body.error?.code).toBe('CS_FORBIDDEN')
     expect(approval.decideDispute).not.toHaveBeenCalled()
   })
 
   it('refuses a session whose user row no longer exists with 401, not a server fault', async () => {
-    db.findUserById.mockResolvedValue(ok(undefined))
+    auth.requireMerchant.mockResolvedValue(
+      err(csError('CS_UNAUTHENTICATED', 'The session names a user with no row.')),
+    )
     const response = await POST(req({ decision: 'approve' }), CONTEXT)
     const { status, body } = await read(response)
     expect(status).toBe(401)
@@ -115,12 +134,13 @@ describe('POST /api/disputes/[id]/decision', () => {
     expect(approval.decideDispute).not.toHaveBeenCalled()
   })
 
-  it('answers 503 when the session itself cannot be read', async () => {
-    session.currentUserId.mockResolvedValue(
-      err(csError('CS_INTERNAL', 'SESSION_SECRET is missing')),
-    )
+  it('answers 500 when the session itself cannot be read, rather than treating it as anonymous', async () => {
+    // A signing secret that is missing or too short is a deployment fault. The old route answered 503; the
+    // registry's status for CS_INTERNAL is 500 and every other route uses it, so the login path is not a
+    // special case that hides a misconfiguration behind a different number.
+    auth.requireMerchant.mockResolvedValue(err(csError('CS_INTERNAL', 'SESSION_SECRET is missing')))
     const response = await POST(req({ decision: 'approve' }), CONTEXT)
-    expect((await read(response)).status).toBe(503)
+    expect((await read(response)).status).toBe(500)
   })
 
   it('refuses a body that is not JSON with 400', async () => {

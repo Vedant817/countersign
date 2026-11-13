@@ -13,7 +13,16 @@
 import { expect, test, type Page } from '@playwright/test'
 import { eq, inArray } from 'drizzle-orm'
 
-import { auditLog, db, disputeActions, disputes, evidencePackets } from '@countersign/db'
+import {
+  auditLog,
+  db,
+  disputeActions,
+  disputes,
+  evidencePackets,
+  hashPassword,
+  MERCHANT,
+  setPasswordHash,
+} from '@countersign/db'
 
 // Playwright runs test files in a process whose environment is not the webServer's; the app's `db()` reads
 // `DATABASE_URL` lazily, so setting it here is enough for the test's own connection. Built the same way
@@ -24,6 +33,22 @@ localDatabase.password = 'countersign'
 process.env['DATABASE_URL'] ??= localDatabase.href
 
 const NOW = new Date('2026-11-13T09:00:00.000Z')
+
+/**
+ * The merchant's password, set straight into the row this test owns.
+ *
+ * The web server reads `users.password_hash`; the seed only writes one when `MERCHANT_PASSWORD` is in its
+ * environment. The browser test does not control the seed, so it sets the hash on the seeded merchant row
+ * itself (the real `hashPassword` and the real repository) and then signs in through the real route. That
+ * is the same row a production seed would have configured, not a bypass: the login still verifies a scrypt
+ * hash and mints a real cookie.
+ */
+const MERCHANT_EMAIL = 'merchant.northwind@example.com'
+const MERCHANT_PASSWORD = 'e2e-merchant-password'
+
+async function ensureMerchantPassword(): Promise<void> {
+  await setPasswordHash(MERCHANT.id, await hashPassword(MERCHANT_PASSWORD))
+}
 
 interface Seed {
   readonly id: string
@@ -74,17 +99,17 @@ async function removeDispute(seed: Seed): Promise<void> {
   await db().delete(disputes).where(eq(disputes.id, seed.id))
 }
 
-/** A signed-in caller. The only session this app mints today is the buyer persona, which is enough for a
- * decline on an unlinked dispute: separation of duty only refuses the buyer named on the order. */
+/** Sign in as the merchant through the real login route, then prove the session is the merchant's. */
 async function signIn(page: Page): Promise<void> {
-  const response = await page.request.post('/api/agent/session', {
-    data: { intent: 'Buy the cheapest trail shoes you can find, under 150', cap_minor: '5000' },
+  await ensureMerchantPassword()
+  const response = await page.request.post('/api/auth/login', {
+    data: { email: MERCHANT_EMAIL, password: MERCHANT_PASSWORD, next: '/disputes' },
   })
   expect(response.status(), await response.text()).toBe(200)
 }
 
 test.describe('the dispute approval surface', () => {
-  test('a signed-in caller reads the stored verdict and can decline, and the decline is audited', async ({
+  test('a signed-in merchant reads the stored verdict and can decline, and the decline is audited', async ({
     page,
   }) => {
     const seed = await seedDispute('AWAITING_MERCHANT_APPROVAL')
@@ -112,10 +137,58 @@ test.describe('the dispute approval surface', () => {
   test('a filed case offers no approval controls', async ({ page }) => {
     const seed = await seedDispute('FILED')
     try {
+      await signIn(page)
       await page.goto(`/disputes/${seed.id}`)
       await expect(page.getByText('nothing left to approve')).toBeVisible()
       await expect(page.getByRole('heading', { name: 'Your decision' })).toHaveCount(0)
       await expect(page.getByRole('button', { name: 'Approve and send to PayPal' })).toHaveCount(0)
+    } finally {
+      await removeDispute(seed)
+    }
+  })
+
+  test('an anonymous visitor is sent to the login page and sees no dispute', async ({ page }) => {
+    const seed = await seedDispute('AWAITING_MERCHANT_APPROVAL')
+    try {
+      await page.goto(`/disputes/${seed.id}`)
+      await expect(page).toHaveURL(/\/login\?next=/)
+      await expect(page.getByRole('heading', { name: 'Merchant sign in' })).toBeVisible()
+      await expect(page.getByText(seed.paypalId)).toHaveCount(0)
+    } finally {
+      await removeDispute(seed)
+    }
+  })
+
+  test('a signed-in buyer gets 403, because the queue is the merchant’s', async ({ page }) => {
+    const seed = await seedDispute('AWAITING_MERCHANT_APPROVAL')
+    try {
+      // The only buyer session this app mints is the demo persona's. It is a real session — which is the
+      // point: being signed in is not the same as being the merchant.
+      const buyer = await page.request.post('/api/agent/session', {
+        data: { intent: 'Buy the cheapest trail shoes you can find, under 150', cap_minor: '5000' },
+      })
+      expect(buyer.status(), await buyer.text()).toBe(200)
+
+      await page.goto(`/disputes/${seed.id}`)
+      await expect(page.getByText('This page is the merchant’s')).toBeVisible()
+      await expect(page.getByText(seed.paypalId)).toHaveCount(0)
+    } finally {
+      await removeDispute(seed)
+    }
+  })
+
+  test('the merchant can sign out, and the cookie no longer opens the queue', async ({ page }) => {
+    const seed = await seedDispute('AWAITING_MERCHANT_APPROVAL')
+    try {
+      await signIn(page)
+      await page.goto(`/disputes/${seed.id}`)
+      await expect(page.getByRole('heading', { name: seed.paypalId })).toBeVisible()
+
+      await page.getByRole('button', { name: 'Sign out' }).click()
+      await expect(page.getByRole('heading', { name: 'Merchant sign in' })).toBeVisible()
+
+      await page.goto('/disputes')
+      await expect(page).toHaveURL(/\/login\?next=/)
     } finally {
       await removeDispute(seed)
     }

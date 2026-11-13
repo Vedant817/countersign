@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
     // The Dispute Defender and Judge Mode stream progress over long requests; the default 10 s
     // proxy timeout would cut a 90 s scenario in half (spec §14 SLO).
     proxyTimeout: 120_000,
+    // `forbidden()` / `unauthorized()` are how the merchant pages answer a signed-in non-merchant with a
+    // real 403 (`lib/auth.ts`). Without this flag they throw an error no boundary catches.
+    authInterrupts: true,
   },
 
   /**

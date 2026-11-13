@@ -27,6 +27,7 @@ import { headers } from 'next/headers'
 
 import { formatIstHuman, formatMoney, money } from '@countersign/core'
 
+import { requireMerchantPage } from '@/lib/auth-page'
 import {
   DISPUTE_QUEUE_LIMIT,
   disputesUseDemoView,
@@ -35,6 +36,7 @@ import {
 } from '@/lib/dispute-queue'
 
 import { DemoDisputesView } from './demo-view'
+import { LogoutButton } from './logout-button'
 
 export const metadata: Metadata = {
   title: 'Disputes',
@@ -159,13 +161,27 @@ function QueueRow({ row }: { row: DisputeQueueRow }) {
 }
 
 export default async function DisputesPage() {
+  // The queue is the merchant's. This runs before either branch — the demo branch is a view of the same
+  // page, and a public path to it would be a public path to the fixtures too.
+  const merchant = await requireMerchantPage('/disputes')
+
   const demo = disputesUseDemoView()
   const base = demo ? await publicBaseUrl() : null
+
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="font-mono text-xs uppercase tracking-widest text-ink-faint">
+        {merchant.displayName} · {merchant.email}
+      </p>
+      <LogoutButton />
+    </div>
+  )
 
   if (demo && base !== null) {
     return (
       <div className="mx-auto max-w-4xl px-4 py-10 sm:py-16">
-        <p className="font-mono text-xs uppercase tracking-widest text-blocked">
+        {header}
+        <p className="mt-6 font-mono text-xs uppercase tracking-widest text-blocked">
           SIMULATED DISPUTES
         </p>
         <h1 className="mt-3 text-4xl font-semibold tracking-tight">The Dispute Defender</h1>
@@ -190,7 +206,8 @@ export default async function DisputesPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:py-16">
-      <h1 className="text-4xl font-semibold tracking-tight">Disputes</h1>
+      {header}
+      <h1 className="mt-6 text-4xl font-semibold tracking-tight">Disputes</h1>
       <p className="mt-4 text-lg text-ink-soft">
         Every PayPal dispute this deployment has ingested, most recently updated first. The verdict
         is the one the router stored when it ran; nothing on this page is re-derived from the row.

@@ -31,9 +31,11 @@ import { notFound } from 'next/navigation'
 
 import { formatIstHuman, formatMoney, money } from '@countersign/core'
 
+import { requireMerchantPage } from '@/lib/auth-page'
 import { loadDisputeDetail, type DisputeDetail } from '@/lib/dispute-detail'
 
 import { DecisionForm } from './decision-form'
+import { LogoutButton } from '../logout-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,6 +77,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default async function DisputeDetailPage({ params }: DisputePageContext) {
   const { id } = await params
+  // Same guard as the queue: the case page shows the evidence packet, the verdict and the approve button.
+  await requireMerchantPage(`/disputes/${id}`)
+
   const loaded = await loadDisputeDetail(id)
   // A read that failed is a fault, not an empty case: rendering "no such dispute" over a broken database
   // is the one answer that hides the outage (the same rule `/disputes` states for its queue).
@@ -97,11 +102,14 @@ export default async function DisputeDetailPage({ params }: DisputePageContext) 
 
       <div className="mt-4 flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="font-mono text-2xl font-semibold tracking-tight">{d.paypalDisputeId}</h1>
-        <span
-          className={`rounded-card border px-3 py-1 font-mono text-xs font-bold uppercase tracking-widest ${stateTone(d.defenseState)}`}
-        >
-          {d.defenseState}
-        </span>
+        <div className="flex items-center gap-3">
+          <span
+            className={`rounded-card border px-3 py-1 font-mono text-xs font-bold uppercase tracking-widest ${stateTone(d.defenseState)}`}
+          >
+            {d.defenseState}
+          </span>
+          <LogoutButton />
+        </div>
       </div>
       <p className="mt-2 text-sm text-ink-faint">
         Our row <span className="font-mono">{d.id}</span> · opened{' '}
