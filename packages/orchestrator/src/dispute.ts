@@ -26,10 +26,10 @@
  * decided and recorded why it declined to act. Collapsing those two would lose every refusal from the
  * merchant's dispute history, which is the artefact the whole product exists to produce.
  */
-import { csError, err, ok, type CsError, type Result } from '@countersign/core'
+import { csError, err, ok, type CsError, type Logger, type Result } from '@countersign/core'
 import type { PayPalClient } from '@countersign/paypal'
 
-import type { DefenderSeam, DefendOutcome, OrchestratorDeps } from './types'
+import type { DefenderSeam, DefendOutcome } from './types'
 
 /** Where the dispute id came from. Both callers converge on {@link ingestAndDefend}. */
 export interface DisputeSource {
@@ -40,14 +40,26 @@ export interface DisputeSource {
 /** The PayPal reads this function makes — a `Pick`, so the real client satisfies it structurally. */
 export type DisputePayPal = Pick<PayPalClient, 'getDispute'>
 
-export interface IngestAndDefendDeps extends OrchestratorDeps {
+/**
+ * The deps {@link ingestAndDefend} reaches — and exactly those.
+ *
+ * It used to `extends OrchestratorDeps`, which meant the worker process that runs §8.12's 2-minute
+ * dispute sweep needed the entire purchase stack (`compiler`, `gate`, `orders`, `budget`,
+ * `store`) wired just to satisfy members this function never reads. Narrowed to the Pick-style
+ * members the body uses, the same way {@link DisputePayPal} is a `Pick` of the client rather than
+ * the client. A caller that already has a full `OrchestratorDeps` still satisfies this
+ * structurally — narrowing a type can only widen its accepted values.
+ */
+export interface IngestAndDefendDeps {
   /** §10.2 row 13. `PayPalClient.getDispute`, with an injected `fetchImpl` in tests. */
   readonly paypal: DisputePayPal
-  /** §8.15. Reached through {@link OrchestratorDeps.defender}; absent means this path is unavailable. */
+  /** §8.15. The two Defender calls, plus the whole `DefenderDeps` as `fileDispute` needs it. */
   readonly defender: DefenderSeam & {
     /** The whole `DefenderDeps`, which `fileDispute` extends with its optional model port. */
     readonly deps: Parameters<DefenderSeam['file']>[1]
   }
+  /** Optional. Never for content — the Defender's composed copy still comes from the router. */
+  readonly logger?: Logger
 }
 
 /**
