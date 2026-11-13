@@ -150,7 +150,7 @@ refused as a derivation role). `pnpm vi:lint` → `All checks passed!`.
 
 ---
 
-## 4. P1 - there is no real buyer account, so nothing can be captured (**identity half FIXED 2026-11-13**)
+## 4. P1 - there is no real buyer account, so nothing can be captured (**account + isolation FIXED 2026-11-13**)
 
 **Where.** `apps/web/lib/agent-session.ts` provisioned a **new user per request** (`newId('usr')`,
 `demo.buyer.<id>@example.test`), with `payment_token_id: DEMO-NOT-A-VAULT-TOKEN-…`.
@@ -159,32 +159,64 @@ refused as a derivation role). `pnpm vi:lint` → `All checks passed!`.
 call, so two turns in one browser were two strangers and a reload was a third. `iron-session` and
 `SESSION_SECRET` were validated at boot and never read.
 
-**Fixed 2026-11-13 (identity).** `apps/web/lib/session.ts` owns the cookie (`cs_session`, `SESSION_SECRET`
-refused below 32 characters, `httpOnly`, `sameSite: 'lax'`, `Secure` in production, 7-day ttl). It carries the
-user id **and nothing else** — every other fact is re-read from `users`, so revoking a row takes effect on the next
-request instead of at cookie expiry. `/api/agent/session` reads the cookie, passes it to
-`provisionAgentSession({ userId })`, and calls `rememberUser`; `/api/agent/run` refuses a body that names another
-browser's buyer **before the mandate is read** (`guardRunUser` → 403).
+**Fixed 2026-11-13 (identity, first pass).** `apps/web/lib/session.ts` owns the cookie (`cs_session`,
+`SESSION_SECRET` refused below 32 characters, `httpOnly`, `sameSite: 'lax'`, `Secure` in production, 7-day ttl). It
+carries the user id **and nothing else** — every other fact is re-read from `users`, so revoking a row takes effect
+on the next request instead of at cookie expiry.
 
-A returning browser keeps its user row and its wallet row — `paypal_wallets_payment_token_id_key` is UNIQUE and
+**Fixed 2026-11-13 (real accounts, D-060).** The identity is now an **account a person created**, not a row the
+provisioner minted:
+
+- `/signup` (email + password, 10-character floor) and `/buyer-login` reuse the D-059 machinery — one `users`
+  table, one `crypto.scrypt` hash, one `cs_session` cookie with the same `loginAtSec` anchor and 12-hour absolute
+  lifetime, one 5-per-15-minute limiter, one same-origin guard. There is no second auth system.
+- `users.email` is **UNIQUE** (`packages/db/drizzle/0006_users_email_unique.sql`); a duplicate sign-up answers the
+  same generic `401` as a wrong password, so the form is not a directory of accounts.
+- `provisionAgentSession` **no longer mints a user**. It requires the id of an existing `BUYER` row and refuses
+  anything else (`CS_NOT_FOUND` for a stale cookie, `CS_FORBIDDEN` for a merchant or judge). `/api/agent/session`
+  requires a signed-in buyer (`requireBuyer`: 401 anonymous, 403 wrong persona) before it provisions anything.
+- `/api/agent/run` derives the buyer from the session. `guardRunUser` has no anonymous branch, and the named
+  `mandate_id` and `agent_id` are checked against that buyer's own mandates (`requireOwnedMandate` /
+  `requireOwnedAgent`) **before** a bearer is minted — another buyer's ids answer `404`, so a caller who does not
+  own a mandate does not learn that it is real.
+- The merchant's dispute surfaces are unchanged: `requireMerchant` (401 anonymous / 403 buyer) still guards them,
+  and a merchant session is refused on `/agent` (403).
+- `rememberUser` is no longer on any sign-in path (a grep for it is the check a future caller has to justify); it
+  stays as the tested session primitive under `startSession`.
+
+A returning buyer keeps its user row and its wallet row — `paypal_wallets_payment_token_id_key` is UNIQUE and
 the demo's placeholder token is derived from the user id, so a second insert is a unique violation rather than a
 second instrument. The mandate, the device key and the agent key stay **per call**: `demo-device.ts` mints a fresh
 P-256 key each time and never persists the private half, so a stored device row could not sign a second L2, and
 `l1_credentials` is UNIQUE (device_id, wallet_id) — a new device beside the reused wallet is exactly the row that
-constraint expects.
+constraint expects. The wallet's `payer_email` is now the buyer's real address rather than
+`demo.buyer.<id>@example.test`.
 
-**Verified:** `apps/web/lib/session.test.ts` (11 tests: round-trip, forged cookie is anonymous rather than an
-error, missing/short secret refuses, forget, cookie flags, the run-user rule); `apps/web/tests/e2e/session.spec.ts`
-(3 browser tests: one browser keeps one buyer across two mandates, two browsers are two buyers, a run cannot claim
-another browser's buyer). **Falsified three ways:** dropping the 32-character floor fails the secret test; removing
-`guardRunUser` from the run route turns the third e2e test's 403 into a 200; creating a second wallet for a
-returning buyer fails the first e2e test on `paypal_wallets_payment_token_id_key`.
+**Verified:** `apps/web/lib/auth.test.ts` (29 tests: `currentUser`, `authenticate`, `requireMerchant`,
+`requireBuyer`, `normalizeEmail`, `registerBuyer`); `apps/web/lib/session.test.ts` (13); `apps/web/lib/mandate-ownership.test.ts`
+(6: the rule, and `CS_NOT_FOUND` rather than `CS_FORBIDDEN` for a mandate another buyer owns);
+`apps/web/app/api/auth/{signup,buyer-login}/route.test.ts` (15: guard order, generic duplicate refusal, 429 +
+`Retry-A`, cross-origin 403, rotation, shared limiter bucket); `apps/web/app/api/agent/{session,run}/route.test.ts`
+(12: 401 anonymous, 403 merchant, 404 for another buyer's mandate/agent, a bearer minted only for an owned agent);
+`packages/db/test/repos.users.live.test.ts` (5, live `users_email_key`) and
+`packages/db/test/repos.mandate-ownership.live.test.ts` (4, the buyer-scoped mandate select);
+`apps/web/tests/e2e/buyer-account.spec.ts` (7 browser tests: sign-up → sign-in → mandate → sign-out, one buyer
+across two mandates, a duplicate address refused, buyer B refused buyer A's id **and** mandate, anonymous 401,
+a merchant 403 on the buyer surface); `agent-chat.spec.ts` signs up before it runs. The demo `session.spec.ts` is
+gone with the demo buyer.
+
+**Falsified, live:** a second `users` row on the same address came back `CS_VALIDATION` with no `pgCode` before the
+fix — because drizzle wraps the driver error and only `cause.code` was read. That is fixed in
+`packages/db/src/repos/index.ts` (`findPgError` walks the `cause` chain, and `constraint_name` is read as well as
+`constraint`), with a regression test in `packages/db/test/schema.test.ts`. Without it the UNIQUE index was
+enforced by the database while the app reported a generic validation error — the money-safe outcome, but the wrong
+diagnosis for the operator.
 
 **Still blocked on** HUMAN_TODO 1a (Vault + buyer credentials) for the money half. The code path that needs it is
 `packages/orders/src/create.ts:305` `payment_source: { paypal: { vault_id: draft.wallet.vaultId } }` — complete and
 tested, unreachable because no wallet ever holds a real `vault_id`. `agentDemoAllowed()` still gates the whole
 surface behind `COUNTERSIGN_AGENT_DEMO=1` plus a non-production `NODE_ENV`, so a deployed application does not
-serve demo identities; a real login is what replaces that gate when real accounts land.
+serve mandate provisioning at all; the account in front of it is now real.
 
 ---
 
@@ -376,9 +408,15 @@ soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/`
    unit/live (password hash, user lookup, auth decision, rate limit, rotation/expiry, login/logout
    routes) and the full 25-test Playwright suite (sign in and decline, filed case, anonymous redirect,
    buyer 403, sign out).
-   **Still open in item 6:** buyer accounts are still the demo persona minted by `/api/agent/session`
-   (behind `COUNTERSIGN_AGENT_DEMO=1`), and "scoped to its own disputes" is `persona === 'MERCHANT'`
-   because `orders` has no `merchant_id` column. The money half remains blocked on HUMAN_TODO 1a/2.
+   ✅ **buyer accounts done 2026-11-13 (D-060)** — `/signup` (email + password, 10-character floor) and
+   `/buyer-login` create and verify real buyer rows with the same scrypt/cookie/anchor/limiter/same-origin
+   machinery as the merchant; `users.email` is UNIQUE and a duplicate answers the generic `401`.
+   `provisionAgentSession` no longer mints a user (it requires an existing `BUYER` row), `/api/agent/session`
+   requires a signed-in buyer, and `/api/agent/run` derives the buyer from the session and checks the named
+   `mandate_id` and `agent_id` against that buyer's own mandates before minting a bearer. Another buyer's ids
+   answer 404, an anonymous caller 401, a merchant on the buyer surface 403.
+   **Still open in item 6:** "scoped to its own disputes" is `persona === 'MERCHANT'` because `orders`
+   has no `merchant_id` column. The money half remains blocked on HUMAN_TODO 1a/2.
 7. **[P1]** PayPal authorize → capture → refund → void wired to the app, each verified against the
    sandbox by command output in this thread.
 8. **[P1]** Disputes API ingest + provide-evidence wired to the app, replacing the fixture page.

@@ -1735,3 +1735,48 @@ pretence that the check is per-merchant.
 `apps/web/app/api/disputes/[id]/decision/route.test.ts` (buyer 403),
 `apps/web/tests/e2e/dispute-decision.spec.ts` (5 browser tests: sign in and decline, filed case, anonymous
 redirect, buyer 403, sign out); live-DB `packages/db/test/repos.users.live.test.ts` (3).
+
+## D-060 - A buyer account is a row the buyer created, and identity on a buyer surface comes from the session
+
+**Date:** 2026-11-13
+**Decision:** A buyer signs up at `/signup` (email + password, minimum 10 characters) and signs in at
+`/buyer-login`, using the same `crypto.scrypt` hash (`packages/db/src/password.ts`), the same encrypted
+`cs_session` cookie, the same `loginAtSec` anchor + 12-hour absolute lifetime, the same 5-per-15-minutes
+login limiter and the same same-origin guard as the merchant (D-059). Nothing builds a second auth system:
+`lib/auth.ts` gains `SIGNUP_MIN_PASSWORD`, `normalizeEmail` and `registerBuyer`, and `authenticate` already
+answered for any persona. `users.email` gains a UNIQUE index (`0006_users_email_unique.sql`), so "one
+account per address" is the database's rule rather than a check-then-insert race. Sign-up answers the same
+generic `401` whether the address is taken or not, so the form is not a directory of who has an account.
+
+**No session without credentials.** `provisionAgentSession` no longer mints a user. It requires a `userId`
+that already exists, and the only route that calls it (`POST /api/agent/session`) requires a signed-in
+`BUYER` (`requireBuyer` → 401 anonymous, 403 wrong persona). The `COUNTERSIGN_AGENT_DEMO=1` gate stays on
+top: a demo deployment is still not a production one, but the demo can no longer hand out an identity.
+`rememberUser` is gone from the provisioning path (a password sign-in is the only thing that writes a
+session now); the function is kept only as the tested session primitive it always was.
+
+**Ownership is read from the row, never the body.** `guardRunUser` no longer has an anonymous branch: the
+run route derives `user_id` from the session and refuses a body that names anyone else, and it checks the
+named `mandate_id` actually belongs to that buyer (`findMandatesByUser`) before a token is minted or a
+signer is built. Cross-user access answers `403` with a sentence; an unknown id answers `404`.
+
+**Reason:** The blueprint's demo personas were the only buyer identity, and `/api/agent/session` minted a
+fresh `usr_...` for any caller that asked - so "scoped to the signed-in buyer" was a property of one
+browser's cookie rather than of an account. `POST /api/agent/run` took `user_id` **and** `mandate_id` from
+the request body, so a caller who guessed another buyer's mandate id could spend that buyer's budget; the
+old `guardRunUser` compared the body's user id to the cookie and then allowed the anonymous case through
+(D-057), which is the hole this closes. Keeping one `users` table with a `persona` label (rather than a
+`buyers` table) is what makes one session type, one rate limiter and one cookie policy possible; the
+persona is re-read from the row on every request, so editing a row changes what it may do immediately.
+The demo gate is **not** removed: vi-service, the demo device key and the sandbox order path are still
+demo-only, and a production deployment serves no mandate provisioning at all.
+
+**Evidence:** `packages/db/src/repos/users.ts` (`findUserById`), `packages/db/drizzle/0006_users_email_unique.sql`;
+`apps/web/lib/auth.ts` (`registerBuyer`, `requireBuyer`, `normalizeEmail`, `SIGNUP_MIN_PASSWORD`),
+`apps/web/lib/auth.test.ts`, `apps/web/lib/agent-session.ts` (`provisionAgentSession` requires a buyer),
+`apps/web/app/api/auth/{signup,buyer-login}/route.ts`, `apps/web/app/{signup,buyer-login}/page.tsx`,
+`apps/web/app/api/agent/session/route.ts` (`requireBuyer`), `apps/web/app/api/agent/run/route.ts`
+(session-derived `user_id` + mandate ownership), `apps/web/tests/e2e/buyer-account.spec.ts`
+(sign-up -> sign-in -> mandate -> sign-out, and buyer B refused buyer A's mandate),
+`apps/web/tests/e2e/session.spec.ts` (replaced: the demo buyer is gone),
+`packages/db/test/repos.users.live.test.ts` (live UNIQUE email).
