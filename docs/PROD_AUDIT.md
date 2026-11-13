@@ -360,9 +360,16 @@ Verified by: `packages/db/test/repos.worker.live.test.ts` (6 tests against a rea
    reads `disputes` through `listDisputesForReview` and shows the **stored** verdict (`liability`,
    `router_trace.ruleId`) with an explicit "not assessed yet" when the router has not run. The fixtures moved
    behind `COUNTERSIGN_AGENT_DEMO=1` **and** `NODE_ENV !== 'production'`, so `next start` cannot serve them.
-   **Still open:** nothing calls `orchestrator.ingestAndDefend`, so a real dispute is stored and ranked by the
-   reconciler but never routed or filed — `liability` stays `null` until that is wired, and this page says so
-   rather than inventing a verdict.
+   ✅ **defend step done 2026-11-13** — `wh.disputes` runs `orchestrator.ingestAndDefend` after its sweep
+   (`apps/worker/src/defend.ts` + `defender-store.ts`, commit `0bf0c33`), bounded at 10 candidates per tick
+   over `findDisputesNeedingAssessment`. It passes **no approval option**, so the filer's §8.15 gate exits
+   with `awaitingApproval: true` and zero PayPal calls for every posture — the verdict, rule and posture are
+   recorded in `disputes.liability` / `router_trace`, which is exactly what the page above renders. A real
+   dispute is now assessed within two minutes of the sweep storing it.
+   **Still open:** the PDF renderer (`renderPdf`/`artefacts`) and the real refund port
+   (`orders.defenderRefundsFromOrders`) are intentionally unwired — both sit behind §8.15's merchant
+   approval click, which has no surface yet (S-17 approval workspace). The refunds port refuses loudly
+   (`DEF_WRONG_STATE`) rather than no-op, so a wiring change without its refund path fails visibly.
 9. **[P1]** LLM path configurable, with graceful configured-off behaviour everywhere.
 10. **[P1]** edge cases: every §12 row, including PayPal 5xx/timeouts, duplicate webhooks, concurrent
     checkouts on one budget, revoked mandate mid-checkout, refund after chargeback, tampered packets,

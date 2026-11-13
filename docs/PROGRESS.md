@@ -674,3 +674,37 @@ output above.
   **Honest gap, recorded rather than papered over:** nothing calls `orchestrator.ingestAndDefend`, so a real
   dispute is stored and ranked by the reconciler but never routed or filed. `liability` therefore stays null
   in production, and the page says exactly that instead of showing a verdict it does not have.
+- **2026-11-13 (IST)** - **That gap is closed: `wh.disputes` now runs `orchestrator.ingestAndDefend` (audit
+  order-of-work item 8, provide-evidence half; commits `faa764d`, `4d025b2`, `351fc73`, `0bf0c33`).**
+  The 2-minute sweep stored and ranked real disputes, but nothing invoked the router, so `liability` stayed
+  `null` for ever. The job now runs a defend step after the sweep: `findDisputesNeedingAssessment` (new
+  repository reader — `liability IS NULL` and `defense_state` still in the two pre-verdict states, ordered
+  by seller deadline with NULLS LAST) feeds a bounded loop of 10 per tick over `ingestAndDefend`.
+  **The approval rule is structural, not a policy choice:** the step invokes `ingestAndDefend` with no
+  `approval` option, and §8.15's gate sits *before* the posture dispatch in `fileDispute` — so every
+  posture, REFUND included, exits with `awaitingApproval: true` and **zero PayPal calls**. What lands is the
+  verdict, the rule and the posture in `disputes.liability` / `router_trace`, which `/disputes` already
+  renders. Filing awaits a merchant approval (the S-17 approval workspace does not exist yet).
+  The new wiring: `apps/worker/src/defender-store.ts` is the production `DefenderStore` — a
+  rename-and-forward over the db repos, with `evidence.bundle` assembling §7.3's bundle from five tables
+  (`orders` → `checkout_attempts` → `mandates` / `checkout_sessions` / `gate_decisions`, plus `l1_credentials`,
+  `captures`, `shipments`) and answering `CS_NOT_FOUND` on a broken chain rather than fabricating a default;
+  `corpus`/`policy` answer the port's documented unknown `{}`. The refunds port is
+  `refundsRefusedLoudly()` — a loud `DEF_WRONG_STATE` naming `orders.defenderRefundsFromOrders` as the
+  wiring to add, because a silent no-op refund would be the most expensive lie a case file can carry.
+  `IngestAndDefendDeps` was narrowed from `extends OrchestratorDeps` to the three members the function
+  actually reaches, so the worker no longer needs the whole purchase stack wired to assess a dispute; a
+  full `OrchestratorDeps` still satisfies it structurally.
+  Failure semantics: one dispute's fault is that dispute's problem (tallied, logged, left in the queue for
+  the next tick); an **all-failed** tick returns `err` with the first failure's own code so pg-boss retries
+  a PayPal outage instead of recording a green report that hid it.
+  **Measured:** `findDisputesNeedingAssessment` + `listEvidencePacketsForDispute` covered by 5 live-Postgres
+  tests (ordering, NULLS LAST, limit, full packet history); the defend loop by 7 unit tests (boundedness,
+  one-per-candidate, honest tallies, all-failed → err) and 3 `wh.disputes` wiring tests (sweep-then-defend
+  order, sweep-alone degradation without the port, retryable defend failure); the adapter by 11
+  live-Postgres tests (full-chain bundle assembly, `CS_NOT_FOUND` on a missing gate decision, absent-not-
+  false paypal/shipments, `{}` unknowns, loud refund refusal, transaction rollback, packet history, action
+  idempotency, verdict writes). Worker suite 164 passed; defender 655 passed; orchestrator 54 passed; db 86
+  passed; repo `typecheck` exit 0; `secret-scan` no leaks; CI run 43346163957 dispatched on `prod/real-users`.
+  **Still open (both behind §8.15's approval click):** the PDF renderer and artefacts, and the real refund
+  port wiring — the refunds port refuses loudly until an approval surface exists.
