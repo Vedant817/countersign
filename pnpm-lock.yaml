@@ -353,6 +353,9 @@ importers:
       '@countersign/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
+      '@countersign/orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/orchestrator
       '@countersign/orders':
         specifier: workspace:*
         version: link:../../packages/orders
@@ -381,6 +384,9 @@ importers:
       '@types/node':
         specifier: 24.19.1
         version: 24.19.1
+      drizzle-orm:
+        specifier: 0.45.3
+        version: 0.45.3(@opentelemetry/api@1.9.1)(pg@8.23.1)(postgres@3.4.9)
       tsx:
         specifier: 4.23.15
         version: 4.23.15

@@ -52,12 +52,15 @@ import {
 } from '@countersign/core'
 import {
   drizzleStore,
+  findDisputesNeedingAssessment,
   findJobHeartbeats,
   findStaleAttempts,
   listEntries,
   reconcileIn,
   type CheckoutAttemptRow,
 } from '@countersign/db'
+import { defineDefenderDeps, fileDispute, ingestDisputeToDefender } from '@countersign/defender'
+import type { IngestAndDefendDeps } from '@countersign/orchestrator'
 import {
   expireStaleReservations,
   RELEASE_REASONS,
@@ -77,6 +80,8 @@ import {
 } from '@countersign/webhooks'
 
 import { budgetAccountIds, dbWebhookAudit, dbWebhookStore, isReconcileCandidate } from './adapters'
+import { defendDisputesJob, productionDefendDeps } from './defend'
+import { dbDefenderStore, refundsRefusedLoudly } from './defender-store'
 import {
   createJobRunner,
   createPgBossQueue,
@@ -169,6 +174,8 @@ export interface WorkerDeps {
   readonly releaseReservations?: JobHandler
   /** §7.2: the nightly "balances must equal the sum of entries" check. */
   readonly reconcileBudget?: JobHandler
+  /** §8.15/§10.2 rows 13–16: the defend step `wh.disputes` runs after its sweep. */
+  readonly defend?: JobHandler
   readonly logger?: Logger
   /**
    * §8.19: where finished runs are recorded. Defaults to `worker_job_runs`.
@@ -252,6 +259,7 @@ export async function startWorker(deps: WorkerDeps): Promise<Result<Worker, CsEr
     ...(deps.hooks ? { hooks: deps.hooks } : {}),
     ...(deps.releaseReservations ? { releaseReservations: deps.releaseReservations } : {}),
     ...(deps.reconcileBudget ? { reconcileBudget: deps.reconcileBudget } : {}),
+    ...(deps.defend ? { defend: deps.defend } : {}),
   })
 
   /*
@@ -370,18 +378,26 @@ export function createWebhooksFromEnv(
     readonly fetchImpl?: typeof fetch
     readonly clock?: WebhookDeps['clock']
     readonly throttle?: WebhookDeps['throttle']
+    /**
+     * A client the caller already built. The worker's dispute path shares it with the Defender
+     * (`ingestAndDefend` re-fetches through `getDispute`), and one client means one token cache and
+     * one throttle domain for every PayPal call this process makes.
+     */
+    readonly paypal?: PayPalClient
   },
 ): WebhookDeps {
   const clock = options.clock ?? systemClock
   const configured = env()
-  const paypal = new PayPalClient({
-    baseUrl: configured.PAYPAL_API_BASE,
-    clientId: configured.PAYPAL_CLIENT_ID,
-    clientSecret: configured.PAYPAL_CLIENT_SECRET,
-    clock,
-    logger: options.logger,
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-  })
+  const paypal =
+    options.paypal ??
+    new PayPalClient({
+      baseUrl: configured.PAYPAL_API_BASE,
+      clientId: configured.PAYPAL_CLIENT_ID,
+      clientSecret: configured.PAYPAL_CLIENT_SECRET,
+      clock,
+      logger: options.logger,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    })
   return defineWebhookDeps({
     clock,
     paypal,
@@ -543,14 +559,26 @@ export async function main(): Promise<number> {
  */
 export function productionDeps(): WorkerDeps {
   // Read the environment first, so a missing variable fails here rather than at the first job tick.
-  env()
+  const configured = env()
   const logger = loggerChild('worker')
   const clock = systemClock
+
+  // One client for the whole process: the webhook half and the Defender share it, so one token cache
+  // and one throttle domain cover every PayPal call. §8.15's `ingestAndDefend` re-fetches each
+  // dispute through `getDispute` on this client — the only PayPal read the defend step makes.
+  const paypal = new PayPalClient({
+    baseUrl: configured.PAYPAL_API_BASE,
+    clientId: configured.PAYPAL_CLIENT_ID,
+    clientSecret: configured.PAYPAL_CLIENT_SECRET,
+    clock,
+    logger,
+  })
 
   const webhooks = createWebhooksFromEnv(queueForWebhooks(), {
     store: dbWebhookStore({ logger }),
     audit: dbWebhookAudit(WEBHOOK_AUDIT_CHAIN),
     logger,
+    paypal,
   })
 
   return {
@@ -558,6 +586,45 @@ export function productionDeps(): WorkerDeps {
     logger,
     releaseReservations: releaseReservationsJob(clock, logger),
     reconcileBudget: budgetReconcileJob(logger),
+    defend: defendDisputesJob(
+      productionDefendDeps(defendDepsFor(paypal, clock, logger), (limit) =>
+        findDisputesNeedingAssessment(limit),
+      ),
+    ),
+  }
+}
+
+/**
+ * §8.15's `ingestAndDefend` deps, over the real rows and the real client.
+ *
+ * **The options are `{}`** — see `productionDefendDeps`. The whole wiring passes no approval, which
+ * is what keeps every PayPal write unreachable: the filer's §8.15 gate exits with
+ * `awaitingApproval: true` before the posture dispatch, for every posture including REFUND.
+ *
+ * Two members are deliberately absent, and each absence is a real decision:
+ *
+ * - **no `drafter` / `llm`** — the packet notes come from the composed template (EC-LLM-1), and a
+ *   model behind an absent credential must not stand between a dispute and its verdict.
+ * - **no `renderPdf` / `artefacts`** — the packet persists with its bundle and hash, and filing
+ *   awaits the approval that does not exist yet; the PDF renderer is wired when a merchant surface
+ *   can attach it. `FileDeps` marks both optional for exactly this stage.
+ */
+function defendDepsFor(paypal: PayPalClient, clock: Clock, logger: Logger): IngestAndDefendDeps {
+  const configured = env()
+  const store = dbDefenderStore()
+  const defenderDeps = defineDefenderDeps({
+    clock,
+    store,
+    paypal,
+    refunds: refundsRefusedLoudly(),
+    // §6's only host a note or QR may name; validated https-or-localhost by `env()`.
+    publicBaseUrl: configured.PUBLIC_BASE_URL,
+    ...(logger ? { logger } : {}),
+  })
+  return {
+    paypal,
+    defender: { ingest: ingestDisputeToDefender, file: fileDispute, deps: defenderDeps },
+    logger,
   }
 }
 

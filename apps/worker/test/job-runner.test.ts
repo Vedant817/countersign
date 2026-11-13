@@ -237,6 +237,63 @@ describe('createJobRunner — every job name is wired', () => {
     await expect(runner[JOB_DISPUTES](undefined)).rejects.toThrow()
   })
 
+  it('wh.disputes runs the defend step after the sweep, and the report carries both halves', async () => {
+    // §10.2 rows 13–16: the sweep stores and ranks; the defend step turns the unassessed rows into
+    // verdicts. The order matters — the sweep's upserts are what make a row assessable in the first
+    // place — so the defend port is a recorder that observes it ran second.
+    const h = workerHarness()
+    const order: string[] = []
+    const originalList = h.deps.paypal.listDisputes
+    h.deps.paypal.listDisputes = (async () => {
+      order.push('sweep')
+      return originalList({ start_time: new Date().toISOString() })
+    }) as typeof h.deps.paypal.listDisputes
+    const runner = createJobRunner({
+      webhooks: h.deps,
+      defend: async (_data: unknown) => {
+        order.push('defend')
+        return ok({
+          candidates: 0,
+          assessed: 0,
+          awaitingApproval: 0,
+          refused: 0,
+          failed: 0,
+          failures: [],
+        })
+      },
+    })
+    const settled = (await runner[JOB_DISPUTES](undefined)) as { sweep: unknown; defend: unknown }
+    expect(order).toEqual(['sweep', 'defend'])
+    expect(settled.sweep).toBeDefined()
+    expect(settled.defend).toMatchObject({ candidates: 0, assessed: 0 })
+  })
+
+  it('wh.disputes is the sweep alone when no defend port is wired', async () => {
+    // The webhook half must never lose the Defender as a precondition (RunnerDeps's contract): an
+    // unwired port degrades the job to the sweep, and the next wiring that adds the port restores
+    // the rest — it does not start failing a job that used to pass.
+    const h = workerHarness()
+    const runner = createJobRunner({ webhooks: h.deps })
+    const settled = (await runner[JOB_DISPUTES](undefined)) as Record<string, unknown>
+    expect(h.calls).toContain('listDisputes')
+    expect(settled.defend).toBeUndefined()
+  })
+
+  it('wh.disputes: a retryable defend failure is retried even though the sweep succeeded', async () => {
+    const h = workerHarness()
+    const runner = createJobRunner({
+      webhooks: h.deps,
+      defend: async () =>
+        err(csError('PP_UNAVAILABLE', 'PayPal is unreachable', { paypal_dispute_ids: ['PP-D-1'] })),
+    })
+    await expect(runner[JOB_DISPUTES](undefined)).rejects.toMatchObject({
+      code: 'PP_UNAVAILABLE',
+      retryable: true,
+    })
+    // The sweep still ran; only the defend half is retrying.
+    expect(h.calls).toContain('listDisputes')
+  })
+
   it('QUEUE-2 a caller-supplied ledger handler is adapted across the Result seam', async () => {
     const h = workerHarness()
     const runner = createJobRunner({

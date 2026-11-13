@@ -271,6 +271,15 @@ export interface RunnerDeps {
   readonly releaseReservations?: JobHandler
   /** §7.2: the nightly "balances must equal the sum of entries" check. */
   readonly reconcileBudget?: JobHandler
+  /**
+   * §8.15/§10.2: defend the disputes the sweep stored but nobody assessed yet.
+   *
+   * Caller-supplied like the two ports above, for the same reason: this worker must run the webhook
+   * half with the Defender unwired, and a test must be able to drive the defend step with a
+   * recording. The production port is `defend.ts::defendDisputesJob` — which passes **no approval**
+   * to `ingestAndDefend`, so the step records verdicts and never writes to PayPal.
+   */
+  readonly defend?: JobHandler
   /** Nightly lookback, in days. §8.12's "full 30-day sweep" is the default. */
   readonly lookbackDays?: number
   readonly logger?: Logger
@@ -372,9 +381,38 @@ export function createJobRunner(deps: RunnerDeps): Record<JobName, QueueHandler>
       })
     },
 
-    /** §8.12's 2-minute dispute sweep. */
-    [JOB_DISPUTES]: async () =>
-      settleRequiredWork(reconcileDisputes(deps.webhooks), { job: JOB_DISPUTES, logger }),
+    /**
+     * §8.12's 2-minute dispute sweep, then §10.2's defend step.
+     *
+     * The sweep stores and ranks; the defend step runs `ingestAndDefend` on the rows whose verdict is
+     * still missing, so `liability` stops being `null` for ever and `/disputes` shows the router's
+     * answer. The step is caller-supplied ({@link RunnerDeps.defend}): absent, this job is the sweep
+     * alone — the webhook half never loses the Defender's wiring as a precondition. The defend port
+     * passes **no approval**, so by §8.15's own gate it cannot write to PayPal; its worst case is a
+     * verdict, and its failures stay in the queue for the next tick.
+     */
+    [JOB_DISPUTES]: async () => {
+      const swept = await reconcileDisputes(deps.webhooks)
+      if (!swept.ok) return settleRequiredWork(swept, { job: JOB_DISPUTES, logger })
+      if (deps.defend === undefined) {
+        return settleForQueue(ok(summarise(swept.value)), { job: JOB_DISPUTES, logger })
+      }
+      const defended = await deps.defend(undefined)
+      if (!defended.ok) {
+        // The sweep succeeded; only the defend step is retrying. Say so, or a green sweep log and a
+        // red queue entry would read as two different jobs failing at once.
+        logger?.warn('wh.disputes: the sweep finished but the defend step is retrying', {
+          job: JOB_DISPUTES,
+          code: defended.error.code,
+          message: defended.error.message,
+        })
+        return settleRequiredWork(defended, { job: JOB_DISPUTES, logger })
+      }
+      return settleForQueue(ok({ sweep: summarise(swept.value), defend: defended.value }), {
+        job: JOB_DISPUTES,
+        logger,
+      })
+    },
 
     /**
      * EC-TIME-5. Also runs as the first step of `wh.reconcile`, so a five-minute cycle and this cron overlap

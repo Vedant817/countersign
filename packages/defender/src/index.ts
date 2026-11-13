@@ -219,6 +219,7 @@ export {
   defineDefenderDeps,
   derivedDisputeId,
   type DefenderDeps,
+  type DefenderRefunds,
   type DefenderStore,
   type DefenderTx,
   type DefenderWorldSeed,
