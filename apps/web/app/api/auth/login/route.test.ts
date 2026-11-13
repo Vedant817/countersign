@@ -16,10 +16,14 @@ import type * as DbModule from '@countersign/db'
 const auth = vi.hoisted(() => ({ authenticate: vi.fn(), startSession: vi.fn() }))
 vi.mock('@/lib/auth', () => auth)
 
-const audit = vi.hoisted(() => ({ appendAudit: vi.fn() }))
+const dbMock = vi.hoisted(() => ({
+  appendAudit: vi.fn(),
+  consumeLoginAttempt: vi.fn(),
+  resetLoginAttempts: vi.fn(),
+}))
 vi.mock('@countersign/db', async (importOriginal) => ({
   ...(await importOriginal<typeof DbModule>()),
-  ...audit,
+  ...dbMock,
 }))
 
 import { POST } from './route'
@@ -41,19 +45,29 @@ function req(body: unknown, headers: Record<string, string> = {}): Request {
   })
 }
 
+type ResponseError =
+  | { code?: string; message?: string; userMessage?: string }
+  | (string & { code?: never; message?: never; userMessage?: never })
+
 async function read(response: Response): Promise<{
   status: number
-  body: { ok?: boolean; next?: string; error?: { code: string; message: string } }
+  body: {
+    ok?: boolean
+    next?: string
+    error?: ResponseError
+  }
 }> {
   return { status: response.status, body: (await response.json()) as never }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks()
-  resetLoginRateLimit()
+  dbMock.consumeLoginAttempt.mockResolvedValue({ allowed: true, retryAfterSec: 0 })
+  dbMock.resetLoginAttempts.mockResolvedValue(undefined)
+  await resetLoginRateLimit()
   auth.authenticate.mockResolvedValue(ok(MERCHANT))
   auth.startSession.mockResolvedValue(ok({}))
-  audit.appendAudit.mockResolvedValue(ok({}))
+  dbMock.appendAudit.mockResolvedValue(ok({}))
 })
 
 describe('POST /api/auth/login', () => {
@@ -66,7 +80,7 @@ describe('POST /api/auth/login', () => {
     expect(body.ok).toBe(true)
     expect(body.next).toBe('/disputes')
     expect(auth.startSession).toHaveBeenCalledWith({ userId: 'usr_merchant' })
-    expect(audit.appendAudit).toHaveBeenCalledWith(
+    expect(dbMock.appendAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'AUTH_LOGIN', actor: 'usr_merchant' }),
     )
   })
@@ -92,12 +106,23 @@ describe('POST /api/auth/login', () => {
       const response = await POST(req({ email: MERCHANT.email, password: 'a password' }))
       expect((await read(response)).status, `attempt ${attempt}`).toBe(200)
     }
+    dbMock.consumeLoginAttempt.mockResolvedValueOnce({ allowed: false, retryAfterSec: 900 })
     const response = await POST(req({ email: MERCHANT.email, password: 'a password' }))
     const { status, body } = await read(response)
     expect(status).toBe(429)
     expect(body.error?.code).toBe('CS_RATE_LIMITED')
     expect(response.headers.get('retry-after')).toMatch(/^\d+$/)
     expect(auth.authenticate).toHaveBeenCalledTimes(5)
+  })
+
+  it('answers 503 when the rate limit check fails closed', async () => {
+    dbMock.consumeLoginAttempt.mockRejectedValue(new Error('Postgres connection lost'))
+    const response = await POST(req({ email: MERCHANT.email, password: 'a password' }))
+    const { status, body } = await read(response)
+    expect(status).toBe(503)
+    expect(body).toEqual({ error: 'Sign-in is temporarily unavailable. Try again shortly.' })
+    expect(auth.authenticate).not.toHaveBeenCalled()
+    expect(auth.startSession).not.toHaveBeenCalled()
   })
 
   it('refuses a cross-origin POST before reading the body or the password', async () => {

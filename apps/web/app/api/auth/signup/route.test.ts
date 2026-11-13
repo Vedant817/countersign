@@ -24,10 +24,14 @@ const auth = vi.hoisted(() => ({
 }))
 vi.mock('@/lib/auth', () => auth)
 
-const audit = vi.hoisted(() => ({ appendAudit: vi.fn() }))
+const dbMock = vi.hoisted(() => ({
+  appendAudit: vi.fn(),
+  consumeLoginAttempt: vi.fn(),
+  resetLoginAttempts: vi.fn(),
+}))
 vi.mock('@countersign/db', async (importOriginal) => ({
   ...(await importOriginal<typeof DbModule>()),
-  ...audit,
+  ...dbMock,
 }))
 
 import { POST } from './route'
@@ -51,23 +55,29 @@ function req(body: unknown, headers: Record<string, string> = {}): Request {
   })
 }
 
+type ResponseError =
+  | { code?: string; message?: string; userMessage?: string }
+  | (string & { code?: never; message?: never; userMessage?: never })
+
 async function read(response: Response): Promise<{
   status: number
   body: {
     ok?: boolean
     next?: string
-    error?: { code: string; message: string; userMessage?: string }
+    error?: ResponseError
   }
 }> {
   return { status: response.status, body: (await response.json()) as never }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks()
-  resetLoginRateLimit()
+  dbMock.consumeLoginAttempt.mockResolvedValue({ allowed: true, retryAfterSec: 0 })
+  dbMock.resetLoginAttempts.mockResolvedValue(undefined)
+  await resetLoginRateLimit()
   auth.registerBuyer.mockResolvedValue(ok(BUYER))
   auth.startSession.mockResolvedValue(ok({}))
-  audit.appendAudit.mockResolvedValue(ok({}))
+  dbMock.appendAudit.mockResolvedValue(ok({}))
 })
 
 describe('POST /api/auth/signup', () => {
@@ -82,7 +92,7 @@ describe('POST /api/auth/signup', () => {
       expect.objectContaining({ email: BUYER.email, password: PASSWORD }),
     )
     expect(auth.startSession).toHaveBeenCalledWith({ userId: 'usr_buyer' })
-    expect(audit.appendAudit).toHaveBeenCalledWith(
+    expect(dbMock.appendAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'AUTH_SIGNUP', actor: 'usr_buyer' }),
     )
   })
@@ -127,6 +137,7 @@ describe('POST /api/auth/signup', () => {
       const response = await POST(req({ email: BUYER.email, password: PASSWORD }))
       expect((await read(response)).status, `attempt ${attempt}`).toBe(401)
     }
+    dbMock.consumeLoginAttempt.mockResolvedValueOnce({ allowed: false, retryAfterSec: 900 })
     const response = await POST(req({ email: BUYER.email, password: PASSWORD }))
     const { status, body } = await read(response)
     expect(status).toBe(429)
@@ -135,13 +146,23 @@ describe('POST /api/auth/signup', () => {
     expect(auth.registerBuyer).toHaveBeenCalledTimes(5)
   })
 
+  it('answers 503 when the rate limit check fails closed', async () => {
+    dbMock.consumeLoginAttempt.mockRejectedValue(new Error('Postgres connection lost'))
+    const response = await POST(req({ email: BUYER.email, password: PASSWORD }))
+    const { status, body } = await read(response)
+    expect(status).toBe(503)
+    expect(body).toEqual({ error: 'Sign-in is temporarily unavailable. Try again shortly.' })
+    expect(auth.registerBuyer).not.toHaveBeenCalled()
+    expect(auth.startSession).not.toHaveBeenCalled()
+  })
+
   it('refuses a cross-origin POST before the body is read', async () => {
     const response = await POST(
       req({ email: BUYER.email, password: PASSWORD }, { origin: 'https://attacker.test' }),
     )
     const { status, body } = await read(response)
     expect(status).toBe(403)
-    expect(body.error?.code).toBe('CS_FORBIDDEN')
+    expect((body.error as { code: string })?.code).toBe('CS_FORBIDDEN')
     expect(auth.registerBuyer).not.toHaveBeenCalled()
   })
 
@@ -154,7 +175,7 @@ describe('POST /api/auth/signup', () => {
 
   it('never stores the address in the audit row — the digest is the record', async () => {
     await POST(req({ email: BUYER.email, password: PASSWORD }))
-    const written = audit.appendAudit.mock.calls[0]?.[0] as { details: Record<string, unknown> }
+    const written = dbMock.appendAudit.mock.calls[0]?.[0] as { details: Record<string, unknown> }
     expect(written.details).toHaveProperty('email_domain', 'example.test')
     expect(JSON.stringify(written.details)).not.toContain('asha')
   })
