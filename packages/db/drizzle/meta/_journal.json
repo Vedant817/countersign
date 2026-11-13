@@ -50,6 +50,13 @@
       "when": 1794543387444,
       "tag": "0006_users_email_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794548318339,
+      "tag": "0007_login_attempts",
+      "breakpoints": true
     }
   ]
 }

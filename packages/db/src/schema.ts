@@ -1456,6 +1456,26 @@ export const workerJobRuns = pgTable(
 )
 
 /* ------------------------------------------------------------------------------------------ */
+/* 28. login_attempts                                                                              */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * Fixed-window login rate limiting (D-059).
+ *
+ * One row per tracked (client IP, email) bucket key. Atomic upserts manage the count and expiry,
+ * pruning removes expired rows, and the reset_at index speeds up sweeps.
+ */
+export const loginAttempts = pgTable(
+  'login_attempts',
+  {
+    key: text('key').primaryKey(),
+    count: integer('count').notNull(),
+    reset_at: ts('reset_at').notNull(),
+  },
+  (t) => [index('login_attempts_reset_at_idx').on(t.reset_at)],
+)
+
+/* ------------------------------------------------------------------------------------------ */
 /* Row types                                                                                       */
 /* ------------------------------------------------------------------------------------------ */
 
@@ -1493,6 +1513,7 @@ export type PrivacyRequestRow = Recast<typeof privacyRequests.$inferSelect, 'id'
 export type JwksKeyRow = typeof jwksKeys.$inferSelect
 export type JobRow = typeof jobs.$inferSelect
 export type WorkerJobRunRow = typeof workerJobRuns.$inferSelect
+export type LoginAttemptRow = typeof loginAttempts.$inferSelect
 
 /** Insert shapes, for `repos/*.ts`. */
 export type NewUser = typeof users.$inferInsert
@@ -1521,6 +1542,7 @@ export type NewAuditEntry = typeof auditLog.$inferInsert
 export type NewPrivacyRequest = typeof privacyRequests.$inferInsert
 export type NewJwksKey = typeof jwksKeys.$inferInsert
 export type NewWorkerJobRun = typeof workerJobRuns.$inferInsert
+export type NewLoginAttempt = typeof loginAttempts.$inferInsert
 
 /**
  * Every table, keyed by its §7.2 name. Used to pass a schema to `drizzle()` and by
