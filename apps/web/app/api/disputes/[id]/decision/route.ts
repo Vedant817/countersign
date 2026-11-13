@@ -24,10 +24,17 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { csError, toBody, type UserId } from '@countersign/core'
+import {
+  csError,
+  HTTP_STATUS_BY_ERROR_CODE,
+  toBody,
+  type CsError,
+  type UserId,
+} from '@countersign/core'
 import { findUserById } from '@countersign/db'
 
 import { decideDispute } from '@/lib/dispute-approval'
+import { requireSameOrigin } from '@/lib/same-origin'
 import { currentUserId } from '@/lib/session'
 
 export const dynamic = 'force-dynamic'
@@ -47,28 +54,28 @@ interface DecisionRouteContext {
   readonly params: Promise<{ id: string }>
 }
 
-/** `CsError.code` → HTTP status. The registry owns the meaning; this owns only the number. */
-function statusFor(code: string): number {
-  switch (code) {
-    case 'CS_VALIDATION':
-      return 400
-    case 'CS_UNAUTHENTICATED':
-      return 401
-    case 'CS_FORBIDDEN':
-      return 403
-    case 'CS_NOT_FOUND':
-      return 404
-    case 'CS_CONFLICT':
-      return 409
-    case 'CS_RATE_LIMITED':
-      return 429
-    default:
-      return 500
-  }
+/**
+ * `CsError.code` → HTTP status.
+ *
+ * The registry owns the number for every code, so this route cannot quietly turn an unlisted one into a
+ * `500`: a hand-written `switch` with a `?? 500` fallback is exactly how a `PP_NOT_FOUND` (a real PayPal
+ * absence the merchant must read) becomes a server fault. Reading the table keeps the whole surface honest.
+ */
+function statusFor(error: CsError): number {
+  return HTTP_STATUS_BY_ERROR_CODE[error.code]
 }
 
 export async function POST(request: Request, context: DecisionRouteContext): Promise<Response> {
   const { id } = await context.params
+
+  // --- the request came from this deployment -------------------------------------------------------
+  // A money-adjacent write should prove its origin before it reads a body, and before it reads a session:
+  // the cookie is `sameSite: 'lax'`, and this is the second lock on the same door. A cross-origin `POST`
+  // is refused even if it somehow carried a session.
+  const originRefusal = requireSameOrigin(request)
+  if (originRefusal !== null) {
+    return NextResponse.json(toBody(originRefusal), { status: statusFor(originRefusal) })
+  }
 
   let raw: unknown
   try {
@@ -114,7 +121,7 @@ export async function POST(request: Request, context: DecisionRouteContext): Pro
   }
 
   const user = await findUserById(session.value)
-  if (!user.ok) return NextResponse.json(toBody(user.error), { status: statusFor(user.error.code) })
+  if (!user.ok) return NextResponse.json(toBody(user.error), { status: statusFor(user.error) })
   if (user.value === undefined) {
     return NextResponse.json(
       toBody(
@@ -138,7 +145,7 @@ export async function POST(request: Request, context: DecisionRouteContext): Pro
     ...(parsed.data.note === undefined ? {} : { note: parsed.data.note }),
   })
   if (!outcome.ok) {
-    return NextResponse.json(toBody(outcome.error), { status: statusFor(outcome.error.code) })
+    return NextResponse.json(toBody(outcome.error), { status: statusFor(outcome.error) })
   }
 
   return NextResponse.json(outcome.value, { status: 200 })
