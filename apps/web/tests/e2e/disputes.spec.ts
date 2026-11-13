@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { signInMerchant } from './merchant-session'
+
 /**
  * `/disputes` in the branch the e2e environment can reach.
  *
@@ -12,6 +14,9 @@ import { expect, test } from '@playwright/test'
  * fixtures are on screen, and the queue page must not appear at the same time.
  */
 test('the disputes page labels its fixtures when the demo branch is on', async ({ page }) => {
+  // The queue is the merchant's (D-059), so the demo branch is only reachable after a real sign-in. The
+  // fixture labelling is what this test is about; the auth redirect is covered by `dispute-decision.spec`.
+  await signInMerchant(page)
   await page.goto('/disputes')
 
   await expect(page.getByRole('heading', { name: 'The Dispute Defender' })).toBeVisible()

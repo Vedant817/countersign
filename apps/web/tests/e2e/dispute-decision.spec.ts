@@ -10,19 +10,12 @@
  * A FILED case is the second test: the page must say there is nothing left to approve and must not render
  * the buttons, because approving a filed case would be a second PayPal action.
  */
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import { eq, inArray } from 'drizzle-orm'
 
-import {
-  auditLog,
-  db,
-  disputeActions,
-  disputes,
-  evidencePackets,
-  hashPassword,
-  MERCHANT,
-  setPasswordHash,
-} from '@countersign/db'
+import { auditLog, db, disputeActions, disputes, evidencePackets } from '@countersign/db'
+
+import { signInMerchant } from './merchant-session'
 
 // Playwright runs test files in a process whose environment is not the webServer's; the app's `db()` reads
 // `DATABASE_URL` lazily, so setting it here is enough for the test's own connection. Built the same way
@@ -33,22 +26,6 @@ localDatabase.password = 'countersign'
 process.env['DATABASE_URL'] ??= localDatabase.href
 
 const NOW = new Date('2026-11-13T09:00:00.000Z')
-
-/**
- * The merchant's password, set straight into the row this test owns.
- *
- * The web server reads `users.password_hash`; the seed only writes one when `MERCHANT_PASSWORD` is in its
- * environment. The browser test does not control the seed, so it sets the hash on the seeded merchant row
- * itself (the real `hashPassword` and the real repository) and then signs in through the real route. That
- * is the same row a production seed would have configured, not a bypass: the login still verifies a scrypt
- * hash and mints a real cookie.
- */
-const MERCHANT_EMAIL = 'merchant.northwind@example.com'
-const MERCHANT_PASSWORD = 'e2e-merchant-password'
-
-async function ensureMerchantPassword(): Promise<void> {
-  await setPasswordHash(MERCHANT.id, await hashPassword(MERCHANT_PASSWORD))
-}
 
 interface Seed {
   readonly id: string
@@ -99,22 +76,13 @@ async function removeDispute(seed: Seed): Promise<void> {
   await db().delete(disputes).where(eq(disputes.id, seed.id))
 }
 
-/** Sign in as the merchant through the real login route, then prove the session is the merchant's. */
-async function signIn(page: Page): Promise<void> {
-  await ensureMerchantPassword()
-  const response = await page.request.post('/api/auth/login', {
-    data: { email: MERCHANT_EMAIL, password: MERCHANT_PASSWORD, next: '/disputes' },
-  })
-  expect(response.status(), await response.text()).toBe(200)
-}
-
 test.describe('the dispute approval surface', () => {
   test('a signed-in merchant reads the stored verdict and can decline, and the decline is audited', async ({
     page,
   }) => {
     const seed = await seedDispute('AWAITING_MERCHANT_APPROVAL')
     try {
-      await signIn(page)
+      await signInMerchant(page)
 
       await page.goto(`/disputes/${seed.id}`)
       await expect(page.getByRole('heading', { name: seed.paypalId })).toBeVisible()
@@ -137,7 +105,7 @@ test.describe('the dispute approval surface', () => {
   test('a filed case offers no approval controls', async ({ page }) => {
     const seed = await seedDispute('FILED')
     try {
-      await signIn(page)
+      await signInMerchant(page)
       await page.goto(`/disputes/${seed.id}`)
       await expect(page.getByText('nothing left to approve')).toBeVisible()
       await expect(page.getByRole('heading', { name: 'Your decision' })).toHaveCount(0)
@@ -180,7 +148,7 @@ test.describe('the dispute approval surface', () => {
   test('the merchant can sign out, and the cookie no longer opens the queue', async ({ page }) => {
     const seed = await seedDispute('AWAITING_MERCHANT_APPROVAL')
     try {
-      await signIn(page)
+      await signInMerchant(page)
       await page.goto(`/disputes/${seed.id}`)
       await expect(page.getByRole('heading', { name: seed.paypalId })).toBeVisible()
 
