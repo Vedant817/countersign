@@ -14,6 +14,31 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 ---
 
+## ☐ 6. Set the merchant's password so `/login` has a merchant to sign in
+
+**Blocks:** the merchant half of PROD_AUDIT item 6 (real accounts). The code is complete and fails closed:
+with no password provisioned, `/login` refuses every attempt rather than accepting a blank one.
+
+1. Pick a password and put it in `.env.local` (and in the Render environment when deployed):
+   `MERCHANT_PASSWORD=<a long random value>`. Treat it as a secret; it is in `SECRET_ENV_KEYS` and is
+   never printed.
+2. Apply the migration and re-run the seed so the scrypt hash lands on the Northwind row:
+   ```powershell
+   pnpm db:migrate
+   pnpm db:seed
+   ```
+   The seed prints `merchant password sign-in configured` when it worked. Re-running it is idempotent, and
+   changing `MERCHANT_PASSWORD` and re-seeding is how the password is rotated.
+3. Sign in at `/login` with `merchant.northwind@example.com` and that password. `/disputes` and
+   `/api/disputes/*` now require this account; a buyer session gets 403.
+
+**Alternatives recorded, not built:** a passwordless **magic link** needs a real email sender this
+deployment does not have, and **Log in with PayPal** needs app scopes/credentials the sandbox app is not
+configured for. Both would replace the password path in `lib/auth.ts` without touching the session, rate
+limit or role checks; neither is a blocker for the merchant approval flow.
+
+---
+
 ## ☐ 0. Rotate the Modal proxy token (agent log exposure)
 
 While inspecting configuration on 13 Nov 2026, an agent printed `.env.local` **values** to the terminal

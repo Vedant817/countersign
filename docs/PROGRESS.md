@@ -49,6 +49,7 @@ buildable now.
 | WP-17c | Shop UI (S-11…S-13) | D | 09 | done | `66d78bc` | E2E ✅ 3 |
 | WP-17d | Merchant UI (S-14…S-16, S-19) | E | 11, 10 | todo | | E2E |
 | WP-17e | Disputes UI + Bryntum timeline (S-17, S-18) | E | 15e | wip | `88aa3b8` | S-17 approval surface + route + 45 tests ✅ · S-18 verifier E2E + table fallback open |
+| WP-17g | Real merchant sign-in (PROD_AUDIT 6) | E | D-059 | done | pending commit | `/login` + scrypt password on `users`, 12 h absolute session + rotation, 5/15 min rate limit, same-origin, merchant-only `/disputes` + decision; 42 unit/live tests + 5 browser tests; `MERCHANT_PASSWORD` provisioning is HUMAN_TODO 6 |
 | WP-17f | Landing, status, design polish | A | 17a–e | wip | `d0fe7ea` | Landing/nav/judge/status/`/regions` copy reworked, 360 px layout fixed, 14 E2E green; Lighthouse ≥ 90 a11y not yet measured |
 | WP-18 | Public verifier `/v/[packetId]` | B | 03, 15d | done | `774e8a4` | AT-M18 ✅ 226 |
 | WP-19 | Privacy, logging, audit, status | A | 02, 12 | wip | `e3b3174` | AT-M19.1 ✅ 58 offline (merge `0878bd3`, `/status` wiring `3013725`); AT-M19.2 is `packages/core`'s logger · remaining: the worker job that executes `planSweep` |

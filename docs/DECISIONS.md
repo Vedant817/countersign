@@ -1695,3 +1695,43 @@ caller transaction); `packages/privacy/src/status.ts` (`jobHealth`, `workerHealt
 `apps/worker/test/{heartbeat,health}.test.ts`; `apps/worker/test/schedule.test.ts` (the cadence drift test);
 `apps/web/app/status/probe.ts` (`buildWorkerSection`); `apps/web/app/status/worker-section.test.ts`;
 `render.yaml`.
+
+## D-059 - Merchant sign-in is email + password with scrypt, and a session is a pointer with an expiry
+
+**Date:** 2026-11-13
+**Decision:** A real merchant signs in at `/login` with the seeded Northwind email and a password stored as
+`users.password_hash` — a `scrypt` hash (`N=16384, r=8, p=1`, per-call salt, parameters carried in the
+string), verified with `timingSafeEqual`. The password is set only by `pnpm db:seed` from
+`MERCHANT_PASSWORD`; when that variable is unset the column stays `null`, every login is refused with the
+same generic `401`, and there is no development bypass. The session is the existing encrypted `httpOnly`
+`cs_session` cookie (`SameSite=Lax`, `Secure` in production, 7-day cookie TTL) plus a `loginAtSec` anchor
+with a **12-hour absolute lifetime**; `startSession` destroys whatever cookie the browser held and writes a
+fresh seal (rotation). `currentUser()` re-reads the `users` row on every request, so persona and existence
+are never taken from the cookie. Login is rate-limited to 5 attempts per 15 minutes per (email, client
+address), with `429` + `Retry-After`, and the login/logout/decision routes all run the same-origin guard.
+`/disputes`, `/disputes/{id}` and `POST /api/disputes/{id}/decision` require `users.persona === 'MERCHANT'`:
+anonymous is a redirect (pages) or `401` (API), a signed-in buyer is `403`.
+
+**Reason:** The blueprint's D14 chose "iron-session cookie sessions with seeded personas" and
+`docs/DECISIONS.md` had no auth-mechanism decision to inherit, so one had to be made explicitly. A
+passwordless **magic link** needs a real email sender this deployment does not have (HUMAN_TODO), and a
+link that is printed to a server log is a credential in a log. **Log in with PayPal** needs app scopes and
+credentials the sandbox app is not configured for, and it would hand identity to a provider this project
+already treats as a payment rail rather than an identity provider. Email + password is self-contained,
+uses Node's built-in `crypto.scrypt` (argon2 would need a native build on every machine, including Render's),
+and fails closed when no password was provisioned. The rate limit is **in process memory**, stated rather
+than hidden: it resets on restart and does not coordinate across replicas, which is the honest limit of a
+single Render web instance today; a shared store is named here as the change a multi-instance deployment
+needs. "Scoped to its own disputes" is currently "the row whose persona is MERCHANT", because `orders` has
+no `merchant_id`; a second merchant needs that column first, and this record is the boundary rather than a
+pretence that the check is per-merchant.
+
+**Evidence:** `packages/db/src/password.ts` + `packages/db/test/password.test.ts`;
+`packages/db/drizzle/0005_users_password_hash.sql`; `packages/db/src/repos/users.ts`
+(`findUserByEmail`, `setPasswordHash`); `packages/db/src/seed/run.ts` (`MERCHANT_PASSWORD`);
+`apps/web/lib/{auth,auth-page,rate-limit,next-path}.ts`; `apps/web/app/api/auth/{login,logout}/route.ts`;
+`apps/web/app/login/*`; `apps/web/lib/auth.test.ts` (21), `apps/web/lib/rate-limit.test.ts` (5),
+`apps/web/lib/session.test.ts` (rotation and anchor), `apps/web/app/api/auth/*/route.test.ts` (10),
+`apps/web/app/api/disputes/[id]/decision/route.test.ts` (buyer 403),
+`apps/web/tests/e2e/dispute-decision.spec.ts` (5 browser tests: sign in and decline, filed case, anonymous
+redirect, buyer 403, sign out); live-DB `packages/db/test/repos.users.live.test.ts` (3).

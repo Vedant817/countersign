@@ -364,6 +364,20 @@ soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/`
    `PAYPAL_WEBHOOK_ID` only for the positive case, and must refuse loudly without it).
 6. **[P1]** real buyer accounts + per-user isolation (blocked on Vault for the money half; the account
    half is buildable now).
+   ✅ **merchant sign-in done 2026-11-13 (D-059)** - `/login` + `POST /api/auth/login` verify the seeded
+   Northwind account against `users.password_hash` (scrypt, per-call salt, `timingSafeEqual`), set the
+   `httpOnly`/`SameSite=Lax`/`Secure`-in-production `cs_session` cookie with a `loginAtSec` anchor and a
+   12-hour absolute lifetime, rotate the seal on sign-in, and end it at `POST /api/auth/logout`. Login is
+   rate-limited (5 / 15 min per email + address, `429` + `Retry-After`), all state-changing auth routes run
+   the same-origin guard, and `/disputes`, `/disputes/[id]` and `/api/disputes/[id]/decision` require
+   `users.persona === 'MERCHANT'`: anonymous is a redirect (pages) or `401` (API), a signed-in buyer is
+   `403`. The password is provisioned only from `MERCHANT_PASSWORD` by `pnpm db:seed`; with it unset the
+   column stays null and every login is refused, so there is no fake or dev login. Tests: 21 auth unit, 5
+   rate-limit, 3 session rotation/expiry, 10 login/logout route, 3 live-DB user/password, and 5 browser
+   tests (sign in and decline, filed case, anonymous redirect, buyer 403, sign out).
+   **Still open in item 6:** buyer accounts are still the demo persona minted by `/api/agent/session`
+   (behind `COUNTERSIGN_AGENT_DEMO=1`), and "scoped to its own disputes" is `persona === 'MERCHANT'`
+   because `orders` has no `merchant_id` column. The money half remains blocked on HUMAN_TODO 1a/2.
 7. **[P1]** PayPal authorize → capture → refund → void wired to the app, each verified against the
    sandbox by command output in this thread.
 8. **[P1]** Disputes API ingest + provide-evidence wired to the app, replacing the fixture page.
@@ -384,9 +398,9 @@ soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/`
    click is refused without a PayPal call; the buyer on the order cannot approve; a real PayPal 404 reaches
    the merchant as 404. Covered by 45 unit/route tests (`dispute-approval`, `same-origin`, `decision/route`), 7
    live-Postgres tests (`dispute-approval.live`), and 2 browser tests (`dispute-decision.spec`).
-   **Caveat:** there is still no merchant sign-in — the route authorises on the existing `cs_session` cookie,
-   which today only `/api/agent/session` mints as a _buyer_ persona. A real deployment needs a merchant login
-   before a merchant can click (item 6).
+   **Caveat:** the merchant sign-in this used to lack now exists (D-059, item 6). The route requires
+   `users.persona === 'MERCHANT'`; a buyer session is refused with 403 and an anonymous caller with 401,
+   and the merchant approves from `/disputes/{id}` after signing in at `/login`.
    **Still open:** only a **real dispute** (HUMAN_TODO 1a/2: a captured payment and the Disputes
    product/simulator) stands between this and a real filed packet; `provideEvidence` on an absent id still
    returns PayPal's own 404, never a fabricated success.
