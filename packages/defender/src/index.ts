@@ -229,3 +229,16 @@ export {
   type UpsertDisputeInput,
 } from './ingest'
 export type { EvidencePlanItem as DemoEvidencePlanItem } from './types'
+
+/* ------------------------------------------------------------------------------------------ */
+/* The production store over `@countersign/db`                                                 */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * The one `DefenderStore` implementation that talks to Postgres.
+ *
+ * Exported from the package rather than from an app because **two** callers need it — the worker's
+ * unapproved defend tick and `apps/web`'s merchant approval click — and two rename-and-forward maps over
+ * the same repositories are two things that will drift. `docs/contract-issues.md` records the history.
+ */
+export { dbDefenderStore, refundsRefusedLoudly } from './db-store'

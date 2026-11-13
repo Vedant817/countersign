@@ -22,6 +22,7 @@ import type { CsError, DisputeId, Money, PacketId, Result } from '@countersign/c
 
 import { db, type Exec } from '../client'
 import {
+  captures,
   checkoutAttempts,
   disputeActions,
   disputes,
@@ -374,6 +375,93 @@ export function linkDisputeToOrder(
     { table: 'disputes', id },
   )
 }
+
+/**
+ * The PayPal capture ids PayPal reports as terminal for a dispute.
+ *
+ * `packages/orders`'s in-memory world uses exactly this pair (`TERMINAL_DISPUTE_STATUSES` in
+ * `orders/src/deps.ts`), and {@link findOpenDisputeForCapture} has to agree with it: the two are the
+ * same question asked by the port and by the repository, and a disagreement is a refund that goes out
+ * beside a live case.
+ */
+const TERMINAL_DISPUTE_STATUSES = ['RESOLVED', 'OTHER'] as const
+
+/**
+ * EC-REF-4: "is there an open dispute against this capture?" — answered in SQL.
+ *
+ * ## The two joins, and why neither is optional
+ *
+ * `disputes.capture_id` is a foreign key to **`captures.id`** (our `cap_…`), not to PayPal's
+ * `3C679366HH908993F`. The port is asked about PayPal's id, so the capture has to be resolved first —
+ * comparing the two directly returns "no dispute" for *every* capture, and a refund then goes out
+ * beside a live case. `packages/orders`'s in-memory implementation makes the same point at length; this
+ * is the production answer to it.
+ *
+ * `dispute_actions` and the router never consult this: it is a guard on **money**, and the only correct
+ * answer to "might a refund be a second refund?" is the one the database can prove.
+ */
+export function findOpenDisputeForCapture(
+  paypalCaptureId: string,
+  exec?: Exec,
+): Promise<Result<DisputeRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select({ dispute: disputes })
+        .from(disputes)
+        .innerJoin(captures, eq(disputes.capture_id, captures.id))
+        .where(
+          and(
+            eq(captures.paypal_capture_id, paypalCaptureId),
+            sql`${disputes.status} not in ('RESOLVED', 'OTHER')`,
+          ),
+        )
+        .orderBy(disputes.created_at)
+        .limit(1)
+      return rows[0]?.dispute as DisputeRow | undefined
+    },
+    { table: 'disputes', paypalCaptureId },
+  )
+}
+
+/**
+ * The user id of the buyer behind a dispute, or `undefined` when there is no chain to read.
+ *
+ * ## What it is for, and what it deliberately does not decide
+ *
+ * §8.15's merchant approval is a **merchant** act. A buyer authorising the filing against themselves —
+ * and, on a `REFUND` posture, authorising a refund *to themselves* — is self-dealing, and no amount of
+ * "the router said so" makes it acceptable. This is the read that lets the approval surface refuse it.
+ *
+ * It walks `disputes → orders → checkout_attempts → mandates`, the same four hops
+ * {@link countDisputesForWalletSince} spells out, and it returns `undefined` — not an error — for every
+ * case where the answer is genuinely unknown: an unlinked dispute (`order_id === null`, EC-DSP-9), an
+ * order whose attempt has no mandate, a mandate whose user row is gone. "We could not work out who the
+ * buyer is" must not be reported as "there is no buyer", because the first is a reason to carry the
+ * refusal in the audit row and the second is a reason to allow the click.
+ */
+export function findDisputeBuyerUserId(
+  disputeId: DisputeId,
+  exec?: Exec,
+): Promise<Result<string | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select({ userId: mandates.user_id })
+        .from(disputes)
+        .innerJoin(orders, eq(disputes.order_id, orders.id))
+        .innerJoin(checkoutAttempts, eq(orders.attempt_id, checkoutAttempts.id))
+        .innerJoin(mandates, eq(checkoutAttempts.mandate_id, mandates.id))
+        .where(eq(disputes.id, disputeId))
+        .limit(1)
+      return rows[0]?.userId as string | undefined
+    },
+    { table: 'disputes', disputeId },
+  )
+}
+
+/** Exported so a test can pin the terminal set without re-deriving it from a row. */
+export { TERMINAL_DISPUTE_STATUSES as TERMINAL_DISPUTE_STATUS_LIST }
 
 /** Our own machine. Never called from a webhook handler — only from a deliberate, audited step. */
 export function setDefenseState(

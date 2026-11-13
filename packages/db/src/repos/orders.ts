@@ -696,6 +696,27 @@ export function findRefundByPaypalId(
   )
 }
 
+/**
+ * One `refunds` row by our own `ref_…` id.
+ *
+ * The dispute refund path (`packages/orders/src/dispute-refund.ts`) re-reads the row it reserved by id
+ * before it stamps PayPal's own refund id onto it, so "the reservation I made is the row I am about to
+ * write" is a read rather than an assumption. `OrderRepoHandles` has always named this handle; the
+ * repository simply did not have it, which is why `orderStoreFromRepos` had no production caller.
+ */
+export function findRefundById(
+  id: string,
+  exec?: Exec,
+): Promise<Result<RefundRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db()).select().from(refunds).where(eq(refunds.id, id)).limit(1)
+      return rows[0] as RefundRow | undefined
+    },
+    { table: 'refunds', id },
+  )
+}
+
 export function setRefundStatus(
   id: string,
   status: RefundStatus,
@@ -759,6 +780,31 @@ export function findShipmentsByOrder(
       return rows as ShipmentRow[]
     },
     { table: 'shipments', orderId },
+  )
+}
+
+/**
+ * The shipment carrying a tracking number, or `undefined`.
+ *
+ * `OrderRepoHandles` names this handle because the tracking webhook
+ * (`packages/orders/src/tracking.ts`) has to find the shipment a carrier is talking about from the
+ * tracking id alone — the carrier knows that and nothing else. Without it the webhook could only ever
+ * create a duplicate shipment, so the port's "is this tracker already ours?" question had no answer.
+ */
+export function findShipmentByTracking(
+  trackingNumber: string,
+  exec?: Exec,
+): Promise<Result<ShipmentRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select()
+        .from(shipments)
+        .where(eq(shipments.tracking_number, trackingNumber))
+        .limit(1)
+      return rows[0] as ShipmentRow | undefined
+    },
+    { table: 'shipments', trackingNumber },
   )
 }
 
