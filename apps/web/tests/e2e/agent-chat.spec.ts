@@ -31,10 +31,19 @@
  */
 import { expect, test } from '@playwright/test'
 
-test.describe('S-10 agent chat', () => {
-  test('creates a mandate and reaches a Gate ALLOW on an in-mandate cart', async ({ page }) => {
-    await page.goto('/agent')
+import { signUpBuyer } from './buyer-session'
 
+test.describe('S-10 agent chat', () => {
+  // A mandate belongs to an account, and the surface is closed without one (D-060). Each test gets its own
+  // address because `users.email` is UNIQUE and these run against one database.
+  test.beforeEach(async ({ page }) => {
+    await signUpBuyer(page.request)
+    // The session cookie is set by the sign-up response; the page is a fresh navigation, not a client
+    // transition, so its server components read the cookie the way a returning buyer's would.
+    await page.goto('/agent')
+  })
+
+  test('creates a mandate and reaches a Gate ALLOW on an in-mandate cart', async ({ page }) => {
     await expect(page.getByRole('heading', { level: 1 })).toContainText(
       'Ask the agent to buy something',
     )

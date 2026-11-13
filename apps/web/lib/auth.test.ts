@@ -16,18 +16,30 @@ const db = vi.hoisted(() => ({
   findUserById: vi.fn(),
   burnPasswordCheck: vi.fn(),
   verifyPassword: vi.fn(),
+  hashPassword: vi.fn(),
+  createUser: vi.fn(),
+  setPasswordHash: vi.fn(),
 }))
 vi.mock('@countersign/db', async (importOriginal) => ({
   ...(await importOriginal<typeof DbModule>()),
   ...db,
 }))
 
-import { authenticate, currentUser, requireMerchant } from './auth'
+import {
+  authenticate,
+  currentUser,
+  normalizeEmail,
+  registerBuyer,
+  requireBuyer,
+  requireMerchant,
+  SIGNUP_MIN_PASSWORD,
+} from './auth'
 import { safeNextPath } from './next-path'
 import { readSession, startSession, type CookieStoreLike } from './session'
 
 const SECRET = 'test-session-secret-of-at-least-32-characters'
 const USER = 'usr_01HZX0000000000000000MERCHANT' as UserId
+const BUYER_ID = 'usr_01HZX0000000000000000BUYER01' as UserId
 
 function jar(): CookieStoreLike {
   const raw = new Map<string, string>()
@@ -55,6 +67,14 @@ const MERCHANT_ROW = {
   updated_at: new Date(0),
 }
 
+const BUYER_ROW = {
+  ...MERCHANT_ROW,
+  id: BUYER_ID,
+  persona: 'BUYER',
+  display_name: 'asha',
+  email: 'asha@example.test',
+}
+
 beforeEach(() => {
   process.env['SESSION_SECRET'] = SECRET
   vi.clearAllMocks()
@@ -62,6 +82,9 @@ beforeEach(() => {
   db.findUserByEmail.mockResolvedValue(ok(undefined))
   db.burnPasswordCheck.mockResolvedValue(undefined)
   db.verifyPassword.mockResolvedValue(false)
+  db.hashPassword.mockResolvedValue('scrypt$16384$8$1$NEW$NEWHASH')
+  db.createUser.mockResolvedValue(ok({ ...BUYER_ROW, id: 'usr_new' }))
+  db.setPasswordHash.mockResolvedValue(ok({ ...BUYER_ROW, id: 'usr_new', password_hash: 'x' }))
 })
 
 afterEach(() => {
@@ -171,14 +194,103 @@ describe('requireMerchant', () => {
     expect(result.error.code).toBe('CS_UNAUTHENTICATED')
   })
 
-  it('refuses a signed-in buyer with CS_FORBIDDEN', async () => {
-    const store = jar()
-    await startSession({ userId: USER }, store)
-    db.findUserById.mockResolvedValue(ok({ ...MERCHANT_ROW, persona: 'BUYER' }))
-    const result = await requireMerchant(store)
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    expect(result.error.code).toBe('CS_FORBIDDEN')
+  describe('requireBuyer', () => {
+    it('refuses an anonymous request with CS_UNAUTHENTICATED', async () => {
+      const result = await requireBuyer(jar())
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.code).toBe('CS_UNAUTHENTICATED')
+      expect(result.error.userMessage).toBe('Sign in as the buyer first.')
+    })
+
+    it('refuses a signed-in merchant with CS_FORBIDDEN', async () => {
+      const store = jar()
+      await startSession({ userId: USER }, store)
+      const result = await requireBuyer(store)
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.code).toBe('CS_FORBIDDEN')
+    })
+
+    it('accepts the buyer', async () => {
+      const store = jar()
+      db.findUserById.mockResolvedValue(ok(BUYER_ROW))
+      await startSession({ userId: BUYER_ID }, store)
+      const result = await requireBuyer(store)
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.value.id).toBe(BUYER_ID)
+    })
+  })
+
+  describe('normalizeEmail', () => {
+    it('trims and folds, so one address is one account', () => {
+      expect(normalizeEmail('  Asha@Example.TEST ')).toBe('asha@example.test')
+    })
+  })
+
+  describe('registerBuyer', () => {
+    it('hashes the password and stores the hash on the new row', async () => {
+      const created = await registerBuyer({
+        email: 'Asha@Example.test',
+        password: 'a long enough password',
+      })
+      expect(created.ok).toBe(true)
+      // The plain password never reaches the repository: only the hash is written.
+      expect(db.hashPassword).toHaveBeenCalledWith('a long enough password')
+      expect(db.createUser).toHaveBeenCalledWith(
+        expect.objectContaining({ persona: 'BUYER', email: 'asha@example.test' }),
+      )
+      const stored = await registerBuyer({
+        email: 'Asha@Example.test',
+        password: 'a long enough password',
+      })
+      expect(stored.ok).toBe(true)
+      const id = (db.createUser.mock.calls[0]?.[0] as { id: string }).id
+      expect(db.setPasswordHash).toHaveBeenCalledWith(id, 'scrypt$16384$8$1$NEW$NEWHASH')
+    })
+
+    it('answers the same refusal for an address that is already taken', async () => {
+      db.createUser.mockResolvedValue(
+        err(
+          csError('CS_CONFLICT', 'Duplicate rejected by unique constraint users_email_key', {
+            pgCode: '23505',
+            constraint: 'users_email_key',
+          }),
+        ),
+      )
+      const created = await registerBuyer({
+        email: 'taken@example.test',
+        password: 'a long enough password',
+      })
+      expect(created.ok).toBe(false)
+      if (created.ok) return
+      // Not a CS_CONFLICT: a duplicate is the same answer as an unusable address, so it does not tell the
+      // caller that the address is registered.
+      expect(created.error.code).toBe('CS_UNAUTHENTICATED')
+    })
+
+    it('does not hide a real database failure behind the duplicate refusal', async () => {
+      db.createUser.mockResolvedValue(err(csError('CS_INTERNAL', 'the database is down')))
+      const created = await registerBuyer({
+        email: 'someone@example.test',
+        password: 'a long enough password',
+      })
+      expect(created.ok).toBe(false)
+      if (created.ok) return
+      expect(created.error.code).toBe('CS_INTERNAL')
+    })
+
+    it('uses the part of the address before the @ as the display name', async () => {
+      await registerBuyer({ email: 'asha@example.test', password: 'a long enough password' })
+      expect(db.createUser).toHaveBeenCalledWith(expect.objectContaining({ display_name: 'asha' }))
+    })
+
+    it('refuses nothing about the password itself — the route owns the length rule', () => {
+      // The floor lives in the route, where the answer is a 400 the form can show; this function's contract is
+      // "hash what it was given", and pinning that here keeps the two from drifting into two password rules.
+      expect(SIGNUP_MIN_PASSWORD).toBe(10)
+    })
   })
 
   it('accepts the merchant', async () => {

@@ -394,6 +394,35 @@ describe('unique indexes are the replay / idempotency defence', () => {
 
     expect(toRepoError(new Error('no sqlstate here')).code).toBe('CS_VALIDATION')
   })
+
+  it('unwraps the driver error, because a real insert never throws the SQLSTATE directly', () => {
+    // What drizzle actually rejects with: a plain `Error` whose `message` is the failing SQL, holding the
+    // `PostgresError` on `cause` (2026-11-13, live: a duplicate `users.email` came back `CS_VALIDATION` with
+    // no `pgCode`, because only the top-level `cause.code` was read). These assertions are the regression
+    // test for that, and they are the reason a live suite caught what a synthetic error could not.
+    const driver = Object.assign(
+      new Error('duplicate key value violates unique constraint "users_email_key"'),
+      { code: PG.UNIQUE_VIOLATION, constraint_name: 'users_email_key', table_name: 'users' },
+    )
+    const wrapped = new Error('Failed query: insert into "users" …', { cause: driver })
+    expect(pgErrorCode(wrapped)).toBe(PG.UNIQUE_VIOLATION)
+    expect(isUniqueViolation(wrapped)).toBe(true)
+    expect(pgConstraintName(wrapped)).toBe('users_email_key')
+
+    const mapped = toRepoError(wrapped, { table: 'users' })
+    expect(mapped.code).toBe('CS_CONFLICT')
+    // The database's sentence, not the wrapper's `Failed query: …`: an incident reader needs the former.
+    expect(mapped.message).toMatch(/duplicate key value/)
+    expect(mapped.details?.['pgCode']).toBe(PG.UNIQUE_VIOLATION)
+    expect(mapped.details?.['constraint']).toBe('users_email_key')
+
+    // A two-deep chain still resolves, and a cyclic one cannot hang the request.
+    const deep = new Error('outer', { cause: new Error('middle', { cause: driver }) })
+    expect(pgErrorCode(deep)).toBe(PG.UNIQUE_VIOLATION)
+    const cyclic = new Error('loop')
+    ;(cyclic as Error & { cause: unknown }).cause = cyclic
+    expect(pgErrorCode(cyclic)).toBeUndefined()
+  })
 })
 
 /* ------------------------------------------------------------------------------------------ */

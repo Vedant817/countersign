@@ -164,10 +164,15 @@ describe('the run-user rule', () => {
     expect(guardRunUser(USER, USER as string).ok).toBe(true)
   })
 
-  it('allows an anonymous request, because the demo gate is what closes that door', () => {
-    // On a deployment with real accounts this branch becomes a login requirement; today the run route is
-    // already refused by agentDemoAllowed() unless COUNTERSIGN_AGENT_DEMO=1 and NODE_ENV is not production.
-    expect(guardRunUser(undefined, 'usr_anyone').ok).toBe(true)
+  it('refuses an anonymous request with CS_UNAUTHENTICATED (D-060)', () => {
+    // D-057 allowed this branch through on the theory that `COUNTERSIGN_AGENT_DEMO=1` was the lock. It is not:
+    // the demo gate is a process-wide flag, not a per-request identity, so an anonymous run was a run whose
+    // `user_id` came from the request body. The gate is still the second lock; this is the first.
+    const refused = guardRunUser(undefined, 'usr_anyone')
+    expect(refused.ok).toBe(false)
+    if (refused.ok) return
+    expect(refused.error.code).toBe('CS_UNAUTHENTICATED')
+    expect(refused.error.userMessage).toBe('Sign in as the buyer first.')
   })
 })
 

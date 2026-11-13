@@ -69,5 +69,39 @@ describe.skipIf(!hasDatabase)(
       const found = await findUserByEmail(EMAIL)
       expect(found.ok && found.value?.password_hash).toBeNull()
     })
+
+    it('refuses a second account on the same address as CS_CONFLICT (D-060, users_email_key)', async () => {
+      // The UNIQUE index, not the sign-up route, is what makes "one account per address" true: a route that
+      // checks and then inserts is a race, and the second row would be an account two people can both sign in
+      // to. This is the statement that loses the race.
+      const duplicate = await createUser({
+        id: 'usr_liveduplicatetest00000000' as UserId,
+        persona: 'BUYER',
+        display_name: 'The other Asha',
+        email: EMAIL,
+        country: 'US',
+      })
+      expect(duplicate.ok).toBe(false)
+      if (duplicate.ok) return
+      expect(duplicate.error.code).toBe('CS_CONFLICT')
+      expect(duplicate.error.details?.['constraint']).toBe('users_email_key')
+      expect(duplicate.error.details?.['pgCode']).toBe('23505')
+    })
+
+    it('treats the address as case-insensitive at the index, because the route folds before it writes', async () => {
+      // The UNIQUE index is on the raw text; folding is `normalizeEmail`'s job, so the guarantee this proves is
+      // that the two paths cannot disagree — a folded lookup must find the folded write.
+      await db().delete(users).where(eq(users.id, ID))
+      const created = await createUser({
+        id: ID,
+        persona: 'BUYER',
+        display_name: 'asha',
+        email: EMAIL.toLowerCase(),
+        country: 'US',
+      })
+      expect(created.ok, created.ok ? '' : created.error.message).toBe(true)
+      const found = await findUserByEmail(EMAIL.toLowerCase())
+      expect(found.ok && found.value?.id).toBe(ID)
+    })
   },
 )

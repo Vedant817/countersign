@@ -16,6 +16,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { auditLog, db, disputeActions, disputes, evidencePackets } from '@countersign/db'
 
 import { signInMerchant } from './merchant-session'
+import { BUYER_PASSWORD, buyerEmail } from './buyer-session'
 
 // Playwright runs test files in a process whose environment is not the webServer's; the app's `db()` reads
 // `DATABASE_URL` lazily, so setting it here is enough for the test's own connection. Built the same way
@@ -127,18 +128,18 @@ test.describe('the dispute approval surface', () => {
     }
   })
 
-  test('a signed-in buyer gets 403, because the queue is the merchant’s', async ({ page }) => {
+  test("a signed-in buyer gets 403, because the queue is the merchant's", async ({ page }) => {
     const seed = await seedDispute('AWAITING_MERCHANT_APPROVAL')
     try {
-      // The only buyer session this app mints is the demo persona's. It is a real session — which is the
-      // point: being signed in is not the same as being the merchant.
-      const buyer = await page.request.post('/api/agent/session', {
-        data: { intent: 'Buy the cheapest trail shoes you can find, under 150', cap_minor: '5000' },
+      // A real buyer account, not the old demo persona: the point of the test is that being signed in is not
+      // the same as being the merchant, so the account has to be a genuine buyer (D-060).
+      const buyer = await page.request.post('/api/auth/signup', {
+        data: { email: buyerEmail('dispute403'), password: BUYER_PASSWORD, displayName: 'A buyer' },
       })
       expect(buyer.status(), await buyer.text()).toBe(200)
 
       await page.goto(`/disputes/${seed.id}`)
-      await expect(page.getByText('This page is the merchant’s')).toBeVisible()
+      await expect(page.getByText('This page belongs to another account')).toBeVisible()
       await expect(page.getByText(seed.paypalId)).toHaveCount(0)
     } finally {
       await removeDispute(seed)
