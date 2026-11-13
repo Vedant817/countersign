@@ -351,32 +351,46 @@ export const jwksKeyStatusEnum = pgEnum('jwks_key_status', ['ACTIVE', 'RETIRED',
 /* 1. users                                                                                        */
 /* ------------------------------------------------------------------------------------------ */
 
-export const users = pgTable('users', {
-  id: text('id').primaryKey(),
-  /**
-   * Which demo persona this row is (`BUYER` / `MERCHANT` / `JUDGE`). Plain text, not an enum: a
-   * persona is a label on the landing page, not a state machine, and the demo picker is allowed to
-   * grow one without a migration.
-   */
-  persona: text('persona').notNull(),
-  display_name: text('display_name').notNull(),
-  email: text('email').notNull(),
-  /**
-   * A `scrypt` password hash, or `null` for an account that cannot sign in with a password.
-   *
-   * `null` is the honest default for the seeded BUYER and JUDGE personas: they have no password, and a
-   * blank string would be a hash of the empty password - a login that succeeds with no secret at all.
-   * Only the MERCHANT persona is given one, and only from `MERCHANT_PASSWORD` at seed time (D-059), so a
-   * deployment that never sets that variable has no password login and says so rather than accepting one.
-   */
-  password_hash: text('password_hash'),
-  /** ISO 3166-1 alpha-2. Drives the flat shipping fee (spec §8.9) and the DPDP notice. */
-  country: char('country', { length: 2 }).notNull(),
-  /** §12.13 DPDP/GDPR notice acknowledgement; null means not yet shown. */
-  dpdp_notice_ack_at: ts('dpdp_notice_ack_at'),
-  created_at: createdAt(),
-  updated_at: updatedAt(),
-})
+export const users = pgTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    /**
+     * Which demo persona this row is (`BUYER` / `MERCHANT` / `JUDGE`). Plain text, not an enum: a
+     * persona is a label on the landing page, not a state machine, and the demo picker is allowed to
+     * grow one without a migration.
+     */
+    persona: text('persona').notNull(),
+    display_name: text('display_name').notNull(),
+    email: text('email').notNull(),
+    /**
+     * A `scrypt` password hash, or `null` for an account that cannot sign in with a password.
+     *
+     * `null` is the honest default for the seeded BUYER and JUDGE personas: they have no password, and a
+     * blank string would be a hash of the empty password - a login that succeeds with no secret at all.
+     * Only the MERCHANT persona is given one, and only from `MERCHANT_PASSWORD` at seed time (D-059), so a
+     * deployment that never sets that variable has no password login and says so rather than accepting one.
+     */
+    password_hash: text('password_hash'),
+    /** ISO 3166-1 alpha-2. Drives the flat shipping fee (spec §8.9) and the DPDP notice. */
+    country: char('country', { length: 2 }).notNull(),
+    /** §12.13 DPDP/GDPR notice acknowledgement; null means not yet shown. */
+    dpdp_notice_ack_at: ts('dpdp_notice_ack_at'),
+    created_at: createdAt(),
+    updated_at: updatedAt(),
+  },
+  (t) => [
+    /**
+     * One account per address, enforced by the database rather than by a check-then-insert (D-060).
+     *
+     * The sign-up route also refuses a duplicate before it inserts, but `findUserByEmail` followed by
+     * `createUser` is a race between two requests, and the second row would be an account two people can
+     * both sign in to. The repository turns the 23505 into a `CS_CONFLICT` (`repos/users.ts`), so the
+     * caller's answer is the same whether it saw the collision first or lost the race.
+     */
+    uniqueIndex('users_email_key').on(t.email),
+  ],
+)
 
 /* ------------------------------------------------------------------------------------------ */
 /* 2. paypal_wallets                                                                               */

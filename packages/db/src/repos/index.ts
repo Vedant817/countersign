@@ -58,7 +58,13 @@ export const PG = {
 interface PgErrorLike {
   code?: unknown
   constraint?: unknown
+  /**
+   * postgres.js's own name for the constraint (`postgres` uses `constraint_name`; `pg` uses `constraint`).
+   * Both are read, because the same repository can be pointed at either driver's error shape.
+   */
+  constraint_name?: unknown
   table?: unknown
+  table_name?: unknown
   detail?: unknown
   message?: unknown
 }
@@ -67,9 +73,51 @@ function asPgErrorLike(cause: unknown): PgErrorLike | null {
   return typeof cause === 'object' && cause !== null ? (cause as PgErrorLike) : null
 }
 
-/** The SQLSTATE of `cause`, if it came from Postgres. `undefined` for anything else. */
+/**
+ * A SQLSTATE is exactly five characters (Postgres's `code`), which is what tells it apart from a Node
+ * error code (`ERR_INVALID_ARG_TYPE`, `ECONNREFUSED`) on the same property.
+ */
+const SQLSTATE = /^[0-9A-Z]{5}$/
+
+/** How deep the chain walk goes. Three is enough for drizzle's `Error` → `PostgresError`, with room to spare. */
+const MAX_CAUSE_DEPTH = 5
+
+/**
+ * The Postgres error inside whatever was thrown.
+ *
+ * ## Why a chain walk and not a cast
+ *
+ * Drizzle wraps a driver failure: `db().insert(...)` rejects with `new Error('Failed query: …')` whose
+ * `cause` is the `PostgresError` carrying `code` and `constraint`. Reading `cause.code` therefore finds
+ * `undefined` on the **real** error and every SQLSTATE mapping in this file silently degrades to
+ * `CS_VALIDATION` — which is exactly what `createUser` did on a duplicate email (found live on 2026-11-13:
+ * a second `users` row came back `CS_VALIDATION` with no `pgCode`). The unit tests passed because they feed
+ * `toRepoError` a bare synthetic error; only a live database can produce the wrapped shape, which is why the
+ * live suites exist.
+ *
+ * The walk is bounded and only follows `cause` on objects, so a cyclic cause chain cannot hang a request.
+ */
+function findPgError(cause: unknown): PgErrorLike | null {
+  let current: unknown = cause
+  for (
+    let depth = 0;
+    depth < MAX_CAUSE_DEPTH && current !== null && current !== undefined;
+    depth += 1
+  ) {
+    const candidate = asPgErrorLike(current)
+    if (candidate === null) return null
+    const code = candidate.code
+    if (typeof code === 'string' && SQLSTATE.test(code)) return candidate
+    const next = (current as { cause?: unknown }).cause
+    if (next === undefined || next === current) return null
+    current = next
+  }
+  return null
+}
+
+/** The SQLSTATE of `cause` or of anything in its `cause` chain. `undefined` for anything else. */
 export function pgErrorCode(cause: unknown): string | undefined {
-  const code = asPgErrorLike(cause)?.code
+  const code = findPgError(cause)?.code
   return typeof code === 'string' ? code : undefined
 }
 
@@ -80,8 +128,11 @@ export function isUniqueViolation(cause: unknown): boolean {
 
 /** The constraint or index name Postgres reported, when there was one. */
 export function pgConstraintName(cause: unknown): string | undefined {
-  const c = asPgErrorLike(cause)?.constraint
-  return typeof c === 'string' && c.length > 0 ? c : undefined
+  const pgError = findPgError(cause)
+  // `constraint` is `pg`'s spelling, `constraint_name` is postgres.js's; both are accepted so a mapping
+  // table keyed by constraint name works whichever driver raised it.
+  const name = pgError?.constraint ?? pgError?.constraint_name
+  return typeof name === 'string' && name.length > 0 ? name : undefined
 }
 
 /**
@@ -103,6 +154,9 @@ const CONSTRAINT_CODES: Record<string, CsErrorCode> = {
   evidence_packets_notes_le_2000: 'CS_VALIDATION',
   mandates_exp_gt_iat: 'VI_EXPIRED',
   l1_credentials_exp_gt_iat: 'VI_EXPIRED',
+  // D-060: one account per address. The sign-up route maps this to the same generic refusal a wrong
+  // password gets, so a duplicate is not a way to ask whether an address has an account.
+  users_email_key: 'CS_CONFLICT',
 }
 
 const CHECK_MESSAGES: Record<string, string> = {
@@ -122,7 +176,10 @@ const CHECK_MESSAGES: Record<string, string> = {
 export function toRepoError(cause: unknown, context: Record<string, unknown> = {}): CsError {
   const code = pgErrorCode(cause)
   const constraint = pgConstraintName(cause)
-  const rawMessage = asPgErrorLike(cause)?.message
+  const pgError = findPgError(cause)
+  // The driver's message when there is one (drizzle's own `Failed query: …` is the wrapper's, not the
+  // database's, and the SQLSTATE is what the reader of an incident needs next to it).
+  const rawMessage = pgError?.message
   const message = typeof rawMessage === 'string' ? rawMessage : toCsError(cause).message
 
   if (code === PG.UNIQUE_VIOLATION) {

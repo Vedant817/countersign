@@ -43,6 +43,13 @@
       "when": 1794540719030,
       "tag": "0005_users_password_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794543387444,
+      "tag": "0006_users_email_unique",
+      "breakpoints": true
     }
   ]
 }
