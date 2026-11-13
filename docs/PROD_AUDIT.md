@@ -382,7 +382,8 @@ soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/`
    approve (`renderPdf`/`provideEvidence` for CONTEST, `orders.defenderRefundsFromOrders` for REFUND) and
    records only an `audit_log` row on decline. Every action is audited in a per-case hash chain; a second
    click is refused without a PayPal call; the buyer on the order cannot approve; a real PayPal 404 reaches
-   the merchant as 404. Covered by 45 unit/route tests (`dispute-approval`, `same-origin`, `decision/route`).
+   the merchant as 404. Covered by 45 unit/route tests (`dispute-approval`, `same-origin`, `decision/route`), 7
+   live-Postgres tests (`dispute-approval.live`), and 2 browser tests (`dispute-decision.spec`).
    **Caveat:** there is still no merchant sign-in — the route authorises on the existing `cs_session` cookie,
    which today only `/api/agent/session` mints as a _buyer_ persona. A real deployment needs a merchant login
    before a merchant can click (item 6).
@@ -394,8 +395,8 @@ soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/`
    `ca59a12dcccf7`); `listDisputes({})` → 200, 0 items; `provideEvidence` multipart on the absent id →
    PayPal 404 `RESOURCE_NOT_FOUND` (debug id `ca59a12e2280b`) — so the whole filing request path (auth,
    multipart, endpoint, error mapping) is proven live; only a **real dispute** (HUMAN_TODO 1a/2: a
-   captured payment and the Disputes product/simulator) and the **merchant approval click** (no surface
-   yet) stand between this and a real filed packet. The filer's own upload path is covered by 72 tests
+   captured payment and the Disputes product/simulator) now stands between this and a real filed packet —
+   the merchant approval click landed in S-17. The filer's own upload path is covered by 72 tests
    against the real client; its fixtures are honestly doc-derived, not captured (H-01 open).
 9. **[P1]** LLM path configurable, with graceful configured-off behaviour everywhere.
 10. **[P1]** edge cases: every §12 row, including PayPal 5xx/timeouts, duplicate webhooks, concurrent

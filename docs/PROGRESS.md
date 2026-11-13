@@ -749,10 +749,13 @@ output above.
   the existing `cs_session` cookie and re-reads the user row; a same-origin guard (`lib/same-origin.ts`)
   refuses a cross-origin `POST` before it reads a body, and the route reads `HTTP_STATUS_BY_ERROR_CODE` so a
   `PP_NOT_FOUND` is a 404 the merchant can read rather than a 500.
-  **Measured:** 45 new tests (20 `dispute-approval`, 8 `same-origin`, 17 route) - approve, decline,
-  double-click conflict, already-filed, unauthenticated, buyer self-dealing, PayPal 404, status mapping;
+  **Measured:** 45 unit/route tests (20 `dispute-approval`, 8 `same-origin`, 17 route) - approve, decline,
+  double-click conflict, already-filed, unauthenticated, buyer self-dealing, PayPal 404, status mapping -
+  plus 7 live-Postgres tests (the decline audit row, the filer outcome in the chain, the already-filed
+  refusal, the two-link hash chain, the stored-verdict detail read, the not-assessed read, the not-found
+  read) and 2 browser tests (a signed-in decline writes the audit row; a filed case offers no controls);
   repo `typecheck` exit 0; `lint` 0 errors (14 pre-existing warnings); `format:check` clean; `secret-scan`
-  no leaks; full `pnpm test` 133 files / 3049 passed, 1 skipped; CI run 43355493094 green on `prod/real-users`.
+  no leaks; full `pnpm test` 134 files / 3056 passed, 1 skipped; CI run 43355493094 green on `prod/real-users`.
   **Caveats:** there is still no merchant sign-in (the route trusts the buyer-persona `cs_session` that only
   `/api/agent/session` mints), and a live `provideEvidence` still returns PayPal's 404 because no real captured
   payment → dispute exists (HUMAN_TODO 1a/2) — never a fabricated filed packet.
