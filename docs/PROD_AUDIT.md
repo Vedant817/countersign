@@ -195,13 +195,13 @@ Verified live in this session: `createDemoOrder` (no payment source) → real sa
 
 Not reachable from the app:
 
-| Capability                         | Library                                               | App call site                                                     |
-| ---------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------- |
-| authorize / capture                | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none                                                              |
-| refund / void                      | `refundCapture`, `voidAuthorization` ✅               | none                                                              |
-| webhooks (verify + ingest)         | `packages/webhooks` ✅ + `apps/worker` ✅             | **`apps/web/app/api/webhooks/paypal/route.ts` — DONE 2026-11-13** |
-| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅    | none - `/disputes` renders fixtures                               |
-| reconciler crons                   | `apps/worker/src/schedule.ts` ✅                      | `render.yaml` defines the worker; never run here                  |
+| Capability                         | Library                                               | App call site                                                                                    |
+| ---------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| authorize / capture                | `packages/paypal` `authorizeOrder`, `captureOrder` ✅ | none                                                                                             |
+| refund / void                      | `refundCapture`, `voidAuthorization` ✅               | none                                                                                             |
+| webhooks (verify + ingest)         | `packages/webhooks` ✅ + `apps/worker` ✅             | **`apps/web/app/api/webhooks/paypal/route.ts` — DONE 2026-11-13**                                |
+| disputes ingest / provide-evidence | `listDisputes`, `getDispute`, `provideEvidence` ✅    | **`/disputes` reads real rows + `wh.disputes` assesses (item 8); filing awaits the §8.15 click** |
+| reconciler crons                   | `apps/worker/src/schedule.ts` ✅                      | `render.yaml` defines the worker; never run here                                                 |
 
 **Webhook ingest (fixed 2026-11-13).** `POST /api/webhooks/paypal` now stores PayPal's exact bytes, verifies
 through `PayPalClient`, marks the row `PENDING`/`VERIFIED`/`FAILED`, and acknowledges per §8.12 (200 for
