@@ -1726,15 +1726,21 @@ needs. "Scoped to its own disputes" is currently "the row whose persona is MERCH
 no `merchant_id`; a second merchant needs that column first, and this record is the boundary rather than a
 pretence that the check is per-merchant.
 
+*Update (2026-11-13):* Moved the login rate limit from process memory to the Postgres `login_attempts`
+table (migration `0007_login_attempts.sql`, repo `consumeLoginAttempt` / `resetLoginAttempts`). The
+5-per-15-minutes limit now survives process restarts and coordinates across replicas. If the database call
+fails or times out, the auth routes fail closed with generic 503 rather than allowing unmetered logins.
+
 **Evidence:** `packages/db/src/password.ts` + `packages/db/test/password.test.ts`;
 `packages/db/drizzle/0005_users_password_hash.sql`; `packages/db/src/repos/users.ts`
 (`findUserByEmail`, `setPasswordHash`); `packages/db/src/seed/run.ts` (`MERCHANT_PASSWORD`);
 `apps/web/lib/{auth,auth-page,rate-limit,next-path}.ts`; `apps/web/app/api/auth/{login,logout}/route.ts`;
-`apps/web/app/login/*`; `apps/web/lib/auth.test.ts` (21), `apps/web/lib/rate-limit.test.ts` (5),
-`apps/web/lib/session.test.ts` (rotation and anchor), `apps/web/app/api/auth/*/route.test.ts` (10),
+`apps/web/app/login/*`; `apps/web/lib/auth.test.ts` (21), `apps/web/lib/rate-limit.test.ts` (6, live DB),
+`apps/web/lib/session.test.ts` (rotation and anchor), `apps/web/app/api/auth/*/route.test.ts` (10, including 503 fail-closed),
 `apps/web/app/api/disputes/[id]/decision/route.test.ts` (buyer 403),
 `apps/web/tests/e2e/dispute-decision.spec.ts` (5 browser tests: sign in and decline, filed case, anonymous
-redirect, buyer 403, sign out); live-DB `packages/db/test/repos.users.live.test.ts` (3).
+redirect, buyer 403, sign out); live-DB `packages/db/test/repos.users.live.test.ts` (3);
+`packages/db/test/repos.login-attempts.live.test.ts` (6).
 
 ## D-060 - A buyer account is a row the buyer created, and identity on a buyer surface comes from the session
 

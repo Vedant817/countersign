@@ -400,7 +400,8 @@ soon|lorem|placeholder|dummy` over all non-test `apps/`, `packages/`, `scripts/`
    Northwind account against `users.password_hash` (scrypt, per-call salt, `timingSafeEqual`), set the
    `httpOnly`/`SameSite=Lax`/`Secure`-in-production `cs_session` cookie with a `loginAtSec` anchor and a
    12-hour absolute lifetime, rotate the seal on sign-in, and end it at `POST /api/auth/logout`. Login is
-   rate-limited (5 / 15 min per email + address, `429` + `Retry-After`), all state-changing auth routes run
+   rate-limited (backed by Postgres `login_attempts` table, migration 0007, 5 / 15 min per email + address,
+   `429` + `Retry-After`, fails closed with 503), all state-changing auth routes run
    the same-origin guard, and `/disputes`, `/disputes/[id]` and `/api/disputes/[id]/decision` require
    `users.persona === 'MERCHANT'`: anonymous is a redirect (pages) or `401` (API), a signed-in buyer is
    `403`. The password is provisioned only from `MERCHANT_PASSWORD` by `pnpm db:seed`; with it unset the
