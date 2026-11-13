@@ -218,9 +218,13 @@ export {
   createInMemoryDefenderWorld,
   defineDefenderDeps,
   derivedDisputeId,
+  type DefenderDeps,
+  type DefenderStore,
+  type DefenderTx,
   type DefenderWorldSeed,
   type EvidenceBundle,
   type InMemoryDefenderWorld,
   type PacketArtefacts,
+  type UpsertDisputeInput,
 } from './ingest'
 export type { EvidencePlanItem as DemoEvidencePlanItem } from './types'
