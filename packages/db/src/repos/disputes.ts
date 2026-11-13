@@ -185,6 +185,39 @@ export function findDisputesByDefenseState(
 }
 
 /**
+ * The merchant's dispute list, newest first, for a human to read.
+ *
+ * ## Why this exists beside the four sweeps
+ *
+ * Every other reader here answers a **machine** question - "which rows are not terminal", "which rows
+ * are past their deadline", "which rows moved since 2026-11-13T00:00Z". A person opening a page asks
+ * "what is on my plate, most recent first", which none of those answer: a case the reconciler has not
+ * touched yet is invisible to `findDisputesByDefenseState` (it is `NEW`, so it is in the queue, but the
+ * queue is ordered by *deadline*, so a fresh case with no deadline sorts first for the wrong reason)
+ * and a case closed last week is invisible to the sweep readers entirely.
+ *
+ * `limit` is required rather than defaulted: this is a page query, and an unbounded read of a table
+ * that grows with every PayPal dispute is the kind of query that is fine on day one and takes the
+ * process down in year two. The caller states the page size.
+ */
+export function listDisputesForReview(
+  limit: number,
+  exec?: Exec,
+): Promise<Result<DisputeRow[], CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select()
+        .from(disputes)
+        .orderBy(desc(disputes.updated_at))
+        .limit(limit)
+      return rows as DisputeRow[]
+    },
+    { table: 'disputes', op: 'list_for_review', limit },
+  )
+}
+
+/**
  * EC-WH-3 for disputes: apply a **fetched** state, never one from a payload.
  *
  * PayPal's ordering is `(stage order, status, update_time)` (§8.12). `stageRank` is the primary key

@@ -647,3 +647,30 @@ WP-06s and everything needing live sandbox is not started.
   deliberately does not credit).
   **Measured:** `pnpm typecheck` all packages exit 0, `pnpm lint` 0 errors, `format:check` clean, whole repo
   `125 files / 2966 passed | 1 skipped`, `pnpm test:ec` OK (592 test references), `pnpm secret-scan` no leaks.
+
+- **2026-11-13 (IST)** - **`/disputes` serves the database, not the fixtures (audit order-of-work item 8,
+  page half).** The page rendered two fixture disputes from `lib/defender-demo.ts` on the path a merchant
+  takes, labelled SIMULATED. The label was honest and the placement was not: a fixture is only a fixture if
+  the reader already knows, and on the day a real dispute arrives the fixtures would still be above it.
+  `apps/web/lib/dispute-queue.ts` now reads `disputes` through a new `listDisputesForReview(limit)`
+  repository (newest first, bounded - the bound is required, not defaulted), and the page renders the
+  **stored** verdict: `liability` and `router_trace.ruleId`, with "not assessed yet" when the router has not
+  run, and "unlinked - not a Countersign payment" when `order_id` is null. It never re-derives a verdict,
+  because a second §8.15 implementation beside the router is how the two start disagreeing.
+  The fixtures moved behind `disputesUseDemoView()` (`COUNTERSIGN_AGENT_DEMO=1` **and** `NODE_ENV !== 'production'`) into `app/disputes/demo-view.tsx`; `next start` sets `NODE_ENV=production`, so
+  a deployed build cannot serve a fixture even with the flag on.
+  **Measured:** web `typecheck` exit 0, repo `typecheck` exit 0, `pnpm lint` 0 errors, `format:check` clean,
+  web `next build` exit 0 (`/disputes` is dynamic), whole repo `126 files / 2974 passed | 1 skipped`
+  (8 new tests: 5 read real rows from Postgres, 3 pin the branch rule), Playwright `disputes.spec.ts` 1
+  passed.
+  **Against a production build and the real database:** `next start -p 3211` then `GET /disputes` returned
+  200 with the empty state and no SIMULATED banner; after inserting one dispute row (`PP-D-MANUAL-1`,
+  `AWAITING_MERCHANT_APPROVAL`, `MERCHANT_FAULT`, trace `{"ruleId":"R-SNAD-OK"}`) the same page showed the
+  id, `$48.00`, the state, `R-SNAD-OK` and the unlinked line, with the empty state gone. The row was deleted
+  again. The response-due cell was then switched from raw ISO to `formatIstHuman` and re-checked on a second
+production build (`next start -p 3212`): the same row rendered `Tue 1 Dec, 5:30 AM IST` with no ISO string
+anywhere in the page. The row was deleted again and both servers were stopped; the evidence is the command
+output above.
+  **Honest gap, recorded rather than papered over:** nothing calls `orchestrator.ingestAndDefend`, so a real
+  dispute is stored and ranked by the reconciler but never routed or filed. `liability` therefore stays null
+  in production, and the page says exactly that instead of showing a verdict it does not have.

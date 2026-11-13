@@ -356,6 +356,13 @@ Verified by: `packages/db/test/repos.worker.live.test.ts` (6 tests against a rea
 7. **[P1]** PayPal authorize → capture → refund → void wired to the app, each verified against the
    sandbox by command output in this thread.
 8. **[P1]** Disputes API ingest + provide-evidence wired to the app, replacing the fixture page.
+   ✅ **page half done 2026-11-13** — `/disputes` no longer renders fixtures on the path a merchant takes: it
+   reads `disputes` through `listDisputesForReview` and shows the **stored** verdict (`liability`,
+   `router_trace.ruleId`) with an explicit "not assessed yet" when the router has not run. The fixtures moved
+   behind `COUNTERSIGN_AGENT_DEMO=1` **and** `NODE_ENV !== 'production'`, so `next start` cannot serve them.
+   **Still open:** nothing calls `orchestrator.ingestAndDefend`, so a real dispute is stored and ranked by the
+   reconciler but never routed or filed — `liability` stays `null` until that is wired, and this page says so
+   rather than inventing a verdict.
 9. **[P1]** LLM path configurable, with graceful configured-off behaviour everywhere.
 10. **[P1]** edge cases: every §12 row, including PayPal 5xx/timeouts, duplicate webhooks, concurrent
     checkouts on one budget, revoked mandate mid-checkout, refund after chargeback, tampered packets,
