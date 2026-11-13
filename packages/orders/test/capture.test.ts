@@ -443,7 +443,7 @@ describe('captureShipment — AT-M11.1, AT-M11.2, AT-M11.6', () => {
   })
 
   describe('EC-CAP-3 / AT-M11.4 — an over-capture is refused locally', () => {
-    it('EC-CAP-3 / AT-M11.4: a capture exceeding the authorization makes NO PayPal call', async () => {
+    it('EC-CAP-3 / EC-PRICE-2 / AT-M11.4: a capture exceeding the authorization makes NO PayPal call', async () => {
       const h = harness({
         lines: [{ sku: 'NW-001', qty: 1 }],
         products: [p('NW-001', 'Trail Runner', 4_500n, false)],

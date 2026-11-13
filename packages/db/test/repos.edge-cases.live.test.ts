@@ -329,7 +329,7 @@ describe.skipIf(!hasDatabase)(
 describe.skipIf(!hasDatabase)(
   'EC-AGT-4: rotation retains the old key row and records the chain',
   () => {
-    it('marks the predecessor REVOKED instead of deleting it, and links the new key to it', async () => {
+    it('EC-AGT-4: marks the predecessor REVOKED instead of deleting it, and links the new key to it', async () => {
       const r = await inTx(async (tx) => {
         await cleanup(tx)
         await tx.insert(users).values({

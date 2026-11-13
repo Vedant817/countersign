@@ -631,3 +631,19 @@ WP-06s and everything needing live sandbox is not started.
   **Falsified three ways (each run, then reverted):** registering `runner` instead of `handlers` fails
   `worker.test.ts`'s heartbeat test; making `jobHealth` ignore the last failure fails 3 tests in
   `job-health.test.ts`; a flat 300 s threshold fails the nightly cadence test. Recorded as D-058.
+
+- **2026-11-13 (IST)** - **Audit 8.13 closed: the edge-case ledger is honest about all 42 `wip` rows.**
+  Every row was re-decided by reading the production source, not the note: 27 were already implemented and
+  covered by a test that names the id, but were still `wip` because the note described an earlier state
+  ("the INSERT ... ON CONFLICT ingest is WP-12" - it had shipped, and a real-Postgres route test drives it).
+  They are now `done`, each with the file and line that closes it. One row is `blocked` with the exact human
+  item (EC-WH-5 needs a registered webhook, H-3). Fourteen stay `wip`, each naming the missing surface rather
+  than a work package: `revokeMandate`, `markWalletDeleted`, `markDeviceLost` and `rotateAgentKey` exist in
+  `@countersign/db` with **no production caller**, `decrementStockForOrder` is exported but nothing decrements
+  at ORDER_CREATED, no receipt renderer exists for EC-FX-2, and nothing writes a non-null
+  `mandates.webauthn_assertion` (so EC-FAM-1/EC-FAM-2 cannot be closed by the server).
+  Two test titles were corrected so the ledger cites them: the over-capture guard is also EC-PRICE-2, and the
+  rotation test names EC-AGT-4 in its `it` rather than only in its `describe` (which the coverage scanner
+  deliberately does not credit).
+  **Measured:** `pnpm typecheck` all packages exit 0, `pnpm lint` 0 errors, `format:check` clean, whole repo
+  `125 files / 2966 passed | 1 skipped`, `pnpm test:ec` OK (592 test references), `pnpm secret-scan` no leaks.
