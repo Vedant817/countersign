@@ -588,6 +588,34 @@ export function redactText(text: string, secrets: readonly (string | undefined)[
 }
 
 /**
+ * The store merchant's **PayPal** id — the value that goes into `payee.merchant_id` on an order and is
+ * seeded into `merchants.paypal_merchant_id`.
+ *
+ * ## Why there are two variables at all
+ *
+ * `MERCHANT_ID` is *our* identifier for the shop (`mrc_northwind`, or whatever an operator chooses) and
+ * it appears in every signed artefact. It is **not** a PayPal account id: PayPal answers
+ * `INVALID_STRING_LENGTH` when it is sent as a payee, because a real one is a 13-character
+ * alphanumeric payer id. So the deployment's own id and the PayPal account that actually receives the
+ * money are separate facts, and `PAYPAL_MERCHANT_ID` is the second one.
+ *
+ * ## Precedence, deliberately
+ *
+ * `PAYPAL_MERCHANT_ID` wins when it is set, because the whole point of setting it is to make PayPal
+ * accept the payee. `MERCHANT_ID` remains the fallback so a CI run or a fresh clone that sets only
+ * `MERCHANT_ID` still boots and still seeds — that path never reaches PayPal, so a non-PayPal id there
+ * is harmless.
+ *
+ * A blank string is treated as unset, exactly as `parseEnv` treats `MERCHANT_PASSWORD`: a variable that
+ * is present but empty is an operator who has not filled it in, not an operator who wants an empty payee.
+ */
+export function paypalMerchantIdFromEnv(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  return source['PAYPAL_MERCHANT_ID']?.trim() || source['MERCHANT_ID']?.trim() || ''
+}
+
+/**
  * A readiness probe for `/status` (spec §8.19) that never leaks a value: it reports *present* or
  * *missing* per key, plus a currency check for the ones that look like money.
  */

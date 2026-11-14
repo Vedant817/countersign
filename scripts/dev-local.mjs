@@ -110,7 +110,11 @@ const environment = {
   PUBLIC_BASE_URL: `http://localhost:${webPort}`,
   // The merchant the local lab sells as, signed into every checkout JWT. Required with no default
   // (`apps/web/lib/merchant.ts`): a defaulted merchant name is a fabricated value inside a signature.
-  MERCHANT_ID: 'mrc_northwind',
+  // `PAYPAL_MERCHANT_ID` is not forced the way this is: it is the operator's PayPal account, and
+  // `MERCHANT_ID` above already resolved it (falling back to `mrc_northwind`). Overwriting it here with
+  // a literal is what made the launcher send a non-PayPal id as the payee, which PayPal rejects with
+  // `INVALID_STRING_LENGTH`.
+  MERCHANT_ID: localEnv.PAYPAL_MERCHANT_ID?.trim() || 'mrc_northwind',
   MERCHANT_NAME: 'Northwind Outfitters',
   MERCHANT_WEBSITE: 'https://northwind.countersign.test',
   VI_SERVICE_URL: `http://127.0.0.1:${viPort}`,

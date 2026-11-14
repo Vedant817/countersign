@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { envSchema, ENV_KEYS, parseEnv, parsePartialEnv } from '../src/env'
+import { envSchema, ENV_KEYS, parseEnv, parsePartialEnv, paypalMerchantIdFromEnv } from '../src/env'
 
 /**
  * A minimal environment that satisfies every required variable.
@@ -198,6 +198,29 @@ describe('the declared key list is derived, not maintained', () => {
     delete (withoutKey as Record<string, string | undefined>)['OPENAI_API_KEY']
     expect(() => parseEnv(withoutKey)).not.toThrow()
     expect(parseEnv(withoutKey).OPENAI_API_KEY).toBeUndefined()
+  })
+})
+
+describe('paypalMerchantIdFromEnv prefers PAYPAL_MERCHANT_ID and falls back to MERCHANT_ID', () => {
+  it('uses PAYPAL_MERCHANT_ID when it is set, ignoring MERCHANT_ID', () => {
+    expect(
+      paypalMerchantIdFromEnv({
+        MERCHANT_ID: 'mrc_northwind',
+        PAYPAL_MERCHANT_ID: '9KX436DUC84BN',
+      }),
+    ).toBe('9KX436DUC84BN')
+  })
+
+  it('falls back to MERCHANT_ID when PAYPAL_MERCHANT_ID is unset or blank', () => {
+    expect(paypalMerchantIdFromEnv({ MERCHANT_ID: 'mrc_northwind' })).toBe('mrc_northwind')
+    // A blank value is an operator who has not filled it in, not one asking for an empty payee.
+    expect(
+      paypalMerchantIdFromEnv({ MERCHANT_ID: 'mrc_northwind', PAYPAL_MERCHANT_ID: '   ' }),
+    ).toBe('mrc_northwind')
+  })
+
+  it('returns empty when neither is configured, so a caller can tell "unset" from a value', () => {
+    expect(paypalMerchantIdFromEnv({})).toBe('')
   })
 })
 

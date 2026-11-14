@@ -41,7 +41,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { and, eq, isNull } from 'drizzle-orm'
 
-import { formatMoney } from '@countersign/core'
+import { formatMoney, paypalMerchantIdFromEnv } from '@countersign/core'
 
 import { closeDb, db, withTx, type Exec } from '../client'
 import { devices, merchants, paypalWallets, users, walletCaps, type JsonValue } from '../schema'
@@ -140,10 +140,8 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
     if (!written.ok) throw written.error
   }
 
-  const rawPaypalMerchantId =
-    process.env['MERCHANT_ID']?.trim() || process.env['PAYPAL_MERCHANT_ID']?.trim()
-  const paypalMerchantId =
-    rawPaypalMerchantId && rawPaypalMerchantId.length > 0 ? rawPaypalMerchantId : null
+  const rawPaypalMerchantId = paypalMerchantIdFromEnv()
+  const paypalMerchantId = rawPaypalMerchantId.length > 0 ? rawPaypalMerchantId : null
   const merchantId = `mer_${MERCHANT.id.replace(/^usr_/, '')}`
 
   const seededMerchant = await repo(

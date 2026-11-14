@@ -1,6 +1,8 @@
 /** Throwaway: find which field PayPal's sandbox rejects on POST /v2/checkout/orders. */
 import { readFileSync } from 'node:fs'
 
+import { paypalMerchantIdFromEnv } from '../packages/core/src/index.ts'
+
 function envLocal(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const line of readFileSync('.env.local', 'utf8').split(/\r?\n/)) {
@@ -52,7 +54,7 @@ const variants: Record<string, unknown>[] = [
     purchase_units: [
       {
         amount: { currency_code: 'USD', value: '133.00' },
-        payee: { merchant_id: env['PAYPAL_MERCHANT_ID'] },
+        payee: { merchant_id: paypalMerchantIdFromEnv(env) },
       },
     ],
   },

@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { csError, type CsError, type Result } from '@countersign/core'
+import { csError, paypalMerchantIdFromEnv, type CsError, type Result } from '@countersign/core'
 
 /**
  * Who this deployment sells as — the merchant identity that ends up **inside signed artefacts**.
@@ -80,7 +80,12 @@ export function merchantIdentity(
     }
   }
 
-  const id = (env['MERCHANT_ID'] ?? '').trim()
+  // Which id signs the checkout — and, because `merchantId` becomes the L3a `payee_id` and then
+  // `orders.create` `payee.merchant_id`, which PayPal account actually receives the money. Those are two
+  // different facts (a PayPal payer id is a 13-character account id; ours is `MERCHANT_ID`), so the
+  // PayPal one is preferred when the operator configured it. `merchantIdentity` stays strict about
+  // `MERCHANT_ID`: a defaulted merchant name is a fabricated value inside a signature (D-042).
+  const id = paypalMerchantIdFromEnv(env) || (env['MERCHANT_ID'] ?? '').trim()
   const name = (env['MERCHANT_NAME'] ?? '').trim()
   const website = (env['MERCHANT_WEBSITE'] ?? '').trim()
 

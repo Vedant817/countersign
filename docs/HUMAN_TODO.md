@@ -90,6 +90,17 @@ What is needed, in one line each:
    `mrc_northwind`; PayPal rejects it as a payee with `INVALID_STRING_LENGTH` — see
    `scripts/paypal-order-probe.mts`).
 
+   **Done in code (14 Nov 2026), not yet in data:** the runtime now _prefers_ `PAYPAL_MERCHANT_ID` and
+   falls back to `MERCHANT_ID` — one helper, `paypalMerchantIdFromEnv` in `packages/core/src/env.ts`, used
+   by the seed (`packages/db/src/seed/run.ts`), the checkout's merchant identity
+   (`apps/web/lib/merchant.ts`), `scripts/dev-local.mjs` and the two PayPal scripts. So once the value is
+   in `.env.local` the checkout signs it as `payee_id` and `orders.create` sends it as
+   `payee.merchant_id`. **The local database must be re-seeded once** (`pnpm db:seed`) for the existing
+   `merchants` row to pick it up: the row is keyed on `owner_user_id`, and a re-seed updates
+   `paypal_merchant_id` in place.
+
+   This item stays **open** until a real sandbox order is created and confirmed with that id.
+
 Then `packages/orders.createOrderFromDecision` (P0-4) can send the vault id and the run can capture.
 Until then the agent demo reports `order_pending: true` and a sentence saying so, which is the honest
 state rather than a claim.

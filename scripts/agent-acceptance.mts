@@ -34,7 +34,7 @@
  */
 import { readFileSync } from 'node:fs'
 
-import { systemClock } from '../packages/core/src/index.ts'
+import { paypalMerchantIdFromEnv, systemClock } from '../packages/core/src/index.ts'
 import { PayPalClient } from '../packages/paypal/src/index.ts'
 
 /* ------------------------------------------------------------------------------------------ */
@@ -325,8 +325,9 @@ async function main(): Promise<void> {
       // identifier (`mrc_northwind`), not a PayPal one, and PayPal answers `INVALID_STRING_LENGTH` for it —
       // verified against the sandbox by `scripts/paypal-order-probe.mts`. The real order path
       // (`packages/orders`) takes this from the configured merchant account; a demo script must not invent
-      // one, and this environment's `PAYPAL_MERCHANT_ID` is unset (HUMAN_TODO item 2).
-      const paypalMerchantId = (env['PAYPAL_MERCHANT_ID'] ?? '').trim()
+      // one. `paypalMerchantIdFromEnv` prefers the operator's `PAYPAL_MERCHANT_ID` and falls back to
+      // `MERCHANT_ID` so a CI-shaped environment behaves exactly as it did before (HUMAN_TODO item 2).
+      const paypalMerchantId = paypalMerchantIdFromEnv(env)
       const amountValue = `${(BigInt(amountMinor) / 100n).toString()}.${(BigInt(amountMinor) % 100n)
         .toString()
         .padStart(2, '0')}`
