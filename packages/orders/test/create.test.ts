@@ -88,6 +88,36 @@ describe('createOrderFromDecision — AT-M11.5, D17, D18', () => {
       // And it is a pure function of our ids, so a retry re-sends the identical header.
       expect(orderCreateRequestId(ATTEMPT_ID)).toBe(`cs:${ATTEMPT_ID}:create`)
     })
+
+    it('sets merchant_id on the created order from the merchant receiving payment', async () => {
+      const h = harness()
+      const created = await createOrderFromDecision(allowDecision(), h.deps)
+      expect(created.ok).toBe(true)
+      if (!created.ok) return
+      const orderRow = h.world.rows.orders.get(created.value.id)
+      expect(orderRow?.merchant_id).toBe('mer_00000000000000000000000001')
+    })
+
+    it('refuses an attempt whose payee has no registered merchant with CS_VALIDATION and makes no PayPal call', async () => {
+      const h = harness({
+        attempt: { payee: 'UNREGISTERED_PAYEE' },
+      })
+      const result = await createOrderFromDecision(allowDecision(), h.deps)
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.code).toBe('CS_VALIDATION')
+      expect(result.error.message).toContain(
+        'No registered merchant receives payments for payee UNREGISTERED_PAYEE',
+      )
+      expect(result.error.details?.['payee']).toBe('UNREGISTERED_PAYEE')
+      expect(result.error.details?.['table']).toBe('merchants')
+      expect(result.error.userMessage).toBe(
+        'This store is not set up to take payments yet. Nothing was charged.',
+      )
+      expect(result.error.retryable).toBe(false)
+      expect(h.paypal.callsTo('/v2/checkout/orders')).toHaveLength(0)
+      expect(h.world.rows.orders.size).toBe(0)
+    })
   })
 
   describe('D18 — the custom_id binding', () => {
@@ -641,6 +671,7 @@ function draftOf(h: ReturnType<typeof harness>) {
   const products = [...h.world.rows.products.values()]
 
   const draft: OrderDraft = {
+    merchantId: [...h.world.rows.merchants.values()][0]?.id ?? 'mer_00000000000000000000000001',
     decision: {
       id: DECISION_ID,
       attemptId: ATTEMPT_ID,

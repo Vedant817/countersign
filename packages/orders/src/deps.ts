@@ -70,6 +70,7 @@ import type {
   GateDecisionRow,
   L1Row,
   MandateRow,
+  MerchantRow,
   NewAuthorization,
   NewCapture,
   NewOrder,
@@ -166,6 +167,11 @@ export interface OrderRepoHandles {
     skus: readonly string[],
     exec?: Exec,
   ) => Promise<Result<ProductRow[], CsError>>
+  /** `repos/merchants.ts::getMerchantByPaypalMerchantId`. */
+  readonly findMerchantByPaypalMerchantId: (
+    paypalMerchantId: string,
+    exec?: Exec,
+  ) => Promise<Result<MerchantRow | undefined, CsError>>
 
   /** `repos/orders.ts::findOrderByAttempt`. */
   readonly findOrderByAttempt: (
@@ -345,6 +351,8 @@ export function orderStoreFromRepos(handles: OrderRepoHandles): OrderStore {
     checkoutSession: (id, tx) => handles.findCheckoutSessionById(id, tx),
     l1Credential: (deviceId, walletId, tx) => handles.findL1Credential(deviceId, walletId, tx),
     products: (skus, tx) => handles.findProductsBySku(skus, tx),
+    merchantByPaypalId: (paypalMerchantId, tx) =>
+      handles.findMerchantByPaypalMerchantId(paypalMerchantId, tx),
 
     orders: {
       findByAttempt: (attemptId, tx) => handles.findOrderByAttempt(attemptId, tx),
@@ -581,6 +589,8 @@ export interface InMemoryOrderWorldSeed {
   readonly session?: Partial<CheckoutSessionRow>
   readonly products?: readonly Partial<ProductRow>[]
   readonly l1?: Partial<L1Row>
+  readonly merchant?: Partial<MerchantRow>
+  readonly merchants?: readonly Partial<MerchantRow>[]
   /** Disputes that are open against a PayPal capture id — EC-REF-4's detection. */
   readonly openDisputes?: readonly Partial<DisputeRow>[]
 }
@@ -596,6 +606,7 @@ export interface InMemoryOrderWorld {
     sessions: Map<string, CheckoutSessionRow>
     products: Map<string, ProductRow>
     l1: Map<string, L1Row>
+    merchants: Map<string, MerchantRow>
     orders: Map<string, OrderRow>
     authorizations: Map<string, AuthorizationRow>
     captures: Map<string, CaptureRow>
@@ -827,6 +838,38 @@ export function createInMemoryOrderWorld(seed: InMemoryOrderWorldSeed = {}): InM
     ...seed.l1,
   } as L1Row
 
+  const defaultPaypalMerchantId =
+    seed.merchant?.paypal_merchant_id !== undefined
+      ? seed.merchant.paypal_merchant_id
+      : '9KX436DUC84BN'
+  const defaultMerchants: Partial<MerchantRow>[] = [
+    {
+      id: 'mer_00000000000000000000000001',
+      owner_user_id: 'usr_00000000000000000000000001',
+      display_name: 'Seed Merchant',
+      paypal_merchant_id: defaultPaypalMerchantId,
+      status: 'ACTIVE',
+      ...seed.merchant,
+    },
+    {
+      id: 'mer_00000000000000000000000002',
+      owner_user_id: 'usr_00000000000000000000000002',
+      display_name: 'Northwind',
+      paypal_merchant_id: 'MERCHANT_NORTHWIND',
+      status: 'ACTIVE',
+    },
+  ]
+  const merchantRows: MerchantRow[] = (seed.merchants ?? defaultMerchants).map((m, idx) => ({
+    id: m.id ?? `mer_${String(idx + 1).padStart(26, '0')}`,
+    owner_user_id: m.owner_user_id ?? `usr_${String(idx + 1).padStart(26, '0')}`,
+    display_name: m.display_name ?? 'Seed Merchant',
+    paypal_merchant_id: m.paypal_merchant_id ?? null,
+    status: m.status ?? 'ACTIVE',
+    created_at: at,
+    updated_at: at,
+    ...m,
+  })) as MerchantRow[]
+
   const rows: InMemoryOrderWorld['rows'] = {
     decisions: new Map([[decision.id, decision]]),
     attempts: new Map([[attempt.id, attempt]]),
@@ -835,6 +878,7 @@ export function createInMemoryOrderWorld(seed: InMemoryOrderWorldSeed = {}): InM
     sessions: new Map([[session.id, session]]),
     products,
     l1: new Map([[l1.id, l1]]),
+    merchants: new Map(merchantRows.map((m) => [m.id, m])),
     orders: new Map(),
     authorizations: new Map(),
     captures: new Map(),
@@ -898,6 +942,7 @@ export function createInMemoryOrderWorld(seed: InMemoryOrderWorldSeed = {}): InM
       rows.refunds,
       rows.shipments,
       rows.attempts,
+      rows.merchants,
     ].map((map) => new Map([...map].map(([k, v]) => [k, { ...v }])))
   }
 
@@ -909,6 +954,7 @@ export function createInMemoryOrderWorld(seed: InMemoryOrderWorldSeed = {}): InM
       rows.refunds,
       rows.shipments,
       rows.attempts,
+      rows.merchants,
     ]
     maps.forEach((map, i) => {
       map.clear()
@@ -977,6 +1023,12 @@ export function createInMemoryOrderWorld(seed: InMemoryOrderWorldSeed = {}): InM
     },
     async products(skus) {
       return ok([...rows.products.values()].filter((p) => skus.includes(p.sku)))
+    },
+    async merchantByPaypalId(paypalMerchantId) {
+      for (const m of rows.merchants.values()) {
+        if (m.paypal_merchant_id === paypalMerchantId) return ok(m)
+      }
+      return ok(undefined)
     },
 
     orders: {

@@ -95,6 +95,7 @@ function orderRepoHandles(): OrderRepoHandles {
       repository.findCheckoutSessionById(id as `chk_${string}`, exec),
     findL1Credential: repository.findL1ForDeviceWallet,
     findProductsBySku: repository.findProductsBySku,
+    findMerchantByPaypalMerchantId: repository.findMerchantByPaypalMerchantId,
 
     findOrderByAttempt: repository.findOrderByAttempt,
     findOrderById: (id, exec) => repository.findOrderById(id as `ord_${string}`, exec),

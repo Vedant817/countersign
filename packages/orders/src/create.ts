@@ -409,6 +409,7 @@ export async function createOrderFromDecisionDetailed(
     const inserted = await deps.store.orders.insert(
       {
         id: orderId,
+        merchant_id: draft.merchantId,
         attempt_id: draft.attempt.id,
         paypal_order_id: paypalOrder.id,
         intent: body.intent,
@@ -582,6 +583,23 @@ async function loadOrderDraft(
   if (!session.value) return err(notFound('checkout_sessions', sessionId))
   const sessionRow = session.value
 
+  const merchant = await deps.store.merchantByPaypalId(attemptRow.payee, tx)
+  if (!merchant.ok) return merchant
+  if (!merchant.value) {
+    return err(
+      csError(
+        'CS_VALIDATION',
+        `No registered merchant receives payments for payee ${attemptRow.payee}`,
+        { table: 'merchants', payee: attemptRow.payee },
+        {
+          userMessage: 'This store is not set up to take payments yet. Nothing was charged.',
+          retryable: false,
+        },
+      ),
+    )
+  }
+  const merchantRow = merchant.value
+
   if (sessionRow.currency !== attemptRow.currency) {
     return err(
       csError(
@@ -655,6 +673,7 @@ async function loadOrderDraft(
   const money = (minor: bigint): Money => ({ minor, currency })
 
   return ok({
+    merchantId: merchantRow.id,
     decision: {
       id: decisionRow.id,
       attemptId: attemptRow.id,

@@ -63,6 +63,7 @@ import type {
   GateDecisionRow,
   L1Row,
   MandateRow,
+  MerchantRow,
   NewAuthorization,
   NewCapture,
   NewOrder,
@@ -216,6 +217,12 @@ export interface OrderStore {
 
   /** `repos/products.ts::findProductsBySku` — item names for `purchase_units[].items[]`. */
   products(skus: readonly string[], tx?: OrderTx): Promise<Result<ProductRow[], CsError>>
+
+  /** `repos/merchants.ts::getMerchantByPaypalMerchantId`. */
+  merchantByPaypalId(
+    paypalMerchantId: string,
+    tx?: OrderTx,
+  ): Promise<Result<MerchantRow | undefined, CsError>>
 
   orders: {
     /** `repos/orders.ts::findOrderByAttempt` — **the** AT-M11.5 / EC-IDEM-1 lookup. */
@@ -507,6 +514,7 @@ export interface DraftCartLine {
  * spec's "re-reads mandate status in the same tx" exists to prevent.
  */
 export interface OrderDraft {
+  readonly merchantId: string
   readonly decision: {
     readonly id: GateDecisionId
     readonly attemptId: AttemptId
