@@ -129,4 +129,18 @@ describe('POST /api/agent/session', () => {
     const { status } = await read(response)
     expect(status).toBe(404)
   })
+
+  it('answers 409 when the buyer has no saved PayPal wallet', async () => {
+    agent.provisionAgentSession.mockResolvedValue(
+      err({
+        code: 'CS_CONFLICT',
+        message: 'The buyer has no saved PayPal payment method.',
+        retryable: false,
+      }),
+    )
+    const response = await POST(req())
+    const { status, body } = await read(response)
+    expect(status).toBe(409)
+    expect(body.error?.code).toBe('CS_CONFLICT')
+  })
 })

@@ -124,7 +124,9 @@ export async function POST(request: Request): Promise<Response> {
           ? 403
           : provisioned.error.code === 'CS_NOT_FOUND'
             ? 404
-            : 503,
+            : provisioned.error.code === 'CS_CONFLICT'
+              ? 409
+              : 503,
     })
   }
 

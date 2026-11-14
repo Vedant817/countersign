@@ -51,7 +51,6 @@ import {
   csError,
   err,
   money,
-  ok,
   newId,
   systemClock,
   type AgentId,
@@ -87,6 +86,7 @@ type ViPaymentConstraints = NonNullable<L2PrepareRequest['payment_constraints']>
 
 import { merchantIdentity } from './merchant'
 import { createDemoDeviceKey } from './demo-device'
+import { pickActiveWallet } from './active-wallet'
 import {
   AGENT_AUDIENCE,
   agentIssuer,
@@ -197,7 +197,6 @@ export async function provisionAgentSession(
   }
 
   const userId = existingUser.id as UserId
-  const walletId = newId('wal') as WalletId
   const deviceId = newId('dev') as DeviceId
   const agentId = newId('agt') as AgentId
   const mandateId = newId('mdt') as MandateId
@@ -228,31 +227,23 @@ export async function provisionAgentSession(
   // The buyer row already exists and was read above: D-060 removed the "mint a user if the cookie is
   // absent" branch, which is what let a browser hold an identity nobody had authenticated for.
   //
-  // A returning buyer keeps its **wallet**: `paypal_wallets_payment_token_id_key` is UNIQUE and this demo's
-  // placeholder token is derived from the user id, so a second insert for the same buyer is a unique violation
-  // rather than a second instrument. What is per mandate is the **device**: `demo-device.ts` mints a fresh P-256
-  // key each call and never persists the private half, so a stored device row could not sign a second L2 —
-  // and `l1_credentials` is UNIQUE (device_id, wallet_id), which a new device beside the reused wallet satisfies
-  // exactly. (Reusing the device would have meant re-issuing its L1 from a row that no longer holds the key.)
-  const wallets = await repository.findWalletsByUser(userId)
+  // The wallet is the buyer's real saved PayPal vault wallet (no placeholder is ever created). What is
+  // per mandate is the **device**: `demo-device.ts` mints a fresh P-256 key each call and never persists
+  // the private half, so a stored device row could not sign a second L2 — and `l1_credentials` is UNIQUE
+  // (device_id, wallet_id), which a new device beside the reused wallet satisfies exactly. (Reusing the
+  // device would have meant re-issuing its L1 from a row that no longer holds the key.)
+  const wallets = await repository.listWalletsForUser(userId)
   if (!wallets.ok) return wallets
-  const wallet =
-    wallets.value.length > 0
-      ? ok(wallets.value[0]!)
-      : await repository.createWallet({
-          id: walletId,
-          user_id: userId,
-          // Not a vault token: no buyer credentials exist yet (HUMAN_TODO item 2). Named so that a reader
-          // cannot mistake it for one, and so an order path that needs a real vault_id fails loudly.
-          payment_token_id: `DEMO-NOT-A-VAULT-TOKEN-${userId.slice(-8)}`,
-          payer_id: `DEMO-PAYER-${userId.slice(-8)}`,
-          // The buyer's own address, not a fabricated `demo.buyer.…@example.test`: the wallet's payer email
-          // is what a dispute and a receipt address, and an account now has a real one.
-          payer_email: existingUser.email,
-        })
-  if (!wallet.ok) return wallet
+  const active = pickActiveWallet(wallets.value)
+  if (active === undefined) {
+    return err(
+      csError('CS_CONFLICT', 'The buyer has no saved PayPal payment method.', undefined, {
+        userMessage: 'Save a PayPal payment method on the Wallet page first.',
+      }),
+    )
+  }
   // The mandate, the L1 and the wallet cap all name the row that was resolved above.
-  const resolvedWalletId = wallet.value.id as WalletId
+  const resolvedWalletId = active.id as WalletId
 
   const deviceKey = await createDemoDeviceKey()
   const device = await repository.createDevice({
@@ -283,9 +274,9 @@ export async function provisionAgentSession(
   const issued = await vi.issueL1({
     user_id: userId,
     wallet: {
-      payer_id: wallet.value.payer_id,
-      payer_email: wallet.value.payer_email,
-      payment_token_id: wallet.value.payment_token_id,
+      payer_id: active.payer_id,
+      payer_email: active.payer_email,
+      payment_token_id: active.payment_token_id,
     },
     device_public_jwk: deviceKey.publicJwk as never,
     device_kid: deviceKey.kid,
@@ -393,7 +384,7 @@ export async function provisionAgentSession(
     payment_instrument: {
       type: 'paypal_vault',
       id: issued.value.card_id,
-      description: 'PayPal demo wallet (no vault token yet)',
+      description: 'PayPal saved payment method',
     },
     nonce,
     aud,
