@@ -8,7 +8,7 @@
  * EC-MDT-6: when PayPal reports the vault token deleted, the wallet becomes `DELETED` (never removed)
  * and the Gate blocks every mandate under it. Keeping the row preserves the audit trail.
  */
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 
 import type { CsError, Result, WalletId } from '@countersign/core'
 
@@ -109,6 +109,28 @@ export function findWalletsByUser(
         .select()
         .from(paypalWallets)
         .where(eq(paypalWallets.user_id, userId))
+      return rows as WalletRow[]
+    },
+    { table: 'paypal_wallets', userId },
+  )
+}
+
+/**
+ * List all wallets for a single buyer, ordered newest first.
+ *
+ * A buyer must NEVER see another buyer's wallets.
+ */
+export function listWalletsForUser(
+  userId: string,
+  exec?: Exec,
+): Promise<Result<WalletRow[], CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select()
+        .from(paypalWallets)
+        .where(eq(paypalWallets.user_id, userId))
+        .orderBy(desc(paypalWallets.created_at))
       return rows as WalletRow[]
     },
     { table: 'paypal_wallets', userId },
