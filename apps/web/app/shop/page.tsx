@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 
 import { displayMoney } from '@/lib/display-money'
+import { merchantIdentity } from '@/lib/merchant'
 import { searchProducts } from '@countersign/gate'
 
 import { shopCatalog, shopCatalogMode } from './catalog'
@@ -22,6 +23,7 @@ export default async function ShopPage({
 }: {
   searchParams: Promise<{ q?: string | string[] }>
 }) {
+  const store = merchantIdentity()
   const params = await searchParams
   const query = firstValue(params.q)
   const result = await searchProducts({ catalog: shopCatalog }, { query })
@@ -34,7 +36,7 @@ export default async function ShopPage({
             Sandbox storefront
           </span>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-            Northwind Outfitters
+            {store.ok ? store.value.name : 'Store not configured'}
           </h1>
         </div>
         <Link

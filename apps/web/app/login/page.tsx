@@ -47,8 +47,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     <main className="mx-auto max-w-md px-4 py-16">
       <h1 className="text-3xl font-semibold tracking-tight">Merchant sign in</h1>
       <p className="mt-3 text-sm text-ink-soft">
-        The dispute queue is the merchant&rsquo;s. Sign in with the Northwind account to read and
-        decide cases.
+        Sign in with your merchant account to read and decide your store&rsquo;s dispute cases.
       </p>
       <LoginForm next={next} />
       <p className="mt-6 text-sm text-ink-soft">
