@@ -9,12 +9,13 @@
  */
 import { expect, type Page } from '@playwright/test'
 
-import { hashPassword, MERCHANT, setPasswordHash } from '@countersign/db'
+import { db, hashPassword, MERCHANT, resetLoginAttempts, setPasswordHash } from '@countersign/db'
 
 export const MERCHANT_EMAIL = 'merchant.northwind@example.com'
 export const MERCHANT_PASSWORD = 'e2e-merchant-password'
 
 export async function ensureMerchantPassword(): Promise<void> {
+  await resetLoginAttempts(db())
   await setPasswordHash(MERCHANT.id, await hashPassword(MERCHANT_PASSWORD))
 }
 
