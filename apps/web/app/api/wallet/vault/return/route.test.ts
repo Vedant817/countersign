@@ -112,7 +112,7 @@ describe('GET /api/wallet/vault/return', () => {
   it('saves the wallet, clears the cookie, and 303 redirects on happy path', async () => {
     const response = await GET(req('?approval_token_id=setup_123', 'cs_vault_setup=setup_123'))
     expect(response.status).toBe(303)
-    expect(response.headers.get('location')).toBe('http://localhost/?wallet=saved')
+    expect(response.headers.get('location')).toBe('http://localhost/wallet?saved=1')
 
     expect(db.upsertWalletByToken).toHaveBeenCalledTimes(1)
     expect(db.upsertWalletByToken).toHaveBeenCalledWith(

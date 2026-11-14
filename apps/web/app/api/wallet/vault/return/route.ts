@@ -122,5 +122,5 @@ export async function GET(request: Request) {
   }
 
   const base = url.origin
-  return clearVaultCookie(NextResponse.redirect(`${base}/?wallet=saved`, 303))
+  return clearVaultCookie(NextResponse.redirect(`${base}/wallet?saved=1`, 303))
 }
