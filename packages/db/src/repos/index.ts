@@ -157,6 +157,8 @@ const CONSTRAINT_CODES: Record<string, CsErrorCode> = {
   // D-060: one account per address. The sign-up route maps this to the same generic refusal a wrong
   // password gets, so a duplicate is not a way to ask whether an address has an account.
   users_email_key: 'CS_CONFLICT',
+  merchants_owner_user_id_key: 'CS_CONFLICT',
+  merchants_paypal_merchant_id_key: 'CS_CONFLICT',
 }
 
 const CHECK_MESSAGES: Record<string, string> = {
@@ -338,6 +340,7 @@ export type { Result, CsError, Clock, Money, Currency }
 /* ------------------------------------------------------------------------------------------ */
 
 export * from './users'
+export * from './merchants'
 export * from './wallets'
 export * from './devices'
 export * from './agents'
