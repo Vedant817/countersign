@@ -113,6 +113,7 @@ export type {
 
 // --- the compiler -----------------------------------------------------------
 export {
+  COMPILER_LLM_TIMEOUT_MS,
   DEFAULT_TTL_SECONDS,
   MAX_HORIZON_MONTHS,
   MAX_TTL_SECONDS,

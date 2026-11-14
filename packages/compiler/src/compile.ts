@@ -101,6 +101,13 @@ import type {
 } from './types'
 
 // ---------------------------------------------------------------------------
+// LLM Timeout
+// ---------------------------------------------------------------------------
+
+/** Hard timeout on compiler LLM calls so a hung model never hangs a buyer request. */
+export const COMPILER_LLM_TIMEOUT_MS = 20_000
+
+// ---------------------------------------------------------------------------
 // TTL
 // ---------------------------------------------------------------------------
 
@@ -388,13 +395,19 @@ interface AskOutcome {
  * answer into a 400. Since P0-7 the model's whole job is "name items for this sentence, if you can"; every
  * value that carries authority is read by `parser.ts` before this function is reached.
  */
-async function askOnce(model: LanguageModel, system: string, prompt: string): Promise<AskOutcome> {
+async function askOnce(
+  model: LanguageModel,
+  system: string,
+  prompt: string,
+  timeoutMs: number = COMPILER_LLM_TIMEOUT_MS,
+): Promise<AskOutcome> {
   const result = await generateText({
     model,
     system,
     prompt,
     temperature: 0,
     seed: 0,
+    abortSignal: AbortSignal.timeout(timeoutMs),
     output: Output.object({ schema: llmProposalSchema, name: 'spending_mandate' }),
   })
   return { proposal: result.output, schemaFailure: null }
@@ -406,9 +419,10 @@ async function attemptAsk(
   system: string,
   prompt: string,
   projection: CatalogProjection,
+  timeoutMs: number = COMPILER_LLM_TIMEOUT_MS,
 ): Promise<Result<AskOutcome>> {
   try {
-    return ok(await askOnce(model, system, prompt))
+    return ok(await askOnce(model, system, prompt, timeoutMs))
   } catch (cause) {
     if (NoObjectGeneratedError.isInstance(cause) || NoOutputGeneratedError.isInstance(cause)) {
       return ok({
@@ -519,6 +533,7 @@ export async function compile(
   let modelProposal: LlmProposal | null = null
   if (askModel) {
     const llm = deps.llm as LanguageModel
+    const timeoutMs = deps.llmTimeoutMs ?? COMPILER_LLM_TIMEOUT_MS
     const system = buildSystemPrompt({
       catalog: projection,
       currency: mandateCurrency,
@@ -536,7 +551,7 @@ export async function compile(
     })
 
     // --- EC-LLM-2: one repair retry, then a typed error ---------------------------------------------
-    const first = await attemptAsk(llm, system, userPrompt, projection)
+    const first = await attemptAsk(llm, system, userPrompt, projection, timeoutMs)
     if (!first.ok) return first
 
     let outcome = first.value
@@ -548,7 +563,7 @@ export async function compile(
             ? userPrompt
             : `${userPrompt}\n\nYour previous answer was:\n${outcome.schemaFailure.text}`,
       })
-      const second = await attemptAsk(llm, system, repairPrompt, projection)
+      const second = await attemptAsk(llm, system, repairPrompt, projection, timeoutMs)
       if (!second.ok) return second
       outcome = second.value
       if (outcome.schemaFailure !== null) {

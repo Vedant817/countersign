@@ -203,6 +203,7 @@ export interface CatalogReader {
  */
 export interface CompileDeps {
   readonly llm?: LanguageModel
+  readonly llmTimeoutMs?: number
   readonly catalog: CatalogReader
   readonly clock: { nowSec(): number }
 }

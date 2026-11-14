@@ -29,6 +29,7 @@
  */
 
 import { fixedClock, type Currency } from '@countersign/core'
+import { MockLanguageModelV3 } from 'ai/test'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -458,6 +459,39 @@ describe('EC-LLM-1 the model is unavailable', () => {
     expect(result.error.retryable).toBe(true)
     // The registry copy for LLM_UNAVAILABLE is the manual-form fallback §12.14 asks for.
     expect(result.error.userMessage).toBe('The model is unavailable. You can do this part by hand.')
+  })
+
+  it('times out when the model hangs, returning LLM_UNAVAILABLE in under 2000 ms', async () => {
+    const hangingModel = new MockLanguageModelV3({
+      provider: 'test',
+      modelId: 'hanging',
+      doGenerate: async (options) => {
+        const signal = options.abortSignal
+        return new Promise<never>((_, reject) => {
+          if (signal?.aborted) {
+            reject(signal.reason ?? new Error('aborted'))
+            return
+          }
+          signal?.addEventListener('abort', () => {
+            reject(signal.reason ?? new Error('aborted'))
+          })
+        })
+      },
+    })
+
+    const start = Date.now()
+    const result = await compile(compileInput({ text: 'Under 130 dollars' }), {
+      llm: hangingModel as unknown as Parameters<typeof compile>[1]['llm'],
+      llmTimeoutMs: 50,
+      catalog: catalogOf(STANDARD_CATALOG),
+      clock: CLOCK,
+    })
+    const elapsed = Date.now() - start
+
+    expect(elapsed).toBeLessThan(2000)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('LLM_UNAVAILABLE')
   })
 
   it('does not throw out of compile, whatever the model threw', async () => {
