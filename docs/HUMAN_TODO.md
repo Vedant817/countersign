@@ -34,6 +34,8 @@ JOIN merchants m ON m.paypal_merchant_id = a.payee
 WHERE o.merchant_id IS NULL;
 ```
 
+- Production: the MERCHANT_ID env var must equal the PayPal merchant ID the store owner links in /merchant/settings; until it does, /shop/checkout returns 503 and takes no orders.
+
 ---
 
 ## ☐ 6. Set the merchant's password so `/login` has a merchant to sign in

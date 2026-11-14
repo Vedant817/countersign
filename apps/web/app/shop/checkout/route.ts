@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server'
 
-import { merchantIdentity } from '@/lib/merchant'
-import { createCheckout } from '@countersign/gate'
 import { csError } from '@countersign/core'
+import { getMerchantByPaypalMerchantId } from '@countersign/db'
+import { createCheckout } from '@countersign/gate'
+
 import { DELIVERY_COUNTRIES } from '@/lib/delivery'
+import { merchantIdentity } from '@/lib/merchant'
+import { requireRegisteredStore } from '@/lib/registered-store'
 import { shopCatalog } from '../catalog'
 import { shopCheckout } from '../checkout-store'
 
@@ -91,6 +94,13 @@ export async function POST(request: Request): Promise<Response> {
       },
     )
   }
+
+  const registered = await requireRegisteredStore(merchant.value.id, getMerchantByPaypalMerchantId)
+  if (!registered.ok)
+    return Response.json(
+      { error: { code: registered.error.code, message: registered.error.userMessage } },
+      { status: 503 },
+    )
 
   const result = await createCheckout(
     { catalog: shopCatalog, checkout: shopCheckout },
