@@ -51,6 +51,7 @@ import {
   devices,
   disputes,
   mandates,
+  merchants,
   orders,
   paypalWallets,
   users,
@@ -69,6 +70,8 @@ const epochSec = (d: Date): bigint => BigInt(Math.floor(d.getTime() / 1000))
 
 const USER = id('usr', 1)
 const USER_B = id('usr', 2)
+const MERCHANT_USER = id('usr', 3)
+const MERCHANT = id('mer', 1)
 const DEVICE = id('dev', 1)
 const DEVICE_B = id('dev', 2)
 const WALLET = id('wal', 1)
@@ -117,6 +120,7 @@ async function cleanup(tx: Tx): Promise<void> {
   await tx.delete(agents).where(like(agents.id, `%${P}%`))
   await tx.delete(paypalWallets).where(like(paypalWallets.id, `%${P}%`))
   await tx.delete(devices).where(like(devices.id, `%${P}%`))
+  await tx.delete(merchants).where(like(merchants.id, `%${P}%`))
   await tx.delete(users).where(like(users.id, `%${P}%`))
 }
 
@@ -168,7 +172,20 @@ async function seedWorld(tx: Tx): Promise<void> {
       email: 'e2e-buyer-2@example.test',
       country: 'US',
     },
+    {
+      id: MERCHANT_USER,
+      persona: 'MERCHANT',
+      display_name: 'E2E merchant',
+      email: 'e2e-merchant@example.test',
+      country: 'US',
+    },
   ])
+  await tx.insert(merchants).values({
+    id: MERCHANT,
+    owner_user_id: MERCHANT_USER,
+    display_name: 'E2E merchant',
+    paypal_merchant_id: 'mrc_e2e',
+  })
   await tx.insert(devices).values([
     { id: DEVICE, user_id: USER, public_jwk: {}, jkt: `jkt-${P}1`, label: 'e2e device 1' },
     { id: DEVICE_B, user_id: USER_B, public_jwk: {}, jkt: `jkt-${P}2`, label: 'e2e device 2' },
@@ -266,6 +283,7 @@ describe.skipIf(!hasDatabase)(
           await tx.insert(orders).values({
             id: order,
             attempt_id: attempt,
+            merchant_id: MERCHANT,
             paypal_order_id: `PP-ORDER-${P}${h.n}`,
             intent: 'CAPTURE',
             custom_id: `cs1:${'A'.repeat(43)}`,

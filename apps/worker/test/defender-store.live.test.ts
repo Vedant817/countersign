@@ -46,6 +46,7 @@ import {
   gateDecisions,
   l1Credentials,
   mandates,
+  merchants,
   orders,
   paypalWallets,
   shipments,
@@ -60,6 +61,8 @@ const hasDatabase = (process.env['DATABASE_URL'] ?? '').trim() !== ''
 const P = 'wkr_def_'
 const ids = {
   user: `usr_${P}1`,
+  merchantUser: `usr_${P}mrc`,
+  merchant: `mer_${P}1`,
   device: `dev_${P}1`,
   wallet: `wal_${P}1`,
   agent: `agt_${P}1`,
@@ -122,17 +125,33 @@ async function cleanup(tx: Tx): Promise<void> {
   await tx.delete(agents).where(like(agents.id, `%${P}%`))
   await tx.delete(paypalWallets).where(like(paypalWallets.id, `%${P}%`))
   await tx.delete(devices).where(like(devices.id, `%${P}%`))
+  await tx.delete(merchants).where(like(merchants.id, `%${P}%`))
   await tx.delete(users).where(like(users.id, `%${P}%`))
 }
 
 /** The full §7.3 chain — every row the bundle's five-table walk reads. */
 async function seedWorld(tx: Tx): Promise<void> {
-  await tx.insert(users).values({
-    id: ids.user,
-    persona: 'BUYER',
-    display_name: 'worker defender e2e buyer',
-    email: 'wkr-def@example.test',
-    country: 'US',
+  await tx.insert(users).values([
+    {
+      id: ids.user,
+      persona: 'BUYER',
+      display_name: 'worker defender e2e buyer',
+      email: 'wkr-def@example.test',
+      country: 'US',
+    },
+    {
+      id: ids.merchantUser,
+      persona: 'MERCHANT',
+      display_name: 'worker defender merchant',
+      email: 'wkr-def-mrc@example.test',
+      country: 'US',
+    },
+  ])
+  await tx.insert(merchants).values({
+    id: ids.merchant,
+    owner_user_id: ids.merchantUser,
+    display_name: 'worker defender merchant',
+    paypal_merchant_id: 'mrc_wkr_def',
   })
   await tx.insert(devices).values({
     id: ids.device,
@@ -227,6 +246,7 @@ async function seedWorld(tx: Tx): Promise<void> {
   await tx.insert(orders).values({
     id: ids.order,
     attempt_id: ids.attempt,
+    merchant_id: ids.merchant,
     paypal_order_id: `PP-ORDER-${P}`,
     intent: 'CAPTURE',
     custom_id: `cs1:${'A'.repeat(43)}`,
@@ -238,6 +258,7 @@ async function seedWorld(tx: Tx): Promise<void> {
   await tx.insert(orders).values({
     id: ids.order2,
     attempt_id: ids.attempt2,
+    merchant_id: ids.merchant,
     paypal_order_id: `PP-ORDER-${P}2`,
     intent: 'CAPTURE',
     custom_id: `cs1:${'B'.repeat(43)}`,
@@ -345,6 +366,7 @@ describe.skipIf(!hasDatabase)('dbDefenderStore — evidence.bundle assembles the
       await tx.insert(orders).values({
         id: order3,
         attempt_id: attempt3,
+        merchant_id: ids.merchant,
         paypal_order_id: `PP-ORDER-${P}3`,
         intent: 'CAPTURE',
         custom_id: `cs1:${'C'.repeat(43)}`,
