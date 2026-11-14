@@ -19,7 +19,7 @@
  * `update_time`, and refuses to move a row backwards. That is why `update_time` matters even though it
  * is not a column here: `fetched_at` carries it, and the caller passes the comparison in.
  */
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, getTableColumns, sql } from 'drizzle-orm'
 
 import type { CsError, Currency, Money, OrderId, Result, ShipmentId } from '@countersign/core'
 
@@ -124,6 +124,68 @@ export function findOrderByAttempt(
       return rows[0] as OrderRow | undefined
     },
     { table: 'orders', attemptId },
+  )
+}
+
+/**
+ * An order, but only if it belongs to `merchantId` — the merchant isolation §7.2 / D-059 asks for.
+ *
+ * `undefined` covers three different facts on purpose: the id names no row, the row has no order, or the
+ * row belongs to **another merchant**. A merchant surface must not be able to tell those apart, because
+ * "that order exists but is not yours" is an existence oracle over every other merchant's takings. The
+ * route turns `undefined` into one `CS_NOT_FOUND` and never into a `403` that confirms the row.
+ *
+ * The join is on `orders.merchant_id` rather than a second read and a comparison in TypeScript: the same
+ * shape `findDisputeForMerchant` uses, and one statement means no window in which the order could change
+ * hands between the read and the check.
+ */
+export function findOrderForMerchant(
+  orderId: string,
+  merchantId: string,
+  exec?: Exec,
+): Promise<Result<OrderRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select(getTableColumns(orders))
+        .from(orders)
+        .where(and(eq(orders.id, orderId as OrderId), eq(orders.merchant_id, merchantId)))
+        .limit(1)
+      return rows[0] as OrderRow | undefined
+    },
+    { table: 'orders', op: 'find_for_merchant', orderId, merchantId },
+  )
+}
+
+/**
+ * A capture, but only if its order belongs to `merchantId`.
+ *
+ * This exists because `refund()` takes a **PayPal** capture id and looks it up globally
+ * (`captures_paypal_capture_id_key` is unique, and `findCaptureByPaypalId` is the right call for a webhook
+ * that already knows the money). A merchant route has no such knowledge: a `cap_…`-shaped guess, or a
+ * PayPal id read off another merchant's page, must not become a refund. So the route resolves the capture
+ * through this finder first and passes the row's `paypal_capture_id` on — which means the merchant check
+ * happens before the refund's own lookups, and a wrong-merchant capture makes no PayPal call at all.
+ *
+ * `exec` is honoured for the same reason as everywhere else in this file: a caller that already holds a
+ * transaction (a future "refund and restock" that must be one unit) must not have the check escape it.
+ */
+export function findCaptureForMerchant(
+  captureId: string,
+  merchantId: string,
+  exec?: Exec,
+): Promise<Result<CaptureRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select(getTableColumns(captures))
+        .from(captures)
+        .innerJoin(orders, eq(captures.order_id, orders.id))
+        .where(and(eq(captures.id, captureId), eq(orders.merchant_id, merchantId)))
+        .limit(1)
+      return rows[0] as CaptureRow | undefined
+    },
+    { table: 'captures', op: 'find_for_merchant', captureId, merchantId },
   )
 }
 
