@@ -393,6 +393,38 @@ export const users = pgTable(
 )
 
 /* ------------------------------------------------------------------------------------------ */
+/* merchants                                                                                  */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * Real merchant identities (§7.2, D-059).
+ *
+ * Links an owning user account to their seller profile and PayPal merchant identifier.
+ * Exactly one merchant profile per owner account.
+ */
+export const merchants = pgTable(
+  'merchants',
+  {
+    id: text('id').primaryKey(),
+    /** The user who owns and administers this merchant profile. */
+    owner_user_id: text('owner_user_id')
+      .notNull()
+      .references(() => users.id),
+    display_name: text('display_name').notNull(),
+    /** The merchant's PayPal payer/merchant id, populated during onboarding. */
+    paypal_merchant_id: text('paypal_merchant_id'),
+    status: text('status').notNull().default('ACTIVE'),
+    created_at: createdAt(),
+    updated_at: updatedAt(),
+  },
+  (t) => [
+    check('merchants_status_check', sql`${t.status} IN ('ACTIVE', 'SUSPENDED')`),
+    uniqueIndex('merchants_owner_user_id_key').on(t.owner_user_id),
+    uniqueIndex('merchants_paypal_merchant_id_key').on(t.paypal_merchant_id),
+  ],
+)
+
+/* ------------------------------------------------------------------------------------------ */
 /* 2. paypal_wallets                                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
@@ -871,6 +903,7 @@ export const orders = pgTable(
     attempt_id: text('attempt_id')
       .notNull()
       .references(() => checkoutAttempts.id),
+    merchant_id: text('merchant_id').references(() => merchants.id),
     /** UNIQUE — mirrors the PayPal order id. */
     paypal_order_id: text('paypal_order_id').notNull(),
     intent: orderIntentEnum('intent').notNull(),
@@ -891,6 +924,7 @@ export const orders = pgTable(
   (t) => [
     uniqueIndex('orders_paypal_order_id_key').on(t.paypal_order_id),
     uniqueIndex('orders_attempt_id_key').on(t.attempt_id),
+    index('orders_merchant_id_idx').on(t.merchant_id),
     // `custom_id` is how the webhook handler and the public verifier find the order from PayPal.
     index('orders_custom_id_idx').on(t.custom_id),
     // Nightly reconciler: "non-terminal orders updated in the last 30 days" (§8.12).
@@ -1514,9 +1548,11 @@ export type JwksKeyRow = typeof jwksKeys.$inferSelect
 export type JobRow = typeof jobs.$inferSelect
 export type WorkerJobRunRow = typeof workerJobRuns.$inferSelect
 export type LoginAttemptRow = typeof loginAttempts.$inferSelect
+export type MerchantRow = typeof merchants.$inferSelect
 
 /** Insert shapes, for `repos/*.ts`. */
 export type NewUser = typeof users.$inferInsert
+export type NewMerchant = typeof merchants.$inferInsert
 export type NewWallet = typeof paypalWallets.$inferInsert
 export type NewDevice = typeof devices.$inferInsert
 export type NewL1 = typeof l1Credentials.$inferInsert
