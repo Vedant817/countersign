@@ -189,4 +189,21 @@ describe('POST /api/auth/merchant-signup', () => {
     expect(auth.registerMerchant).not.toHaveBeenCalled()
     expect(auth.startSession).not.toHaveBeenCalled()
   })
+
+  it('answers 503 when registerMerchant returns CS_INTERNAL and does not call startSession', async () => {
+    auth.registerMerchant.mockResolvedValue(
+      err({
+        code: 'CS_INTERNAL',
+        message: 'Database unavailable.',
+        retryable: true,
+      }),
+    )
+    const response = await POST(
+      req({ email: MERCHANT_USER.email, password: PASSWORD, businessName: 'Acme Corp' }),
+    )
+    const { status, body } = await read(response)
+    expect(status).toBe(503)
+    expect(body.error?.code).toBe('CS_INTERNAL')
+    expect(auth.startSession).not.toHaveBeenCalled()
+  })
 })

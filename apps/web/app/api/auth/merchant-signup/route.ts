@@ -141,9 +141,13 @@ export async function POST(request: Request): Promise<Response> {
     ...(parsed.data.country === undefined ? {} : { country: parsed.data.country }),
   })
   if (!created.ok) {
-    return NextResponse.json(toBody(created.error), {
-      status: created.error.code === 'CS_UNAUTHENTICATED' ? 401 : 400,
-    })
+    const status =
+      created.error.code === 'CS_UNAUTHENTICATED'
+        ? 401
+        : created.error.code === 'CS_VALIDATION'
+          ? 400
+          : 503
+    return NextResponse.json(toBody(created.error), { status })
   }
 
   const session = await startSession({ userId: created.value.user.id })
