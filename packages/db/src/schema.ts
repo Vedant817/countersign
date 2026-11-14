@@ -903,7 +903,9 @@ export const orders = pgTable(
     attempt_id: text('attempt_id')
       .notNull()
       .references(() => checkoutAttempts.id),
-    merchant_id: text('merchant_id').references(() => merchants.id),
+    merchant_id: text('merchant_id')
+      .notNull()
+      .references(() => merchants.id),
     /** UNIQUE — mirrors the PayPal order id. */
     paypal_order_id: text('paypal_order_id').notNull(),
     intent: orderIntentEnum('intent').notNull(),

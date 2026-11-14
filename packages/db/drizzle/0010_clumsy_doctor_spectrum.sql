@@ -1,0 +1,2 @@
+UPDATE orders SET merchant_id = m.id FROM checkout_attempts a JOIN merchants m ON m.paypal_merchant_id = a.payee WHERE orders.attempt_id = a.id AND orders.merchant_id IS NULL;--> statement-breakpoint
+ALTER TABLE "orders" ALTER COLUMN "merchant_id" SET NOT NULL;

@@ -14,6 +14,28 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 ---
 
+## ☐ Pre-deploy check: verify and resolve orphaned orders before migration 0010
+
+**Blocks:** deploying migration 0010 (`orders.merchant_id` becomes `NOT NULL`).
+
+Before deploying migration 0010: run the step-3 count query on the production DB; any order whose payee matches no merchant must be assigned to its real merchant by hand (or the merchant must link that PayPal merchant id at `/merchant/settings`) or the migration will stop.
+
+Read-only SQL:
+
+```sql
+SELECT count(*)::int AS total_orders FROM orders;
+
+SELECT count(*)::int AS orders_without_merchant FROM orders WHERE merchant_id IS NULL;
+
+SELECT count(*)::int AS resolvable_null_orders
+FROM orders o
+JOIN checkout_attempts a ON a.id = o.attempt_id
+JOIN merchants m ON m.paypal_merchant_id = a.payee
+WHERE o.merchant_id IS NULL;
+```
+
+---
+
 ## ☐ 6. Set the merchant's password so `/login` has a merchant to sign in
 
 **Blocks:** the merchant half of PROD_AUDIT item 6 (real accounts). The code is complete and fails closed:

@@ -71,6 +71,13 @@
       "when": 1794642578282,
       "tag": "0009_merchants_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794653229787,
+      "tag": "0010_clumsy_doctor_spectrum",
+      "breakpoints": true
     }
   ]
 }
