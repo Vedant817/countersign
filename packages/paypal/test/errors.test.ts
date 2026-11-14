@@ -38,6 +38,13 @@ describe('the mapping table (§8.6)', () => {
       expect(isCsErrorCode(code), `${name} -> ${code}`).toBe(true)
     }
   })
+
+  it('maps the post-purchase money-movement names (§8.11), which arrive as `name`, not as an issue', () => {
+    expect(NAME_TO_CODE['AUTHORIZATION_ALREADY_CAPTURED']).toBe('PP_UNPROCESSABLE')
+    expect(NAME_TO_CODE['CAPTURE_FULLY_REFUNDED']).toBe('PP_UNPROCESSABLE')
+    expect(NAME_TO_CODE['REFUND_AMOUNT_EXCEEDED']).toBe('PP_UNPROCESSABLE')
+    expect(NAME_TO_CODE['ACTION_DOES_NOT_MATCH_INTENT']).toBe('PP_UNPROCESSABLE')
+  })
 })
 
 describe('mapPayPalError', () => {
@@ -94,6 +101,35 @@ describe('mapPayPalError', () => {
       body: { name: 'UNPROCESSABLE_ENTITY', details: [{ issue: 'AUTHORIZATION_EXPIRED' }] },
     })
     expect(e.code).toBe('PP_AUTH_EXPIRED')
+  })
+
+  /**
+   * The four post-purchase names (§8.11's capture / refund / void).
+   *
+   * PayPal returns each of them as the error `name`, not as a `details[].issue`, and each is a 422: our own
+   * guard should have refused the request before it left the process, so a `422` that keeps the name is
+   * what makes the disagreement findable. The status is asserted alongside the code because the fallback
+   * for 422 is already `PP_UNPROCESSABLE` — a mapping that silently fell through to the status would look
+   * identical, and the point of the entry is that it does not.
+   */
+  it.each([
+    ['AUTHORIZATION_ALREADY_CAPTURED', '/v2/payments/authorizations/8AB00000000000/capture'],
+    ['CAPTURE_FULLY_REFUNDED', '/v2/payments/captures/9C900000000000/refund'],
+    ['REFUND_AMOUNT_EXCEEDED', '/v2/payments/captures/9C900000000000/refund'],
+    ['ACTION_DOES_NOT_MATCH_INTENT', '/v2/payments/authorizations/8AB00000000000/capture'],
+  ] as const)('%s → PP_UNPROCESSABLE, with the name kept for triage', (name, path) => {
+    const e = mapPayPalError({
+      method: 'POST',
+      path,
+      status: 422,
+      body: { name, message: 'The requested action could not be performed.' },
+    })
+    expect(e.code).toBe('PP_UNPROCESSABLE')
+    expect(e.retryable).toBe(false)
+    // The whole reason the name is in the table: a bare 422 cannot be triaged, this can.
+    expect(e.details?.['paypal_name']).toBe(name)
+    expect(e.details?.['matched_token']).toBe(name)
+    expect(e.details?.['unmapped_name']).toBeUndefined()
   })
 
   it('RATE_LIMIT_REACHED / 429 → PP_RATE_LIMITED, retryable', () => {

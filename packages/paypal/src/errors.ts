@@ -75,6 +75,28 @@ export const NAME_TO_CODE: Readonly<Record<string, CsErrorCode>> = {
   // --- disputes / merchant action ---
   DISPUTE_HAS_NO_EVIDENCE: 'PP_UNPROCESSABLE',
   DISPUTE_STATE_NOT_ALLOWED: 'PP_UNPROCESSABLE',
+  // --- post-purchase money movement (M11, §8.11) ---
+  // These four are the names the *capture*, *refund* and *void* endpoints answer with when our own state
+  // machine and PayPal's disagree. They map to `PP_UNPROCESSABLE` rather than to a 409 because the answer
+  // is the same for every one of them: retrying cannot help, the request has to change. Each is a bug
+  // report against the local guard that let the request through, which is why the name is kept in
+  // `details.paypal_name` — a `422` that says only "unprocessable" would be impossible to triage.
+  //
+  // `AUTHORIZATION_ALREADY_CAPTURED` — `POST /v2/payments/authorizations/{id}/capture` on an
+  // authorization that is already fully captured. A retry with the *same* `PayPal-Request-Id` never gets
+  // here (PayPal deduplicates it and replays the original capture), so seeing this means a second capture
+  // was built with a different request id: `captureShipment`'s over-capture guard (EC-CAP-3) should have
+  // refused it first.
+  AUTHORIZATION_ALREADY_CAPTURED: 'PP_UNPROCESSABLE',
+  // `POST /v2/payments/captures/{id}/refund` on a capture whose refundable remainder is zero. `refund`
+  // computes the remainder locally and refuses an over-refund before any HTTP request (EC-REF-2), so this
+  // one also means the two disagree.
+  CAPTURE_FULLY_REFUNDED: 'PP_UNPROCESSABLE',
+  // The same disagreement from the other side: PayPal says the amount is above what is refundable.
+  REFUND_AMOUNT_EXCEEDED: 'PP_UNPROCESSABLE',
+  // The action does not match the order's `intent` — capturing an `AUTHORIZE` order is fine, capturing a
+  // `CAPTURE` order is not. Our own `intentForLines` decides the intent, so this is a bug report.
+  ACTION_DOES_NOT_MATCH_INTENT: 'PP_UNPROCESSABLE',
   // --- OAuth ---
   invalid_client: 'PP_AUTH',
   invalid_grant: 'PP_AUTH',
