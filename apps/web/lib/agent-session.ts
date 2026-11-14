@@ -85,7 +85,7 @@ type ViCheckoutConstraints = NonNullable<L2PrepareRequest['checkout_constraints'
 type ViPaymentConstraints = NonNullable<L2PrepareRequest['payment_constraints']>
 
 import { merchantIdentity } from './merchant'
-import { applyCap } from './apply-cap'
+import { applyCap, assertStoreCurrency } from './apply-cap'
 import { compileIntent, compilerModelLabel } from './intent-compiler'
 import { createDemoDeviceKey } from './demo-device'
 import { pickActiveWallet } from './active-wallet'
@@ -300,6 +300,8 @@ export async function provisionAgentSession(
   // --- 4. The mandate: compiled, prepared, signed, finalised ----------------------------------------
   const compiledResult = await compileIntent({ userId: input.userId, text: input.intent })
   if (!compiledResult.ok) return err(compiledResult.error)
+  const currencyOk = assertStoreCurrency(compiledResult.value)
+  if (!currencyOk.ok) return err(currencyOk.error)
 
   const finalConstraints = applyCap(
     compiledResult.value.constraints,

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { VIConstraint } from '@countersign/compiler'
+import type { CompiledMandate, VIConstraint } from '@countersign/compiler'
 
-import { applyCap } from './apply-cap'
+import { applyCap, assertStoreCurrency } from './apply-cap'
 import type { MerchantIdentity } from './merchant'
 
 const MERCHANT: MerchantIdentity = {
   id: 'mer_northwind',
   name: 'Northwind Outfitters',
-  website: 'https://northwind.example',
+  website: 'https://shop.test',
 }
 
 describe('applyCap', () => {
@@ -155,5 +155,90 @@ describe('applyCap', () => {
       originalAllowed,
     )
     expect(originalAllowed).toHaveLength(1)
+  })
+
+  it('adds the merchant with its real website and no value contains .example', () => {
+    const result = applyCap([], 5000n, MERCHANT)
+    const merchants = result.find((c) => c.type === 'mandate.checkout.allowed_merchants')
+    const payees = result.find((c) => c.type === 'mandate.payment.allowed_payees')
+
+    expect(
+      merchants?.type === 'mandate.checkout.allowed_merchants' && merchants.allowed[0]?.website,
+    ).toBe(MERCHANT.website)
+    expect(payees?.type === 'mandate.payment.allowed_payees' && payees.allowed[0]?.website).toBe(
+      MERCHANT.website,
+    )
+
+    const serialized = JSON.stringify(result, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
+    expect(serialized).not.toContain('.example')
+    expect(serialized).toContain(MERCHANT.website)
+  })
+})
+
+function makeCompiledMandate(
+  currency: 'USD' | 'INR' | string = 'USD',
+  constraints: VIConstraint[] = [],
+): CompiledMandate {
+  return {
+    currency: currency as never,
+    constraints,
+    ttlSeconds: 604800,
+    expiresAtEpochSec: 1700000000,
+    preferences: {},
+    assumptions: [],
+    ambiguities: [],
+  }
+}
+
+describe('assertStoreCurrency', () => {
+  it('ok for USD compiled mandate', () => {
+    const compiled = makeCompiledMandate('USD', [
+      { type: 'mandate.payment.amount_range', currency: 'USD', max: 5000n },
+      { type: 'mandate.payment.budget', currency: 'USD', max: 5000n },
+    ])
+    const result = assertStoreCurrency(compiled)
+    expect(result.ok).toBe(true)
+  })
+
+  it('err with code CS_VALIDATION when compiled currency is INR', () => {
+    const compiled = makeCompiledMandate('INR', [
+      { type: 'mandate.payment.amount_range', currency: 'INR', max: 5000n },
+    ])
+    const result = assertStoreCurrency(compiled)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('CS_VALIDATION')
+      expect(result.error.message).toBe(
+        'This store charges in USD. Please state your limit in dollars.',
+      )
+    }
+  })
+
+  it('err with code CS_VALIDATION when USD mandate has amount_range in INR', () => {
+    const compiled = makeCompiledMandate('USD', [
+      { type: 'mandate.payment.amount_range', currency: 'INR' as never, max: 5000n },
+    ])
+    const result = assertStoreCurrency(compiled)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('CS_VALIDATION')
+      expect(result.error.message).toBe(
+        'This store charges in USD. Please state your limit in dollars.',
+      )
+    }
+  })
+
+  it('err with code CS_VALIDATION when USD mandate has budget in INR', () => {
+    const compiled = makeCompiledMandate('USD', [
+      { type: 'mandate.payment.budget', currency: 'INR' as never, max: 5000n },
+    ])
+    const result = assertStoreCurrency(compiled)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('CS_VALIDATION')
+      expect(result.error.message).toBe(
+        'This store charges in USD. Please state your limit in dollars.',
+      )
+    }
   })
 })
