@@ -1,16 +1,12 @@
+import os from 'node:os'
+import path from 'node:path'
 import { chromium, type Page } from '@playwright/test'
 import { eq } from 'drizzle-orm'
 
-import { closeDb, db, findUserByEmail, paypalWallets } from '@countersign/db'
-
-// Default to local compose Postgres if not provided
-const localDatabase = new URL('postgres://127.0.0.1:5432/countersign')
-localDatabase.username = 'countersign'
-localDatabase.password = 'countersign'
-process.env['DATABASE_URL'] ??= localDatabase.href
+import { BUYER, closeDb, db, findUserByEmail, paypalWallets } from '@countersign/db'
 
 const baseUrl = process.env['BASE_URL'] ?? 'http://localhost:3000'
-const buyerEmail = process.env['BUYER_EMAIL'] ?? 'buyer.countersign@example.com'
+const buyerEmail = process.env['BUYER_EMAIL'] ?? BUYER.email
 const buyerPassword = process.env['BUYER_PASSWORD']
 const paypalBuyerEmail = process.env['PAYPAL_BUYER_EMAIL']
 const paypalBuyerPassword = process.env['PAYPAL_BUYER_PASSWORD']
@@ -21,8 +17,7 @@ async function saveFailureAndExit(
   step: string,
   errorText: string,
 ): Promise<never> {
-  const tempDir = process.env['TEMP'] || process.env['TMP'] || '.'
-  const screenshotPath = `${tempDir}\\cs-vault-${step}.png`
+  const screenshotPath = path.join(os.tmpdir(), `cs-vault-${step}.png`)
   let hostPath = 'unknown'
   if (page) {
     try {
@@ -49,7 +44,19 @@ async function saveFailureAndExit(
   process.exit(1)
 }
 
+async function saveSuccessScreenshot(page: Page, step: string): Promise<void> {
+  try {
+    const screenshotPath = path.join(os.tmpdir(), `cs-vault-ok-${step}.png`)
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+  } catch {
+    // Ignore screenshot error
+  }
+}
+
 async function main(): Promise<void> {
+  if (!process.env['DATABASE_URL']) {
+    await saveFailureAndExit(null, 'init', 'DATABASE_URL environment variable is missing')
+  }
   if (!buyerPassword) {
     await saveFailureAndExit(null, 'init', 'BUYER_PASSWORD environment variable is missing')
   }
@@ -61,12 +68,12 @@ async function main(): Promise<void> {
   }
 
   const browser = await chromium.launch({
+    channel: process.env['PW_CHANNEL'] || undefined,
     headless: !headed,
+    slowMo: headed ? 150 : undefined,
     args: ['--disable-blink-features=AutomationControlled'],
   })
   const context = await browser.newContext({
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     viewport: { width: 1280, height: 800 },
   })
   const page = await context.newPage()
@@ -86,6 +93,7 @@ async function main(): Promise<void> {
       await page.getByLabel('Password').fill(buyerPassword)
       await page.getByRole('button', { name: /sign in/i }).click()
       await page.waitForURL((url) => url.pathname.includes('/wallet'), { timeout: 30000 })
+      await saveSuccessScreenshot(page, 'buyer-login')
     } catch (e) {
       const bodyText = (await page.textContent('body')) ?? ''
       await saveFailureAndExit(
@@ -101,6 +109,7 @@ async function main(): Promise<void> {
       await saveBtn.waitFor({ state: 'visible', timeout: 15000 })
       await saveBtn.click()
       await page.waitForURL((url) => url.hostname.includes('paypal.com'), { timeout: 60000 })
+      await saveSuccessScreenshot(page, 'vault-start')
     } catch (e) {
       const bodyText = (await page.textContent('body')) ?? ''
       await saveFailureAndExit(
@@ -179,6 +188,7 @@ async function main(): Promise<void> {
           await passwordInput.press('Enter')
         }),
       ])
+      await saveSuccessScreenshot(page, 'paypal-login')
     } catch (e) {
       const bodyText = (await page.textContent('body')) ?? ''
       await saveFailureAndExit(
@@ -241,6 +251,7 @@ async function main(): Promise<void> {
           { timeout: 30000 },
         )
       }
+      await saveSuccessScreenshot(page, 'consent')
     } catch (e) {
       const bodyText = (await page.textContent('body')) ?? ''
       await saveFailureAndExit(

@@ -18,7 +18,8 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 **Blocks:** live PayPal vault payment token for the seeded buyer (Asha) on the local dev stack.
 
-**Context:** The automated headless Playwright vault-save script reached a genuine PayPal-side automation block (PayPal sandbox bot detection / non-JS security challenge during approval at `https://www.sandbox.paypal.com/agreements/approve`).
+**Context:** Headed Playwright vault-save run failed at step `paypal_login` at URL `https://www.sandbox.paypal.com/signin` with error: `PayPal login failed: page.waitForNavigation: Target page, context or browser has been closed. Page: Log in to your PayPal accountLog InForgot password?orSign UpAccept Cookies`.
+Also set BUYER_PASSWORD in .env.local and re-run `pnpm db:seed` first; the current buyer hash comes from a throwaway random password.
 
 **Steps to complete:**
 
