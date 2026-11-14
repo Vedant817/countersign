@@ -9,7 +9,7 @@ import 'server-only'
  * key bound into a signed mandate, a budget and a price lock. Every one of those is real here — vi
  * issues the L1, vi prepares and signs the L2, and the row that lands in `mandates` is the same row the
  * Gate reads. What is **fixture-like** is only the custody of the device key (`./demo-device.ts` explains
- * that) and the intent, which the caller supplies instead of a compiler run.
+ * that); the intent is compiled through a real compiler run.
  *
  * **The buyer is not created here (D-060).** `provisionAgentSession` requires the id of a row that already
  * exists — one a person created by signing up — and refuses anything else. Before this it minted a fresh
@@ -85,6 +85,8 @@ type ViCheckoutConstraints = NonNullable<L2PrepareRequest['checkout_constraints'
 type ViPaymentConstraints = NonNullable<L2PrepareRequest['payment_constraints']>
 
 import { merchantIdentity } from './merchant'
+import { applyCap } from './apply-cap'
+import { compileIntent, compilerModelLabel } from './intent-compiler'
 import { createDemoDeviceKey } from './demo-device'
 import { pickActiveWallet } from './active-wallet'
 import {
@@ -296,72 +298,96 @@ export async function provisionAgentSession(
   if (!l1.ok) return l1
 
   // --- 4. The mandate: compiled, prepared, signed, finalised ----------------------------------------
-  //
-  // Two shapes, deliberately, because the two sides genuinely disagree and papering over it is how a
-  // wrong number gets signed:
-  //
-  //  - `readBack` is the **compiler's** function and its templates distinguish an absent bound from a
-  //    `null` one (`min: null` threw inside `formatMoney`). So the compiler array omits absent bounds.
-  //  - vi's wire model mirrors pydantic: the `budget` bound is an `int` (the vi-client schema is
-  //    `z.number()`), while `amount_range` uses the `MinorAmount` transform. Passing a `bigint` for the
-  //    budget bound is refused by the client's own request validation — which is what happened, and why
-  //    the two arrays are built side by side instead of cast.
-  // vi's `budget` bound is a pydantic `int`, so the wire carries a JSON number (the vi-client's schema is
-  // `z.number()`). `toJsonSafe` is the compiler's sanctioned bigint → number boundary, and it **refuses**
-  // a value outside the safe range rather than rounding it the way `Number()` would.
-  const capNumber = toJsonSafe(input.capMinor) as number
+  const compiledResult = await compileIntent({ userId: input.userId, text: input.intent })
+  if (!compiledResult.ok) return err(compiledResult.error)
 
-  // --- 4a. What the buyer's sentence covers ---------------------------------------------------------
-  //
-  // The mandate must name the items it authorises: vi resolves the checkout-side constraint against the
-  // L2's own item disclosures and refuses a cart SKU the buyer never approved (`find_disclosures` fails
-  // closed — which is how this was found). In the real flow that list comes from `packages/compiler`'s
-  // catalog projection; here it is a literal keyword match over the merchant catalog, which is the demo's
-  // honest stand-in — and the read-back prints the entries, so a viewer can see what was authorised.
-  const acceptable = await acceptableItemsFor(input.intent)
-  if (!acceptable.ok) return acceptable
-  const itemList = acceptable.value
+  const finalConstraints = applyCap(
+    compiledResult.value.constraints,
+    input.capMinor,
+    merchant.value,
+  )
 
-  const constraints: VIConstraint[] = [
-    { type: 'mandate.checkout.allowed_merchants', allowed: [merchant.value] },
-    {
+  const existingLineItems = finalConstraints.find(
+    (c): c is Extract<VIConstraint, { type: 'mandate.checkout.line_items' }> =>
+      c.type === 'mandate.checkout.line_items',
+  )
+
+  let itemList: { readonly id: string; readonly title: string }[]
+  if (existingLineItems) {
+    itemList = existingLineItems.items.flatMap((item) => item.acceptable_items)
+  } else {
+    const acceptable = await acceptableItemsFor(input.intent)
+    if (!acceptable.ok) return acceptable
+    itemList = acceptable.value
+    finalConstraints.push({
       type: 'mandate.checkout.line_items',
-      items: [{ id: 'intent-items', acceptable_items: itemList, quantity: 1 }],
+      items: [{ id: 'intent-items', acceptable_items: [...itemList], quantity: 1 }],
       match_mode: 'minimum',
-    },
-    { type: 'mandate.payment.allowed_payees', allowed: [merchant.value] },
-    { type: 'mandate.payment.amount_range', currency: 'USD', max: input.capMinor },
-    { type: 'mandate.payment.budget', currency: 'USD', max: input.capMinor },
-  ] as VIConstraint[]
+    })
+  }
 
-  // The vi-client's *input* shapes, taken from its own request type rather than its exported output
-  // aliases: `PaymentConstraint` is post-transform (bigint), and the request schema is what runs.
-  const checkoutConstraints: ViCheckoutConstraints = [
-    { type: 'mandate.checkout.allowed_merchants', allowed: [merchant.value] },
-    {
-      type: 'mandate.checkout.line_items',
-      // `match_mode: 'minimum'` is the library's "the cart must be a subset of what I list" mode:
-      // `'exact'` would additionally require the cart to contain every listed requirement, which is not
-      // what "buy shoes under $50" means.
-      items: [{ id: 'intent-items', acceptable_items: itemList, quantity: 1 }],
-      match_mode: 'minimum',
-    },
-  ]
-  const paymentConstraints: ViPaymentConstraints = [
-    { type: 'mandate.payment.allowed_payees', allowed: [merchant.value] },
-    { type: 'mandate.payment.amount_range', currency: 'USD', min: null, max: capNumber },
-    { type: 'mandate.payment.budget', currency: 'USD', max: capNumber, min: null },
-  ]
+  // The vi-client's *input* shapes, derived from finalConstraints:
+  // Types starting `mandate.checkout.` go to checkoutConstraints, `mandate.payment.` go to paymentConstraints.
+  // Bigint amounts are converted with `toJsonSafe` (never `Number()`), and `min: null` is passed when a bound has no min.
+  const checkoutConstraints: ViCheckoutConstraints = []
+  const paymentConstraints: ViPaymentConstraints = []
+
+  for (const c of finalConstraints) {
+    if (c.type === 'mandate.checkout.allowed_merchants') {
+      checkoutConstraints.push({
+        type: 'mandate.checkout.allowed_merchants',
+        allowed: c.allowed,
+      })
+    } else if (c.type === 'mandate.checkout.line_items') {
+      checkoutConstraints.push({
+        type: 'mandate.checkout.line_items',
+        items: c.items,
+        match_mode: c.match_mode,
+      })
+    } else if (c.type === 'mandate.payment.allowed_payees') {
+      paymentConstraints.push({
+        type: 'mandate.payment.allowed_payees',
+        allowed: c.allowed,
+      })
+    } else if (c.type === 'mandate.payment.amount_range') {
+      paymentConstraints.push({
+        type: 'mandate.payment.amount_range',
+        currency: c.currency,
+        min: c.min !== undefined ? (toJsonSafe(c.min) as number) : null,
+        max: c.max !== undefined ? (toJsonSafe(c.max) as number) : null,
+      })
+    } else if (c.type === 'mandate.payment.budget') {
+      paymentConstraints.push({
+        type: 'mandate.payment.budget',
+        currency: c.currency,
+        min: c.min !== undefined ? (toJsonSafe(c.min) as number) : null,
+        max: toJsonSafe(c.max) as number,
+      })
+    } else if (c.type === 'mandate.payment.recurrence') {
+      paymentConstraints.push({
+        type: 'mandate.payment.recurrence',
+        frequency: c.frequency,
+        start_date: c.start_date,
+        end_date: c.end_date ?? null,
+        number: c.number ?? null,
+      })
+    } else if (c.type === 'mandate.payment.agent_recurrence') {
+      paymentConstraints.push({
+        type: 'mandate.payment.agent_recurrence',
+        frequency: c.frequency,
+        start_date: c.start_date,
+        end_date: c.end_date,
+        max_occurrences: c.max_occurrences ?? null,
+      })
+    }
+  }
 
   const expiresAtEpochSec = Math.floor(nowMs / 1000) + ttlSeconds
   const compiled: CompiledMandate = {
-    constraints,
-    currency: 'USD',
+    ...compiledResult.value,
+    constraints: finalConstraints,
     ttlSeconds,
     expiresAtEpochSec,
-    preferences: {},
-    assumptions: [],
-    ambiguities: [],
   }
   // The read-back is the compiler's own template, not a string written here: a demo that paraphrased the
   // sentence the buyer "signed" would be showing a promise the signature does not cover (§8.8).
@@ -414,13 +440,13 @@ export async function provisionAgentSession(
     l2_payload: toJsonSafe(prepared.value.payload) as never,
     nl_intent: input.intent,
     readback,
-    constraints: toJsonSafe(constraints) as never,
+    constraints: toJsonSafe(finalConstraints) as never,
     nonce,
     aud,
     iat: BigInt(iat),
     exp: BigInt(exp),
     status: 'ACTIVE',
-    compiler_model: 'demo-fixture',
+    compiler_model: compilerModelLabel(),
   })
   if (!mandate.ok) return mandate
 

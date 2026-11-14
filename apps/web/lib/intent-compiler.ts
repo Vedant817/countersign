@@ -3,7 +3,7 @@ import 'server-only'
 import { ok, type CsError, type Currency, type Result, type UserId } from '@countersign/core'
 import { compile, type CatalogReader, type CompiledMandate } from '@countersign/compiler'
 
-import { languageModel } from './llm'
+import { languageModel, readLlmConfig } from './llm'
 import { merchantIdentity } from './merchant'
 import { shopCatalog } from '../app/shop/catalog'
 
@@ -130,4 +130,13 @@ export async function compileIntent(
       clock: { nowSec: () => Math.floor(Date.now() / 1000) },
     },
   )
+}
+
+/**
+ * The model id the compiler is configured to call, or `'deterministic'` when no model is configured
+ * and the compiler runs without one.
+ */
+export function compilerModelLabel(): string {
+  const config = readLlmConfig()
+  return config.ok ? config.value.mainModel : 'deterministic'
 }
