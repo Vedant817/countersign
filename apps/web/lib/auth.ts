@@ -29,12 +29,14 @@ import 'server-only'
 import { csError, err, newId, ok, type CsError, type Result, type UserId } from '@countersign/core'
 import {
   burnPasswordCheck,
+  createMerchant,
   createUser,
   findUserByEmail,
   findUserById,
   hashPassword,
   setPasswordHash,
   verifyPassword,
+  withTx,
   type UserRow,
 } from '@countersign/db'
 
@@ -179,6 +181,90 @@ export async function registerBuyer(input: {
   const stored = await setPasswordHash(id, passwordHash)
   if (!stored.ok) return stored
   return ok(toSignedIn(withPassword))
+}
+
+/**
+ * Create a merchant account (a user with persona MERCHANT and a merchants row) atomically.
+ */
+export async function registerMerchant(input: {
+  readonly email: string
+  readonly password: string
+  readonly businessName: string
+  readonly country?: string
+}): Promise<Result<{ user: SignedInUser; merchantId: string }, CsError>> {
+  const email = normalizeEmail(input.email)
+  const passwordHash = await hashPassword(input.password)
+  const id = newId('usr') as UserId
+
+  class TxRollback extends Error {
+    readonly code: string
+    readonly details?: Record<string, unknown>
+    readonly userMessage?: string
+    readonly causeError: CsError
+
+    constructor(causeError: CsError) {
+      super(causeError.message)
+      this.name = 'TxRollback'
+      this.causeError = causeError
+      this.code = causeError.code
+      this.details = causeError.details
+      this.userMessage = causeError.userMessage
+    }
+  }
+
+  const txResult = await withTx(async (tx) => {
+    const createdUser = await createUser(
+      {
+        id,
+        persona: MERCHANT_PERSONA,
+        display_name: input.businessName,
+        email,
+        country: input.country ?? 'US',
+      },
+      tx,
+    )
+    if (!createdUser.ok) {
+      throw new TxRollback(createdUser.error)
+    }
+
+    const storedPassword = await setPasswordHash(id, passwordHash, tx)
+    if (!storedPassword.ok) {
+      throw new TxRollback(storedPassword.error)
+    }
+
+    const createdMerchant = await createMerchant(
+      {
+        ownerUserId: id,
+        displayName: input.businessName,
+      },
+      tx,
+    )
+    if (!createdMerchant.ok) {
+      throw new TxRollback(createdMerchant.error)
+    }
+
+    const withPassword: UserRow = { ...createdUser.value, password_hash: passwordHash }
+    return {
+      user: toSignedIn(withPassword),
+      merchantId: createdMerchant.value.id,
+    }
+  })
+
+  if (!txResult.ok) {
+    const errObj = txResult.error
+    const cause = errObj.cause instanceof TxRollback ? errObj.cause.causeError : errObj
+    if (
+      cause.code === 'CS_CONFLICT' ||
+      cause.details?.['pgCode'] === '23505' ||
+      errObj.code === 'CS_CONFLICT' ||
+      errObj.details?.['pgCode'] === '23505'
+    ) {
+      return err(duplicateAccount())
+    }
+    return err(cause)
+  }
+
+  return ok(txResult.value)
 }
 
 /**
