@@ -348,8 +348,12 @@ jobs:
       - name: migrate again (AT-M2.1 — must be a no-op)
         run: pnpm db:migrate
       - name: seed
+        env:
+          MERCHANT_ID: mrc_northwind
         run: pnpm db:seed
       - name: seed again (AT-M2.2 — must be idempotent)
+        env:
+          MERCHANT_ID: mrc_northwind
         run: pnpm db:seed
       - name: package tests against the seeded database
         # `packages/db`'s live suites (`repos.live.test.ts`, `repos.edge-cases.live.test.ts`) skip
@@ -446,6 +450,8 @@ jobs:
         # (`shopCatalogMode() === 'database'`), so a migrated-but-unseeded database serves an empty shop:
         # every storefront assertion fails on a missing product link, which is what the first CI run of this
         # job reported (9 of 16 tests, all of them waiting for a heading or a product that was never there).
+        env:
+          MERCHANT_ID: mrc_northwind
         run: pnpm db:seed
       - name: install chromium
         run: pnpm --filter @countersign/web exec playwright install --with-deps chromium

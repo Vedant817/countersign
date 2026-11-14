@@ -163,7 +163,9 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
         await e
           .update(merchants)
           .set({ paypal_merchant_id: paypalMerchantId, updated_at: new Date() })
-          .where(and(eq(merchants.id, merchantId), isNull(merchants.paypal_merchant_id)))
+          .where(
+            and(eq(merchants.owner_user_id, MERCHANT.id), isNull(merchants.paypal_merchant_id)),
+          )
       }
     },
     { table: 'merchants', id: merchantId },
