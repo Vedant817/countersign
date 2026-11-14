@@ -182,9 +182,17 @@ export default async function DisputesPage() {
 
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="font-mono text-xs uppercase tracking-widest text-ink-faint">
-        {merchant.displayName} · {merchant.email}
-      </p>
+      <div className="flex items-center gap-4">
+        <p className="font-mono text-xs uppercase tracking-widest text-ink-faint">
+          {merchant.displayName} · {merchant.email}
+        </p>
+        <Link
+          className="font-mono text-xs uppercase tracking-widest underline hover:text-ink-soft"
+          href="/merchant/settings"
+        >
+          Settings
+        </Link>
+      </div>
       <LogoutButton />
     </div>
   )
