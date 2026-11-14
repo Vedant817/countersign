@@ -25,6 +25,7 @@ export const SECRET_ENV_KEYS = [
   'PAYPAL_ACCESS_TOKEN',
   'PAYPAL_WEBHOOK_ID',
   'PAYPAL_BUYER_PASSWORD',
+  'BUYER_PASSWORD',
   'MERCHANT_PASSWORD',
   'SESSION_SECRET',
   'VI_SERVICE_TOKEN',
@@ -133,6 +134,15 @@ export const envSchema = z
      * operator to read the seed script.
      */
     MERCHANT_PASSWORD: z.string().optional(),
+
+    /**
+     * The buyer's password, read **only** by `pnpm db:seed`.
+     *
+     * It is optional and an empty value is treated as unset: a deployment with no `BUYER_PASSWORD` has
+     * no password login for the buyer persona at all, and the seed leaves `users.password_hash` null rather
+     * than storing a hash of the empty string.
+     */
+    BUYER_PASSWORD: z.string().optional(),
 
     /**
      * EC-ENV-1. A demo that accidentally takes real money is the worst failure available, so `live`

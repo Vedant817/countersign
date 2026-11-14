@@ -14,6 +14,15 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 ---
 
+## ☐ Set BUYER_PASSWORD and MERCHANT_PASSWORD in .env.local to passwords of your choice
+
+**Blocks:** local and preview sign-in for the buyer (Asha) and merchant personas at `/login`.
+
+1. Set `BUYER_PASSWORD` and `MERCHANT_PASSWORD` in `.env.local` to passwords of your choice.
+2. Re-run `pnpm db:seed` to store their scrypt hashes on the buyer and merchant rows in the database.
+
+---
+
 ## ☐ Pre-deploy check: verify and resolve orphaned orders before migration 0010
 
 **Blocks:** deploying migration 0010 (`orders.merchant_id` becomes `NOT NULL`).

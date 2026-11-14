@@ -100,6 +100,8 @@ export interface SeedSummary {
   readonly digital: number
   /** Whether `MERCHANT_PASSWORD` was set, so the merchant has a password login (D-059). */
   readonly merchantPasswordSet: boolean
+  /** Whether `BUYER_PASSWORD` was set, so the buyer has a password login. */
+  readonly buyerPasswordSet: boolean
 }
 
 /**
@@ -198,6 +200,17 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
   if (merchantPasswordSet) {
     const hashed = await hashPassword(merchantPassword)
     const stored = await setPasswordHash(MERCHANT.id, hashed, e)
+    if (!stored.ok) throw stored.error
+  }
+
+  // The buyer persona (Asha) similarly receives a password hash when `BUYER_PASSWORD` is supplied.
+  // Like `MERCHANT_PASSWORD`, an unset variable leaves `password_hash` alone so re-seeding does not
+  // clear an existing password.
+  const buyerPassword = process.env['BUYER_PASSWORD']?.trim() ?? ''
+  const buyerPasswordSet = buyerPassword.length > 0
+  if (buyerPasswordSet) {
+    const hashed = await hashPassword(buyerPassword)
+    const stored = await setPasswordHash(BUYER.id, hashed, e)
     if (!stored.ok) throw stored.error
   }
 
@@ -301,6 +314,7 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
     lastUnits: SEED_PRODUCTS.filter((p) => p.stock === 1).length,
     digital: SEED_PRODUCTS.filter((p) => p.digital).length,
     merchantPasswordSet,
+    buyerPasswordSet,
   }
 }
 
@@ -318,6 +332,7 @@ export function renderSummary(s: SeedSummary): string {
     '',
     `  users        ${s.users}  (${SEED_PERSONAS.map((p) => `${p.displayName} [${p.persona}]`).join(', ')})`,
     `  merchant     ${s.merchantPasswordSet ? 'password sign-in configured' : 'NO password - set MERCHANT_PASSWORD and re-run to enable /login'}`,
+    `  buyer        ${s.buyerPasswordSet ? 'password sign-in configured' : 'NO password - set BUYER_PASSWORD and re-run to enable /login'}`,
     `  devices      ${s.devices}  (placeholder JWK - WP-05 replaces it at enrolment)`,
     `  wallets      ${s.wallets}  (placeholder vault token — S-02 onboarding replaces it)`,
     `  wallet_caps  ${s.walletCaps}  (${SEED_WALLET_CAP.period} cap ${money} on ${SEED_WALLET_ID})`,
