@@ -64,6 +64,13 @@
       "when": 1794637226455,
       "tag": "0008_merchants",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794642578282,
+      "tag": "0009_merchants_backfill",
+      "breakpoints": true
     }
   ]
 }

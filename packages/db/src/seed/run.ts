@@ -43,7 +43,7 @@ import { pathToFileURL } from 'node:url'
 import { formatMoney } from '@countersign/core'
 
 import { closeDb, db, withTx, type Exec } from '../client'
-import { devices, paypalWallets, users, walletCaps, type JsonValue } from '../schema'
+import { devices, merchants, paypalWallets, users, walletCaps, type JsonValue } from '../schema'
 import { setPasswordHash } from '../repos/users'
 import { upsertProduct } from '../repos/products'
 import { hashPassword } from '../password'
@@ -138,6 +138,29 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
     )
     if (!written.ok) throw written.error
   }
+
+  const rawPaypalMerchantId = process.env['PAYPAL_MERCHANT_ID']?.trim()
+  const paypalMerchantId =
+    rawPaypalMerchantId && rawPaypalMerchantId.length > 0 ? rawPaypalMerchantId : null
+  const merchantId = `mer_${MERCHANT.id.replace(/^usr_/, '')}`
+
+  const seededMerchant = await repo(
+    async () => {
+      await e
+        .insert(merchants)
+        .values({
+          id: merchantId,
+          owner_user_id: MERCHANT.id,
+          display_name: MERCHANT.displayName,
+          paypal_merchant_id: paypalMerchantId,
+        })
+        .onConflictDoNothing({
+          target: merchants.owner_user_id,
+        })
+    },
+    { table: 'merchants', id: merchantId },
+  )
+  if (!seededMerchant.ok) throw seededMerchant.error
 
   // D-059: the merchant is the only persona with a password, and only when the operator supplied one.
   // An unset `MERCHANT_PASSWORD` deliberately leaves `password_hash` alone: clearing it on a re-run

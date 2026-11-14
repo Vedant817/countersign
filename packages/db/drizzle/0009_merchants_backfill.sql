@@ -1,0 +1,2 @@
+INSERT INTO merchants (id, owner_user_id, display_name) SELECT 'mer_' || replace(gen_random_uuid()::text, '-', ''), u.id, u.display_name FROM users u WHERE u.persona = 'MERCHANT' AND NOT EXISTS (SELECT 1 FROM merchants m WHERE m.owner_user_id = u.id);--> statement-breakpoint
+UPDATE orders SET merchant_id = (SELECT id FROM merchants LIMIT 1) WHERE merchant_id IS NULL AND (SELECT count(*) FROM merchants) = 1;

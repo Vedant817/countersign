@@ -21,7 +21,8 @@
  * that a shared wallet cap is enforced across two different mandates. The real race belongs to WP-10's
  * integration suite; pretending a `Map` proves it would be a false assurance.
  */
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 
 import {
   fromPayPalValue,
@@ -51,7 +52,15 @@ import {
   SEED_PERSONAS,
   SEED_WALLET_ID,
 } from '../src/seed/personas'
-import { SEED_WALLET_CAP, renderSummary } from '../src/seed/run'
+import { SEED_WALLET_CAP, renderSummary, runSeed } from '../src/seed/run'
+import { closeDb, db } from '../src/client'
+import { merchants } from '../src/schema'
+
+const hasDatabase = (process.env['DATABASE_URL'] ?? '').trim() !== ''
+
+afterAll(async () => {
+  if (hasDatabase) await closeDb()
+})
 import type { BudgetStore } from '../src/repos/budget'
 import {
   budgetExceeded,
@@ -750,5 +759,29 @@ describe('§7.2 reconcile: balances must equal the sum of entries', () => {
     expect(error.details?.['requestedMinor']).toBe('4000')
     expect(error.details?.['availableMinor']).toBe('1000')
     expect(error.details?.['currency']).toBe('USD')
+  })
+})
+
+/* ------------------------------------------------------------------------------------------ */
+/* Seed live database assertions                                                              */
+/* ------------------------------------------------------------------------------------------ */
+
+describe.skipIf(!hasDatabase)('seed idempotency (live database)', () => {
+  it('merchants row for the MERCHANT persona exists after the seed and running it twice does not create a second', async () => {
+    await runSeed()
+    const firstRows = await db()
+      .select()
+      .from(merchants)
+      .where(eq(merchants.owner_user_id, MERCHANT.id))
+    expect(firstRows).toHaveLength(1)
+    expect(firstRows[0]!.owner_user_id).toBe(MERCHANT.id)
+
+    await runSeed()
+    const secondRows = await db()
+      .select()
+      .from(merchants)
+      .where(eq(merchants.owner_user_id, MERCHANT.id))
+    expect(secondRows).toHaveLength(1)
+    expect(secondRows[0]!.id).toBe(firstRows[0]!.id)
   })
 })
