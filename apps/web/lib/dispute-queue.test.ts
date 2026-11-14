@@ -18,15 +18,14 @@ import {
   checkoutAttempts,
   checkoutSessions,
   closeDb,
-  createMerchant,
   db,
   disputes,
-  getMerchantByOwner,
   mandates,
-  MERCHANT,
+  merchants,
   orders,
   SEED_DEVICE_ID,
   SEED_WALLET_ID,
+  users,
 } from '@countersign/db'
 
 import {
@@ -45,7 +44,8 @@ const disputeId = (n: number): string => `dsp_${P}${String(n).padStart(24, '0')}
 const orderId = (n: number): string => `ord_${P}${String(n).padStart(24, '0')}`
 const attemptId = (n: number): string => `att_${P}${String(n).padStart(24, '0')}`
 
-let MERCHANT_ID = `mer_${MERCHANT.id.replace(/^usr_/, '')}`
+const USER_ID = `usr_${P}${'0'.repeat(20)}1`
+const MERCHANT_ID = `mer_${P}${'0'.repeat(20)}1`
 const agentId = `agt_${P}000000000000000000001`
 const mandateId = `mdt_${P}000000000000000000001`
 const sessionId = `chk_${P}000000000000000000001`
@@ -57,18 +57,25 @@ const insertedAttempts: string[] = []
 beforeAll(async () => {
   if (!DATABASE_URL) return
 
-  const found = await getMerchantByOwner(MERCHANT.id)
-  if (found.ok && found.value) {
-    MERCHANT_ID = found.value.id
-  } else {
-    const created = await createMerchant({
-      id: MERCHANT_ID,
-      ownerUserId: MERCHANT.id,
-      displayName: MERCHANT.displayName,
+  await db()
+    .insert(users)
+    .values({
+      id: USER_ID,
+      persona: 'MERCHANT',
+      display_name: 'Queue Test Merchant',
+      email: `merchant-${P}@example.test`,
+      country: 'US',
     })
-    if (!created.ok) throw created.error
-    MERCHANT_ID = created.value.id
-  }
+    .onConflictDoNothing()
+
+  await db()
+    .insert(merchants)
+    .values({
+      id: MERCHANT_ID,
+      owner_user_id: USER_ID,
+      display_name: 'Queue Test Merchant',
+    })
+    .onConflictDoNothing()
 
   await db()
     .insert(agents)
@@ -202,6 +209,8 @@ afterAll(async () => {
     await db().delete(checkoutSessions).where(eq(checkoutSessions.id, sessionId))
     await db().delete(mandates).where(eq(mandates.id, mandateId))
     await db().delete(agents).where(eq(agents.id, agentId))
+    await db().delete(merchants).where(eq(merchants.id, MERCHANT_ID))
+    await db().delete(users).where(eq(users.id, USER_ID))
   }
   await closeDb()
 })
@@ -301,5 +310,6 @@ describe('routerRuleId', () => {
     expect(routerRuleId({})).toBeNull()
     expect(routerRuleId({ ruleId: 42 })).toBeNull()
     expect(routerRuleId({ ruleId: '' })).toBeNull()
+    expect(routerRuleId('R-SNAD-OK')).toBeNull()
   })
 })
