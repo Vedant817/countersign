@@ -24,15 +24,21 @@ export async function startVault(
   const body: SetupTokenReq = {
     payment_source: {
       paypal: {
-        usage_type: 'MERCHANT',
+        description:
+          'Countersign saves your PayPal account so purchases you pre-approve can be charged later.',
+        permit_multiple_payment_tokens: false,
         usage_pattern: 'IMMEDIATE',
+        usage_type: 'MERCHANT',
+        customer_type: 'CONSUMER',
         experience_context: {
+          brand_name: 'Countersign',
+          locale: 'en-US',
+          shipping_preference: 'NO_SHIPPING',
+          payment_method_preference: 'IMMEDIATE_PAYMENT_REQUIRED',
           return_url: input.returnUrl,
           cancel_url: input.cancelUrl,
-          shipping_preference: 'NO_SHIPPING',
-          vault_instruction: 'ON_PAYER_APPROVAL',
         },
-      } as unknown as NonNullable<SetupTokenReq['payment_source']>['paypal'],
+      },
     },
   }
 

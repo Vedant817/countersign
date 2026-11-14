@@ -54,7 +54,12 @@ describe('wallet-vault', () => {
       expect(expContext?.['return_url']).toBe('https://countersign.test/vault/return')
       expect(expContext?.['cancel_url']).toBe('https://countersign.test/vault/cancel')
       expect(expContext?.['shipping_preference']).toBe('NO_SHIPPING')
-      expect(expContext?.['vault_instruction']).toBe('ON_PAYER_APPROVAL')
+      expect(expContext?.['vault_instruction']).toBeUndefined()
+      expect(paypal?.['customer_type']).toBe('CONSUMER')
+      expect(paypal?.['permit_multiple_payment_tokens']).toBe(false)
+      expect(typeof paypal?.['description']).toBe('string')
+      expect(expContext?.['brand_name']).toBe('Countersign')
+      expect(expContext?.['payment_method_preference']).toBe('IMMEDIATE_PAYMENT_REQUIRED')
     })
 
     it('with only a payer-action link uses it', async () => {

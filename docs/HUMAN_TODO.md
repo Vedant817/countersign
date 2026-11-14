@@ -18,8 +18,7 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 **Blocks:** live PayPal vault payment token for the seeded buyer (Asha) on the local dev stack.
 
-**Context:** Headed Playwright vault-save run reached `paypal_consent` but failed at URL `https://www.sandbox.paypal.com/checkoutweb/genericError` with error: `PayPal approval step failed: TimeoutError: page.waitForURL: Timeout 30000ms exceeded. Page: Things don’t appear to be working at the`.
-Also set BUYER_PASSWORD in .env.local and re-run `pnpm db:seed` first; the current buyer hash comes from a throwaway random password.
+**Context:** Setup-token payload now matches PayPal's documented example (commit after eaa4f99) and PayPal still shows `checkoutweb/genericError` at consent right after a successful sandbox login. Most likely cause is account eligibility: saving PayPal wallets without a purchase is only offered for business accounts in supported countries (US, UK, EU, CA, AU, JP, SG, HK and others; India is NOT on PayPal's list: https://developer.paypal.com/docs/checkout/save-payment-methods/purchase-later/payment-tokens-api/paypal/). Fix: in the PayPal Developer Dashboard > Testing Tools > Sandbox Accounts, check the country of the sandbox BUSINESS account whose merchant ID equals PAYPAL_MERCHANT_ID and of the sandbox PERSONAL buyer account. If either is IN, create a US business account and a US personal account, create a REST app on the US business account with Vault enabled (App Feature Options > Accept payments > Advanced options > Vault), update PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_MERCHANT_ID, PAYPAL_BUYER_EMAIL and PAYPAL_BUYER_PASSWORD in .env.local, re-run `pnpm db:seed`, then run `HEADED=1 PW_CHANNEL=chrome pnpm --filter @countersign/web exec tsx scripts/sandbox-vault-save.mts`.
 
 **Steps to complete:**
 
