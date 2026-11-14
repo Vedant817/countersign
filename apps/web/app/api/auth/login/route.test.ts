@@ -12,14 +12,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { err, ok } from '@countersign/core'
 import type * as DbModule from '@countersign/db'
+import type * as RateLimitModule from '@/lib/rate-limit'
 
 const auth = vi.hoisted(() => ({ authenticate: vi.fn(), startSession: vi.fn() }))
 vi.mock('@/lib/auth', () => auth)
 
+const rateLimit = vi.hoisted(() => ({
+  checkLoginRateLimit: vi.fn(),
+  resetLoginRateLimit: vi.fn(),
+}))
+vi.mock('@/lib/rate-limit', async (importOriginal) => ({
+  ...(await importOriginal<typeof RateLimitModule>()),
+  ...rateLimit,
+}))
+
 const dbMock = vi.hoisted(() => ({
   appendAudit: vi.fn(),
-  consumeLoginAttempt: vi.fn(),
-  resetLoginAttempts: vi.fn(),
 }))
 vi.mock('@countersign/db', async (importOriginal) => ({
   ...(await importOriginal<typeof DbModule>()),
@@ -62,8 +70,8 @@ async function read(response: Response): Promise<{
 
 beforeEach(async () => {
   vi.clearAllMocks()
-  dbMock.consumeLoginAttempt.mockResolvedValue({ allowed: true, retryAfterSec: 0 })
-  dbMock.resetLoginAttempts.mockResolvedValue(undefined)
+  rateLimit.checkLoginRateLimit.mockResolvedValue({ allowed: true, retryAfterSec: 0 })
+  rateLimit.resetLoginRateLimit.mockResolvedValue(undefined)
   await resetLoginRateLimit()
   auth.authenticate.mockResolvedValue(ok(MERCHANT))
   auth.startSession.mockResolvedValue(ok({}))
@@ -106,7 +114,7 @@ describe('POST /api/auth/login', () => {
       const response = await POST(req({ email: MERCHANT.email, password: 'a password' }))
       expect((await read(response)).status, `attempt ${attempt}`).toBe(200)
     }
-    dbMock.consumeLoginAttempt.mockResolvedValueOnce({ allowed: false, retryAfterSec: 900 })
+    rateLimit.checkLoginRateLimit.mockResolvedValueOnce({ allowed: false, retryAfterSec: 900 })
     const response = await POST(req({ email: MERCHANT.email, password: 'a password' }))
     const { status, body } = await read(response)
     expect(status).toBe(429)
@@ -116,7 +124,7 @@ describe('POST /api/auth/login', () => {
   })
 
   it('answers 503 when the rate limit check fails closed', async () => {
-    dbMock.consumeLoginAttempt.mockRejectedValue(new Error('Postgres connection lost'))
+    rateLimit.checkLoginRateLimit.mockRejectedValue(new Error('Postgres connection lost'))
     const response = await POST(req({ email: MERCHANT.email, password: 'a password' }))
     const { status, body } = await read(response)
     expect(status).toBe(503)
