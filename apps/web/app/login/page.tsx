@@ -16,6 +16,7 @@
  * not a page that names the seeded merchant and invites a guess.
  */
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { currentUser } from '@/lib/auth'
@@ -50,6 +51,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         decide cases.
       </p>
       <LoginForm next={next} />
+      <p className="mt-6 text-sm text-ink-soft">
+        <Link className="underline underline-offset-4" href="/merchant-signup">
+          New merchant? Create an account
+        </Link>
+      </p>
     </main>
   )
 }
