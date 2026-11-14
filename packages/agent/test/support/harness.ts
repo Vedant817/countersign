@@ -337,6 +337,7 @@ export function fakeDeps(options: {
   readonly capMinor?: bigint | null
   readonly mandate?: MandateView
   readonly llm?: ShopDeps['llm']
+  readonly llmTimeoutMs?: number
 }): {
   deps: ShopDeps
   merchant: FakeMerchant
@@ -348,6 +349,7 @@ export function fakeDeps(options: {
   const mandate = options.mandate ?? fakeMandate()
   const deps: ShopDeps = {
     llm: options.llm ?? ({} as ShopDeps['llm']),
+    ...(options.llmTimeoutMs !== undefined ? { llmTimeoutMs: options.llmTimeoutMs } : {}),
     merchantMcp: merchant,
     mandate: fakeMandatePort(mandate),
     signer: fakeSigner({

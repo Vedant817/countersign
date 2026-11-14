@@ -170,4 +170,49 @@ describe('runShoppingAgent', () => {
     expect(events.at(-1)?.kind).toBe('final')
     expect(outcomeFromEvents(events).outcome).toBe('ERROR')
   })
+
+  it('times out when the model hangs, ending with an error event, attempting no checkout, in under 2000 ms', async () => {
+    const hanging = new MockLanguageModelV3({
+      provider: 'test',
+      modelId: 'hanging',
+      doStream: async (options) => {
+        const signal = options.abortSignal
+        return new Promise((_, reject) => {
+          if (signal?.aborted) {
+            reject(signal.reason ?? new Error('aborted'))
+            return
+          }
+          signal?.addEventListener('abort', () => {
+            reject(signal.reason ?? new Error('aborted'))
+          })
+        })
+      },
+    })
+    const { deps } = fakeDeps({
+      llm: asLanguageModel(hanging),
+      llmTimeoutMs: 50,
+    })
+    const started = Date.now()
+    const events = await collect(runShoppingAgent(REQUEST, deps))
+    const elapsed = Date.now() - started
+
+    expect(elapsed).toBeLessThan(2000)
+
+    // no checkout was attempted
+    const toolCalls = events.filter((e) => e.kind === 'tool_call')
+    expect(toolCalls).toHaveLength(0)
+
+    // assert the iterable ends with that error event
+    const errorEvent = events.find((e) => e.kind === 'error')
+    expect(errorEvent).toBeDefined()
+    expect(errorEvent?.data.error?.message).toBe(
+      'The shopping agent took too long to answer. Your limits were not used. Try again.',
+    )
+    expect(events.at(-2)?.kind).toBe('error')
+    expect(events.at(-1)?.kind).toBe('final')
+    expect(events.at(-1)?.data.text).toBe(
+      'The shopping agent took too long to answer. Your limits were not used. Try again.',
+    )
+    expect(outcomeFromEvents(events).outcome).toBe('ERROR')
+  })
 })

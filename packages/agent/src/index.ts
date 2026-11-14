@@ -37,6 +37,7 @@
 // --- the agent loop ---------------------------------------------------------------------------
 export {
   runShoppingAgent,
+  AGENT_LLM_TIMEOUT_MS,
   MAX_AGENT_STEPS,
   SHOPPING_AGENT_SYSTEM_PROMPT,
   errorEventData,

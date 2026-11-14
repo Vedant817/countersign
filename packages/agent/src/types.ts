@@ -265,6 +265,8 @@ export type InjectionClassifier = (
 export interface ShopDeps {
   /** The tool-calling model. Absent or failing means the caller should use {@link ScriptedShopper}. */
   readonly llm: LanguageModel
+  /** Hard timeout on the model call in milliseconds. Defaults to AGENT_LLM_TIMEOUT_MS. */
+  readonly llmTimeoutMs?: number
   readonly merchantMcp: MerchantMcp
   readonly mandate: MandatePort
   readonly signer: L3Signer

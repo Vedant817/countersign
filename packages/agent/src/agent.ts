@@ -40,6 +40,9 @@ import type {
   ShopRequest,
 } from './types'
 
+/** Hard timeout on the agent model call so a hung model cannot hang a buyer request. */
+export const AGENT_LLM_TIMEOUT_MS = 90_000
+
 /** §8.13's bound on model turns. */
 export const MAX_AGENT_STEPS = 12
 
@@ -150,12 +153,27 @@ export async function* runShoppingAgent(
       prompt: request.message,
       tools,
       stopWhen: isStepCount(MAX_AGENT_STEPS),
+      abortSignal: AbortSignal.timeout(deps.llmTimeoutMs ?? AGENT_LLM_TIMEOUT_MS),
     })
 
     for await (const part of result.fullStream) {
       if (part.type === 'text-delta') {
         finalText += part.text
         continue
+      }
+      if (part.type === 'abort') {
+        state.sawError = true
+        yield event('error', nowMs(), {
+          error: {
+            code: 'LLM_UNAVAILABLE',
+            message: AGENT_TIMEOUT_MESSAGE,
+          },
+        })
+        yield event('final', nowMs(), {
+          outcome: 'ERROR',
+          text: AGENT_TIMEOUT_MESSAGE,
+        })
+        return
       }
       if (part.type === 'tool-call') {
         const name = String(part.toolName)
@@ -206,19 +224,29 @@ export async function* runShoppingAgent(
       }
       if (part.type === 'error') {
         state.sawError = true
+        const timeout = isTimeoutError(part.error)
         yield event('error', nowMs(), {
-          error: { code: 'CS_INTERNAL', message: describeUnknown(part.error) },
+          error: {
+            code: timeout ? 'LLM_UNAVAILABLE' : 'CS_INTERNAL',
+            message: timeout ? AGENT_TIMEOUT_MESSAGE : describeUnknown(part.error),
+          },
         })
         continue
       }
     }
   } catch (cause) {
+    const timeout = isTimeoutError(cause)
     yield event('error', nowMs(), {
-      error: { code: 'CS_INTERNAL', message: describeUnknown(cause) },
+      error: {
+        code: timeout ? 'LLM_UNAVAILABLE' : 'CS_INTERNAL',
+        message: timeout ? AGENT_TIMEOUT_MESSAGE : describeUnknown(cause),
+      },
     })
     yield event('final', nowMs(), {
       outcome: 'ERROR',
-      text: 'I could not finish the run, so nothing was purchased.',
+      text: timeout
+        ? AGENT_TIMEOUT_MESSAGE
+        : 'I could not finish the run, so nothing was purchased.',
     })
     return
   } finally {
@@ -334,6 +362,23 @@ function describeUnknown(cause: unknown): string {
   const record = asRecord(cause)
   if (record !== undefined && typeof record['message'] === 'string') return record['message']
   return 'Unexpected failure.'
+}
+
+/** Plain buyer-readable message when the shopping agent model times out. */
+export const AGENT_TIMEOUT_MESSAGE =
+  'The shopping agent took too long to answer. Your limits were not used. Try again.'
+
+function isTimeoutError(cause: unknown): boolean {
+  if (typeof cause === 'string' && /timeout|timed out|abort/i.test(cause)) return true
+  let cursor: unknown = cause
+  for (let hop = 0; hop < 5 && cursor !== null && typeof cursor === 'object'; hop += 1) {
+    const name = (cursor as { name?: unknown }).name
+    if (name === 'TimeoutError' || name === 'AbortError') return true
+    const message = (cursor as { message?: unknown }).message
+    if (typeof message === 'string' && /timeout|timed out|abort/i.test(message)) return true
+    cursor = (cursor as { cause?: unknown }).cause
+  }
+  return false
 }
 
 /** A `CsError` as an event payload, for callers that want to emit one themselves. */
