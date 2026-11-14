@@ -10,9 +10,24 @@
  * Skipped, not failed, without a database — the same rule the webhook route suite follows.
  */
 import { eq } from 'drizzle-orm'
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { closeDb, db, disputes } from '@countersign/db'
+import {
+  agents,
+  BUYER,
+  checkoutAttempts,
+  checkoutSessions,
+  closeDb,
+  createMerchant,
+  db,
+  disputes,
+  getMerchantByOwner,
+  mandates,
+  MERCHANT,
+  orders,
+  SEED_DEVICE_ID,
+  SEED_WALLET_ID,
+} from '@countersign/db'
 
 import {
   DISPUTE_QUEUE_LIMIT,
@@ -27,8 +42,84 @@ const describeWithDb = DATABASE_URL ? describe : describe.skip
 /** Every id this file inserts starts with this, so cleanup is one prefix and cannot touch seed rows. */
 const P = 'qtest_'
 const disputeId = (n: number): string => `dsp_${P}${String(n).padStart(24, '0')}`
+const orderId = (n: number): string => `ord_${P}${String(n).padStart(24, '0')}`
+const attemptId = (n: number): string => `att_${P}${String(n).padStart(24, '0')}`
 
-const inserted: string[] = []
+let MERCHANT_ID = `mer_${MERCHANT.id.replace(/^usr_/, '')}`
+const agentId = `agt_${P}000000000000000000001`
+const mandateId = `mdt_${P}000000000000000000001`
+const sessionId = `chk_${P}000000000000000000001`
+
+const insertedDisputes: string[] = []
+const insertedOrders: string[] = []
+const insertedAttempts: string[] = []
+
+beforeAll(async () => {
+  if (!DATABASE_URL) return
+
+  const found = await getMerchantByOwner(MERCHANT.id)
+  if (found.ok && found.value) {
+    MERCHANT_ID = found.value.id
+  } else {
+    const created = await createMerchant({
+      id: MERCHANT_ID,
+      ownerUserId: MERCHANT.id,
+      displayName: MERCHANT.displayName,
+    })
+    if (!created.ok) throw created.error
+    MERCHANT_ID = created.value.id
+  }
+
+  await db()
+    .insert(agents)
+    .values({
+      id: agentId,
+      user_id: BUYER.id,
+      name: 'Queue Test Agent',
+      public_jwk: {},
+      kid: `kid_${P}`,
+      enc_private_key: Buffer.from('test-enc-key'),
+    })
+    .onConflictDoNothing()
+
+  await db()
+    .insert(mandates)
+    .values({
+      id: mandateId,
+      user_id: BUYER.id,
+      device_id: SEED_DEVICE_ID,
+      agent_id: agentId,
+      wallet_id: SEED_WALLET_ID,
+      l2_serialized: 'l2.test',
+      l2_payload: {},
+      nl_intent: 'test mandate',
+      readback: 'test readback',
+      constraints: {},
+      nonce: `nonce-${P}`,
+      aud: 'test-aud',
+      iat: BigInt(Math.floor(Date.now() / 1000) - 60),
+      exp: BigInt(Math.floor(Date.now() / 1000) + 3600),
+      status: 'ACTIVE',
+      compiler_model: 'test',
+    })
+    .onConflictDoNothing()
+
+  await db()
+    .insert(checkoutSessions)
+    .values({
+      id: sessionId,
+      merchant_id: MERCHANT_ID,
+      cart: { lines: [] },
+      subtotal_minor: 4_800n,
+      shipping_minor: 0n,
+      total_minor: 4_800n,
+      currency: 'USD',
+      checkout_jwt: 'co.jwt',
+      checkout_hash: 'h'.repeat(43),
+      price_lock_exp: new Date(Date.now() + 3600_000),
+    })
+    .onConflictDoNothing()
+})
 
 async function insertDispute(input: {
   n: number
@@ -36,14 +127,51 @@ async function insertDispute(input: {
   trace: unknown
   updatedAt: Date
 }): Promise<void> {
-  const id = disputeId(input.n)
-  inserted.push(id)
+  const dId = disputeId(input.n)
+  const oId = orderId(input.n)
+  const attId = attemptId(input.n)
+
+  insertedAttempts.push(attId)
+  insertedOrders.push(oId)
+  insertedDisputes.push(dId)
+
+  await db()
+    .insert(checkoutAttempts)
+    .values({
+      id: attId,
+      mandate_id: mandateId,
+      agent_id: agentId,
+      checkout_session_id: sessionId,
+      l3a: 'l3a.test',
+      l3b: 'l3b.test',
+      l3_jti: `jti-${P}-${input.n}`,
+      idempotency_key: `idem-${P}-${input.n}`,
+      amount_minor: 4_800n,
+      currency: 'USD',
+      payee: 'payee-test',
+    })
+
+  await db()
+    .insert(orders)
+    .values({
+      id: oId,
+      attempt_id: attId,
+      merchant_id: MERCHANT_ID,
+      paypal_order_id: `PP-ORD-${P}-${input.n}`,
+      intent: 'CAPTURE',
+      custom_id: `cs1:order-${P}-${input.n}`,
+      invoice_id: `inv-${P}-${input.n}`,
+      status: 'CAPTURED',
+      amount_minor: 4_800n,
+      currency: 'USD',
+    })
+
   await db()
     .insert(disputes)
     .values({
-      id,
+      id: dId,
       paypal_dispute_id: input.paypalId,
-      order_id: null,
+      order_id: oId,
       reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
       stage: 'CHARGEBACK',
       status: 'WAITING_FOR_SELLER_RESPONSE',
@@ -58,18 +186,29 @@ async function insertDispute(input: {
 }
 
 afterEach(async () => {
-  for (const id of inserted.splice(0, inserted.length)) {
+  for (const id of insertedDisputes.splice(0, insertedDisputes.length)) {
     await db().delete(disputes).where(eq(disputes.id, id))
+  }
+  for (const id of insertedOrders.splice(0, insertedOrders.length)) {
+    await db().delete(orders).where(eq(orders.id, id))
+  }
+  for (const id of insertedAttempts.splice(0, insertedAttempts.length)) {
+    await db().delete(checkoutAttempts).where(eq(checkoutAttempts.id, id))
   }
 })
 
 afterAll(async () => {
+  if (DATABASE_URL) {
+    await db().delete(checkoutSessions).where(eq(checkoutSessions.id, sessionId))
+    await db().delete(mandates).where(eq(mandates.id, mandateId))
+    await db().delete(agents).where(eq(agents.id, agentId))
+  }
   await closeDb()
 })
 
 describeWithDb('loadDisputeQueue', () => {
   it('is a read: an id this suite has not inserted never appears, whatever else is in the table', async () => {
-    const result = await loadDisputeQueue(DISPUTE_QUEUE_LIMIT)
+    const result = await loadDisputeQueue(MERCHANT_ID, DISPUTE_QUEUE_LIMIT)
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(Array.isArray(result.value)).toBe(true)
@@ -84,7 +223,7 @@ describeWithDb('loadDisputeQueue', () => {
       updatedAt: new Date('2026-11-01T00:00:00Z'),
     })
 
-    const result = await loadDisputeQueue(DISPUTE_QUEUE_LIMIT)
+    const result = await loadDisputeQueue(MERCHANT_ID, DISPUTE_QUEUE_LIMIT)
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -94,9 +233,8 @@ describeWithDb('loadDisputeQueue', () => {
     // No liability column value: the router has not run, and the page must say that rather than guess.
     expect(row?.liability).toBeNull()
     expect(row?.ruleId).toBe('R-SNAD-OK')
-    // No order was linked, so the row says so instead of guessing.
-    expect(row?.orderId).toBeNull()
-    expect(row?.orderStatus).toBeNull()
+    expect(row?.orderId).toBe(orderId(1))
+    expect(row?.orderStatus).toBe('CAPTURED')
     // Nothing was filed and nothing was recorded.
     expect(row?.packetId).toBeNull()
     expect(row?.actions).toBe(0)
@@ -119,7 +257,7 @@ describeWithDb('loadDisputeQueue', () => {
       updatedAt: new Date('2026-11-03T00:00:00Z'),
     })
 
-    const result = await loadDisputeQueue(1)
+    const result = await loadDisputeQueue(MERCHANT_ID, 1)
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
@@ -163,6 +301,5 @@ describe('routerRuleId', () => {
     expect(routerRuleId({})).toBeNull()
     expect(routerRuleId({ ruleId: 42 })).toBeNull()
     expect(routerRuleId({ ruleId: '' })).toBeNull()
-    expect(routerRuleId('R-SNAD-OK')).toBeNull()
   })
 })

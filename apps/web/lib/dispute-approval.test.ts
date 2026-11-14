@@ -23,7 +23,7 @@ import type * as DbModule from '@countersign/db'
 import type { FileDeps, FileOutcome } from '@countersign/orchestrator'
 
 const db = vi.hoisted(() => ({
-  findDisputeById: vi.fn(),
+  findDisputeForMerchant: vi.fn(),
   findDisputeBuyerUserId: vi.fn(),
   appendAudit: vi.fn(),
 }))
@@ -49,6 +49,7 @@ import {
 } from './dispute-approval'
 
 const DISPUTE_ID = 'dsp_000000000000000000000001'
+const MERCHANT_ID = 'mer_00000000000000000000000001'
 const ACTOR = 'usr_merchant_000000000000000'
 const BUYER = 'usr_buyer_00000000000000000'
 const FIXED_NOW = new Date('2026-11-13T10:00:00.000Z')
@@ -98,7 +99,7 @@ let file: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   vi.clearAllMocks()
-  db.findDisputeById.mockResolvedValue(ok(row()))
+  db.findDisputeForMerchant.mockResolvedValue(ok(row()))
   db.findDisputeBuyerUserId.mockResolvedValue(ok(undefined))
   db.appendAudit.mockResolvedValue(ok({ id: 'aud_test' }))
   file = vi.fn().mockResolvedValue(ok(outcome()))
@@ -114,10 +115,16 @@ function deps(overrides: Partial<DecisionDeps> = {}): DecisionDeps {
 }
 
 function input(
-  overrides: Partial<{ disputeId: string; decision: 'approve' | 'decline'; note: string }> = {},
+  overrides: Partial<{
+    disputeId: string
+    merchantId: string
+    decision: 'approve' | 'decline'
+    note: string
+  }> = {},
 ): Parameters<typeof decideDispute>[0] {
   return {
     disputeId: DISPUTE_ID,
+    merchantId: MERCHANT_ID,
     decision: 'approve',
     actorUserId: ACTOR as UserId,
     ...overrides,
@@ -207,7 +214,7 @@ describe('decideDispute — decline', () => {
 
 describe('decideDispute — the guards', () => {
   it('refuses a case already past approval with CS_CONFLICT and no PayPal call', async () => {
-    db.findDisputeById.mockResolvedValue(ok(row({ defense_state: 'FILED' })))
+    db.findDisputeForMerchant.mockResolvedValue(ok(row({ defense_state: 'FILED' })))
     const result = await decideDispute(input(), deps())
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -225,7 +232,7 @@ describe('decideDispute — the guards', () => {
     'CLOSED_LOST',
     'CLOSED_REFUNDED',
   ] as const)('treats %s as already past the click', async (state) => {
-    db.findDisputeById.mockResolvedValue(ok(row({ defense_state: state })))
+    db.findDisputeForMerchant.mockResolvedValue(ok(row({ defense_state: state })))
     const result = await decideDispute(input(), deps())
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -273,7 +280,7 @@ describe('decideDispute — the guards', () => {
   })
 
   it('reports a dispute that is not in this deployment’s records as CS_NOT_FOUND', async () => {
-    db.findDisputeById.mockResolvedValue(ok(undefined))
+    db.findDisputeForMerchant.mockResolvedValue(ok(undefined))
     const result = await decideDispute(input(), deps())
     expect(result.ok).toBe(false)
     if (result.ok) return
@@ -281,11 +288,26 @@ describe('decideDispute — the guards', () => {
     expect(file).not.toHaveBeenCalled()
   })
 
+  it("another merchant's dispute -> CS_NOT_FOUND and no PayPal call (file not invoked)", async () => {
+    // When queried with another merchant's id, the repo returns undefined (not found for that merchant)
+    db.findDisputeForMerchant.mockImplementation(async (dispId, mId) => {
+      if (mId === 'mer_other') return ok(undefined)
+      return ok(row())
+    })
+
+    const result = await decideDispute(input({ merchantId: 'mer_other' }), deps())
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CS_NOT_FOUND')
+    expect(file).not.toHaveBeenCalled()
+    expect(db.appendAudit).not.toHaveBeenCalled()
+  })
+
   it('propagates a repository failure rather than rendering an empty case', async () => {
     const failure: Result<never, CsError> = err(
       csError('CS_INTERNAL', 'the database is unreachable'),
     )
-    db.findDisputeById.mockResolvedValue(failure)
+    db.findDisputeForMerchant.mockResolvedValue(failure)
     expect(await decideDispute(input(), deps())).toEqual(failure)
     expect(file).not.toHaveBeenCalled()
   })

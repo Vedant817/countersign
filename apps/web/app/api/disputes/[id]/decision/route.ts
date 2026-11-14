@@ -28,6 +28,7 @@ import { csError, HTTP_STATUS_BY_ERROR_CODE, toBody, type CsError } from '@count
 
 import { decideDispute } from '@/lib/dispute-approval'
 import { requireMerchant } from '@/lib/auth'
+import { merchantIdFor } from '@/lib/merchant-context'
 import { requireSameOrigin } from '@/lib/same-origin'
 
 export const dynamic = 'force-dynamic'
@@ -103,8 +104,16 @@ export async function POST(request: Request, context: DecisionRouteContext): Pro
     return NextResponse.json(toBody(merchant.error), { status: statusFor(merchant.error) })
   }
 
+  const merchantIdRes = await merchantIdFor(merchant.value)
+  if (!merchantIdRes.ok) {
+    return NextResponse.json(toBody(merchantIdRes.error), {
+      status: statusFor(merchantIdRes.error),
+    })
+  }
+
   const outcome = await decideDispute({
     disputeId: id,
+    merchantId: merchantIdRes.value,
     decision: parsed.data.decision,
     actorUserId: merchant.value.id,
     ...(parsed.data.note === undefined ? {} : { note: parsed.data.note }),

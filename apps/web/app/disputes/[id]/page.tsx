@@ -27,11 +27,12 @@
  */
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { forbidden, notFound } from 'next/navigation'
 
 import { formatIstHuman, formatMoney, money } from '@countersign/core'
 
 import { requireMerchantPage } from '@/lib/auth-page'
+import { merchantIdFor } from '@/lib/merchant-context'
 import { loadDisputeDetail, type DisputeDetail } from '@/lib/dispute-detail'
 
 import { DecisionForm } from './decision-form'
@@ -78,9 +79,18 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export default async function DisputeDetailPage({ params }: DisputePageContext) {
   const { id } = await params
   // Same guard as the queue: the case page shows the evidence packet, the verdict and the approve button.
-  await requireMerchantPage(`/disputes/${id}`)
+  const merchant = await requireMerchantPage(`/disputes/${id}`)
+  const merchantIdRes = await merchantIdFor(merchant)
+  if (!merchantIdRes.ok) {
+    if (merchantIdRes.error.code === 'CS_FORBIDDEN') {
+      forbidden()
+    }
+    throw new Error(
+      `the merchant profile could not be read: ${merchantIdRes.error.code} ${merchantIdRes.error.message}`,
+    )
+  }
 
-  const loaded = await loadDisputeDetail(id)
+  const loaded = await loadDisputeDetail(id, merchantIdRes.value)
   // A read that failed is a fault, not an empty case: rendering "no such dispute" over a broken database
   // is the one answer that hides the outage (the same rule `/disputes` states for its queue).
   if (!loaded.ok && loaded.error.code !== 'CS_NOT_FOUND') {

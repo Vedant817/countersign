@@ -24,10 +24,12 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { headers } from 'next/headers'
+import { forbidden } from 'next/navigation'
 
 import { formatIstHuman, formatMoney, money } from '@countersign/core'
 
 import { requireMerchantPage } from '@/lib/auth-page'
+import { merchantIdFor } from '@/lib/merchant-context'
 import {
   DISPUTE_QUEUE_LIMIT,
   disputesUseDemoView,
@@ -164,6 +166,16 @@ export default async function DisputesPage() {
   // The queue is the merchant's. This runs before either branch — the demo branch is a view of the same
   // page, and a public path to it would be a public path to the fixtures too.
   const merchant = await requireMerchantPage('/disputes')
+  const merchantIdRes = await merchantIdFor(merchant)
+  if (!merchantIdRes.ok) {
+    if (merchantIdRes.error.code === 'CS_FORBIDDEN') {
+      forbidden()
+    }
+    throw new Error(
+      `the merchant profile could not be read: ${merchantIdRes.error.code} ${merchantIdRes.error.message}`,
+    )
+  }
+  const merchantId = merchantIdRes.value
 
   const demo = disputesUseDemoView()
   const base = demo ? await publicBaseUrl() : null
@@ -195,7 +207,7 @@ export default async function DisputesPage() {
     )
   }
 
-  const queued = await loadDisputeQueue(DISPUTE_QUEUE_LIMIT)
+  const queued = await loadDisputeQueue(merchantId, DISPUTE_QUEUE_LIMIT)
   if (!queued.ok) {
     // A queue that cannot be read is a fault, not an empty table: rendering "no disputes" here would be
     // the one answer that hides a broken database (the same rule the webhook route states).

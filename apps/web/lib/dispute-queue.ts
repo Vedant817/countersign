@@ -35,7 +35,7 @@ import {
   findLatestPacketForDispute,
   findOrderById,
   listDisputeActions,
-  listDisputesForReview,
+  listDisputesForMerchant,
   type DisputeRow,
 } from '@countersign/db'
 
@@ -98,9 +98,10 @@ export function routerRuleId(trace: DisputeRow['router_trace']): string | null {
  * code than the bound saves. The bound is what keeps it a page load.
  */
 export async function loadDisputeQueue(
+  merchantId: string,
   limit: number = DISPUTE_QUEUE_LIMIT,
 ): Promise<Result<DisputeQueueRow[], CsError>> {
-  const listed = await listDisputesForReview(limit)
+  const listed = await listDisputesForMerchant(merchantId, limit)
   if (!listed.ok) return listed
 
   const rows: DisputeQueueRow[] = []

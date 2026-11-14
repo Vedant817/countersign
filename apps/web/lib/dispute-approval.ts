@@ -42,7 +42,7 @@ import {
   type Result,
   type UserId,
 } from '@countersign/core'
-import { appendAudit, findDisputeBuyerUserId, findDisputeById } from '@countersign/db'
+import { appendAudit, findDisputeBuyerUserId, findDisputeForMerchant } from '@countersign/db'
 import { fileDispute } from '@countersign/defender'
 import type { FileDeps, FileOutcome } from '@countersign/orchestrator'
 
@@ -114,6 +114,7 @@ export interface DecisionDeps {
 export async function decideDispute(
   input: {
     readonly disputeId: string
+    readonly merchantId: string
     readonly decision: DisputeDecision
     readonly actorUserId: UserId
     readonly note?: string
@@ -125,7 +126,7 @@ export async function decideDispute(
   const auditId = decisionAuditId(input.disputeId, input.decision, at)
 
   // --- 1. the row ---------------------------------------------------------------------------------
-  const found = await findDisputeById(input.disputeId as DisputeId)
+  const found = await findDisputeForMerchant(input.disputeId, input.merchantId)
   if (!found.ok) return found
   const row = found.value
   if (row === undefined) {

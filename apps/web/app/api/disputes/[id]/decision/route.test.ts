@@ -18,6 +18,9 @@ import { csError, err, ok } from '@countersign/core'
 const auth = vi.hoisted(() => ({ requireMerchant: vi.fn() }))
 vi.mock('@/lib/auth', () => ({ requireMerchant: auth.requireMerchant }))
 
+const merchantContext = vi.hoisted(() => ({ merchantIdFor: vi.fn() }))
+vi.mock('@/lib/merchant-context', () => ({ merchantIdFor: merchantContext.merchantIdFor }))
+
 const approval = vi.hoisted(() => ({ decideDispute: vi.fn() }))
 vi.mock('@/lib/dispute-approval', () => ({ decideDispute: approval.decideDispute }))
 
@@ -70,6 +73,7 @@ beforeEach(() => {
       email: 'm@example.test',
     }),
   )
+  merchantContext.merchantIdFor.mockResolvedValue(ok('mer_01HZX000000000000000000001'))
   approval.decideDispute.mockResolvedValue(ok(OUTCOME))
 })
 
@@ -81,6 +85,7 @@ describe('POST /api/disputes/[id]/decision', () => {
     expect(body).toEqual(OUTCOME)
     expect(approval.decideDispute).toHaveBeenCalledWith({
       disputeId: 'dsp_1',
+      merchantId: 'mer_01HZX000000000000000000001',
       decision: 'approve',
       actorUserId: 'usr_merchant',
     })
@@ -90,6 +95,7 @@ describe('POST /api/disputes/[id]/decision', () => {
     await POST(req({ decision: 'approve', note: 'kept the item' }), CONTEXT)
     expect(approval.decideDispute).toHaveBeenCalledWith({
       disputeId: 'dsp_1',
+      merchantId: 'mer_01HZX000000000000000000001',
       decision: 'approve',
       actorUserId: 'usr_merchant',
       note: 'kept the item',
@@ -121,6 +127,33 @@ describe('POST /api/disputes/[id]/decision', () => {
     expect(status).toBe(403)
     expect(body.error?.code).toBe('CS_FORBIDDEN')
     expect(approval.decideDispute).not.toHaveBeenCalled()
+  })
+
+  it('answers 403 when the signed-in merchant has no merchants row', async () => {
+    merchantContext.merchantIdFor.mockResolvedValue(
+      err(
+        csError('CS_FORBIDDEN', 'Merchant user usr_merchant has no merchants row.', undefined, {
+          userMessage: 'This account has no merchant profile yet.',
+        }),
+      ),
+    )
+    const response = await POST(req({ decision: 'approve' }), CONTEXT)
+    const { status, body } = await read(response)
+    expect(status).toBe(403)
+    expect(body.error?.code).toBe('CS_FORBIDDEN')
+    expect(approval.decideDispute).not.toHaveBeenCalled()
+  })
+
+  it('passes the resolved merchant id into decideDispute', async () => {
+    merchantContext.merchantIdFor.mockResolvedValue(ok('mer_custom_123'))
+    const response = await POST(req({ decision: 'approve' }), CONTEXT)
+    const { status } = await read(response)
+    expect(status).toBe(200)
+    expect(approval.decideDispute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchantId: 'mer_custom_123',
+      }),
+    )
   })
 
   it('refuses a session whose user row no longer exists with 401, not a server fault', async () => {

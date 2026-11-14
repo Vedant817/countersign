@@ -22,7 +22,7 @@
 import type { Currency, Result } from '@countersign/core'
 import {
   findDisputeBuyerUserId,
-  findDisputeById,
+  findDisputeForMerchant,
   findLatestPacketForDispute,
   listBySubject,
   listDisputeActions,
@@ -194,8 +194,9 @@ export function actionSummaryOf(row: DisputeActionRow): string {
 /** One dispute, with everything the approval page renders. */
 export async function loadDisputeDetail(
   disputeId: string,
+  merchantId: string,
 ): Promise<Result<DisputeDetail, CsError>> {
-  const found = await findDisputeById(disputeId as DisputeId)
+  const found = await findDisputeForMerchant(disputeId, merchantId)
   if (!found.ok) return found
   const row = found.value
   if (row === undefined) {
