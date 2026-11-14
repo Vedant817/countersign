@@ -206,9 +206,9 @@ describe('paypalMerchantIdFromEnv prefers PAYPAL_MERCHANT_ID and falls back to M
     expect(
       paypalMerchantIdFromEnv({
         MERCHANT_ID: 'mrc_northwind',
-        PAYPAL_MERCHANT_ID: '9KX436DUC84BN',
+        PAYPAL_MERCHANT_ID: 'TESTMERCHANT1',
       }),
-    ).toBe('9KX436DUC84BN')
+    ).toBe('TESTMERCHANT1')
   })
 
   it('falls back to MERCHANT_ID when PAYPAL_MERCHANT_ID is unset or blank', () => {
