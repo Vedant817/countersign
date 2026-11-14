@@ -885,33 +885,37 @@ describe.skipIf(!hasDatabase)('seed: PAYPAL_MERCHANT_ID precedence (live databas
 /* BUYER_PASSWORD and MERCHANT_PASSWORD seed behavior (live database)                         */
 /* ------------------------------------------------------------------------------------------ */
 
-describe.skipIf(!hasDatabase)('seed: BUYER_PASSWORD and MERCHANT_PASSWORD provisioning (live database)', () => {
-  it('sets the buyer password hash when BUYER_PASSWORD is set and leaves it alone when unset', async () => {
-    const savedBuyer = process.env['BUYER_PASSWORD']
-    try {
-      await withRollback(async (tx) => {
-        // When BUYER_PASSWORD is set:
-        process.env['BUYER_PASSWORD'] = 'test-buyer-secret-pass'
-        const s1 = await runSeed(tx)
-        expect(s1.buyerPasswordSet).toBe(true)
+describe.skipIf(!hasDatabase)(
+  'seed: BUYER_PASSWORD and MERCHANT_PASSWORD provisioning (live database)',
+  () => {
+    it('sets the buyer password hash when BUYER_PASSWORD is set and leaves it alone when unset', async () => {
+      const savedBuyer = process.env['BUYER_PASSWORD']
+      try {
+        await withRollback(async (tx) => {
+          // When BUYER_PASSWORD is set:
+          process.env['BUYER_PASSWORD'] = 'test-buyer-secret-pass'
+          const s1 = await runSeed(tx)
+          expect(s1.buyerPasswordSet).toBe(true)
 
-        const rows1 = await tx.select().from(users).where(eq(users.id, BUYER.id))
-        expect(rows1).toHaveLength(1)
-        expect(rows1[0]!.password_hash).toBeTruthy()
-        expect(await verifyPassword('test-buyer-secret-pass', rows1[0]!.password_hash!)).toBe(true)
+          const rows1 = await tx.select().from(users).where(eq(users.id, BUYER.id))
+          expect(rows1).toHaveLength(1)
+          expect(rows1[0]!.password_hash).toBeTruthy()
+          expect(await verifyPassword('test-buyer-secret-pass', rows1[0]!.password_hash!)).toBe(
+            true,
+          )
 
-        // When unset, re-seeding leaves the existing hash alone (does not clear it):
-        delete process.env['BUYER_PASSWORD']
-        const s2 = await runSeed(tx)
-        expect(s2.buyerPasswordSet).toBe(false)
+          // When unset, re-seeding leaves the existing hash alone (does not clear it):
+          delete process.env['BUYER_PASSWORD']
+          const s2 = await runSeed(tx)
+          expect(s2.buyerPasswordSet).toBe(false)
 
-        const rows2 = await tx.select().from(users).where(eq(users.id, BUYER.id))
-        expect(rows2[0]!.password_hash).toBe(rows1[0]!.password_hash)
-      })
-    } finally {
-      if (savedBuyer === undefined) delete process.env['BUYER_PASSWORD']
-      else process.env['BUYER_PASSWORD'] = savedBuyer
-    }
-  })
-})
-
+          const rows2 = await tx.select().from(users).where(eq(users.id, BUYER.id))
+          expect(rows2[0]!.password_hash).toBe(rows1[0]!.password_hash)
+        })
+      } finally {
+        if (savedBuyer === undefined) delete process.env['BUYER_PASSWORD']
+        else process.env['BUYER_PASSWORD'] = savedBuyer
+      }
+    })
+  },
+)
