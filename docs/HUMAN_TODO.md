@@ -14,6 +14,23 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 ---
 
+## ☐ Perform one manual PayPal sandbox vault save in a browser at http://localhost:3000/wallet
+
+**Blocks:** live PayPal vault payment token for the seeded buyer (Asha) on the local dev stack.
+
+**Context:** The automated headless Playwright vault-save script reached a genuine PayPal-side automation block (PayPal sandbox bot detection / non-JS security challenge during approval at `https://www.sandbox.paypal.com/agreements/approve`).
+
+**Steps to complete:**
+
+1. Ensure the dev stack is running (`pnpm dev:local`).
+2. Open `http://localhost:3000/buyer-login?next=/wallet` in your browser.
+3. Sign in using buyer email `buyer.countersign@example.com` and the `BUYER_PASSWORD` configured in `.env.local`.
+4. Click **"Save a PayPal payment method"**.
+5. In the PayPal sandbox window, log in with `PAYPAL_BUYER_EMAIL` and `PAYPAL_BUYER_PASSWORD` from `.env.local` and click **"Agree & Continue"**.
+6. Once redirected back to `http://localhost:3000/wallet?saved=1`, the real PayPal vault payment token will be recorded in the local database.
+
+---
+
 ## ☐ Set BUYER_PASSWORD and MERCHANT_PASSWORD in .env.local to passwords of your choice
 
 **Blocks:** local and preview sign-in for the buyer (Asha) and merchant personas at `/login`.
