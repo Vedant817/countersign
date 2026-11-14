@@ -111,3 +111,23 @@ export function setPaypalMerchantId(
 
 export const findMerchantById = getMerchantById
 export const findMerchantByOwner = getMerchantByOwner
+
+/** Lookup a merchant by their PayPal merchant ID. */
+export function getMerchantByPaypalMerchantId(
+  paypalMerchantId: string,
+  exec?: Exec,
+): Promise<Result<MerchantRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select()
+        .from(merchants)
+        .where(eq(merchants.paypal_merchant_id, paypalMerchantId))
+        .limit(1)
+      return rows[0] as MerchantRow | undefined
+    },
+    { table: 'merchants', paypalMerchantId },
+  )
+}
+
+export const findMerchantByPaypalMerchantId = getMerchantByPaypalMerchantId

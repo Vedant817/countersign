@@ -28,6 +28,7 @@ import {
   createMerchant,
   getMerchantById,
   getMerchantByOwner,
+  getMerchantByPaypalMerchantId,
   setPaypalMerchantId,
 } from './merchants'
 import {
@@ -270,6 +271,45 @@ describe.skipIf(!hasDatabase)('merchants repository (live database)', () => {
     expect(duplicate.error.code).toBe('CS_CONFLICT')
     expect(duplicate.error.details?.['constraint']).toBe('merchants_paypal_merchant_id_key')
     expect(duplicate.error.details?.['pgCode']).toBe('23505')
+  })
+
+  it('looks up a merchant by PayPal merchant id', async () => {
+    const userId = `usr_live_mrc_${uid()}` as UserId
+    createdUserIds.push(userId)
+
+    await db()
+      .insert(users)
+      .values({
+        id: userId,
+        persona: 'MERCHANT',
+        display_name: 'PayPal Lookup Owner',
+        email: `paypal-lookup-${uid()}@example.test`,
+        country: 'US',
+      })
+
+    const paypalId = `PPMID_${uid().toUpperCase()}`
+    const created = await createMerchant({
+      ownerUserId: userId,
+      displayName: 'PayPal Lookup Store',
+      paypalMerchantId: paypalId,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    createdMerchantIds.push(created.value.id)
+
+    const found = await getMerchantByPaypalMerchantId(paypalId)
+    expect(found.ok).toBe(true)
+    if (found.ok) {
+      expect(found.value).toBeDefined()
+      expect(found.value?.id).toBe(created.value.id)
+      expect(found.value?.paypal_merchant_id).toBe(paypalId)
+    }
+
+    const missing = await getMerchantByPaypalMerchantId(`NON_EXISTENT_${uid()}`)
+    expect(missing.ok).toBe(true)
+    if (missing.ok) {
+      expect(missing.value).toBeUndefined()
+    }
   })
 
   it('links order row with merchant_id cleanly and rejects invalid merchant_id by FK constraint', async () => {

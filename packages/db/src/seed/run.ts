@@ -39,6 +39,7 @@
  */
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { and, eq, isNull } from 'drizzle-orm'
 
 import { formatMoney } from '@countersign/core'
 
@@ -139,7 +140,8 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
     if (!written.ok) throw written.error
   }
 
-  const rawPaypalMerchantId = process.env['PAYPAL_MERCHANT_ID']?.trim()
+  const rawPaypalMerchantId =
+    process.env['MERCHANT_ID']?.trim() || process.env['PAYPAL_MERCHANT_ID']?.trim()
   const paypalMerchantId =
     rawPaypalMerchantId && rawPaypalMerchantId.length > 0 ? rawPaypalMerchantId : null
   const merchantId = `mer_${MERCHANT.id.replace(/^usr_/, '')}`
@@ -157,6 +159,12 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
         .onConflictDoNothing({
           target: merchants.owner_user_id,
         })
+      if (paypalMerchantId) {
+        await e
+          .update(merchants)
+          .set({ paypal_merchant_id: paypalMerchantId, updated_at: new Date() })
+          .where(and(eq(merchants.id, merchantId), isNull(merchants.paypal_merchant_id)))
+      }
     },
     { table: 'merchants', id: merchantId },
   )
