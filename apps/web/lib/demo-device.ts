@@ -22,11 +22,14 @@ import 'server-only'
  *  - Nothing here is reachable in production: `provisionAgentSession` refuses unless
  *    `COUNTERSIGN_AGENT_DEMO=1` and `NODE_ENV !== 'production'`, the same gate the signing lab uses.
  *
- * The thumbprint is RFC 7638 — the SHA-256 of the canonical `{crv,kty,x,y}` JSON — computed exactly the
- * way `browser-keystore.ts` computes it, because vi's L1 binds `cnf.jkt` and a one-byte difference would
- * surface as an unverifiable chain rather than as an error here.
+ * The thumbprint is RFC 7638 — the SHA-256 of the canonical `{crv,kty,x,y}` JSON — computed in
+ * `./device-thumbprint`, which this module re-exports: it is the one function here that a caller may
+ * need without also minting a server-held key.
  */
 import { bytesToBase64Url } from './base64url'
+import { deviceThumbprint } from './device-thumbprint'
+
+export { deviceThumbprint } from './device-thumbprint'
 
 export interface DemoDeviceKey {
   /** The public half, in the shape vi's `device_public_jwk` expects. */
@@ -43,20 +46,6 @@ const ECDSA_PARAMS = { name: 'ECDSA', namedCurve: 'P-256' } satisfies EcKeyGenPa
 const ECDSA_SIGNATURE_PARAMS = { name: 'ECDSA', hash: 'SHA-256' } satisfies EcdsaParams
 const SIGNATURE_BYTES = 64
 const KID_PREFIX = 'dev_'
-
-/** RFC 7638 thumbprint of a P-256 public JWK. */
-export async function deviceThumbprint(publicJwk: JsonWebKey): Promise<string> {
-  if (publicJwk.kty !== 'EC' || publicJwk.crv !== 'P-256') {
-    throw new Error('Only P-256 EC public keys can be thumbprinted')
-  }
-  const { x, y } = publicJwk
-  if (typeof x !== 'string' || typeof y !== 'string') {
-    throw new Error('The public key is missing its coordinates')
-  }
-  const canonical = JSON.stringify({ crv: publicJwk.crv, kty: publicJwk.kty, x, y })
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))
-  return bytesToBase64Url(new Uint8Array(digest))
-}
 
 /**
  * Generate a single-use P-256 device key.
