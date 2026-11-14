@@ -1786,3 +1786,74 @@ demo-only, and a production deployment serves no mandate provisioning at all.
 (sign-up -> sign-in -> mandate -> sign-out, and buyer B refused buyer A's mandate),
 `apps/web/tests/e2e/session.spec.ts` (replaced: the demo buyer is gone),
 `packages/db/test/repos.users.live.test.ts` (live UNIQUE email).
+
+---
+
+## D-061 - Post-purchase money movement is three merchant-only routes, and a refund is addressed by our own capture id
+
+**Date:** 2026-11-15
+
+**Decision:** The three things a merchant does to an order after the buyer has paid are exposed as
+`POST /api/orders/{id}/capture`, `POST /api/orders/{id}/void` and `POST /api/orders/{id}/refund`, each
+carrying the same four locks as `/api/disputes/{id}/decision` (D-059): same-origin before the body is
+read, `requireMerchant()` (401 anonymous, 403 a signed-in buyer), `merchantIdFor()` (the `mer_...` row, not
+the session user), and a strict zod body. The routes own the HTTP shape only. `apps/web/lib/order-ops.ts`
+owns the two things a route cannot: **whose order it is**, and **the audit row**.
+
+**Ownership is a SQL predicate, not a comparison in TypeScript.** `packages/orders` takes an order id and
+trusts it, because every caller it has ever had was a webhook, a cron or a test. Two new repositories close
+that gap in the same shape as `findDisputeForMerchant`: `findOrderForMerchant(orderId, merchantId)` and
+`findCaptureForMerchant(captureId, merchantId)`, both joining on `orders.merchant_id`. `undefined` covers
+"no such row" and "another merchant's row" on purpose — a merchant surface that answered those differently
+would be an existence oracle over every other merchant's takings, so both become one `CS_NOT_FOUND`.
+
+**A refund is keyed by our capture id and by a required nonce.** `refund()` takes PayPal's capture id,
+because the webhook and the reconciler already know the money; a merchant does not, and PayPal capture ids
+are guessable-shaped. So the route takes our `cap_...` row id, resolves it *for this merchant*, refuses a
+capture that sits on another order, and only then hands `packages/orders` the `paypal_capture_id`. The
+merchant check therefore happens **before** `refund()`'s global `findCaptureByPaypalId` lookup, and a
+wrong-merchant capture costs no PayPal call. `idempotencyKey` is required rather than derived: EC-IDEM-5
+("a double-clicked button is one refund") and EC-IDEM-6 ("two identical refunds are two") cannot be told
+apart from the request, so the caller has to say which it is. `packages/orders` keys the refund row by that
+string.
+
+**No amount crosses the boundary as a number.** `capture` accepts lines, a carrier and a tracking number —
+never an amount, because the amount is the authorisation the buyer already agreed to and a route that
+accepted one could over-capture. `refund` accepts `'FULL'` or `{ minor: "<decimal string>", currency }`,
+rebuilt as a `bigint` at the route. Every response carries amounts as `{ minor: "<string>", currency }`, so
+`JSON.stringify` cannot throw on a `bigint` and no consumer can reintroduce a float (§0).
+
+**The audit row is the record that it happened, and only success writes one.** Each successful movement
+appends one hash-chained entry on a **per-order** chain (`chainId = orders.id`), attributed to the session's
+user, with the PayPal request id and the derived money in the details. A refused capture, a refused refund
+and a `DEF_WRONG_STATE` dispute block write nothing — an audit log that recorded attempts would be a log of
+things that did not happen.
+
+**Four PayPal error names were missing from the mapping.** `AUTHORIZATION_ALREADY_CAPTURED`,
+`CAPTURE_FULLY_REFUNDED`, `REFUND_AMOUNT_EXCEEDED` and `ACTION_DOES_NOT_MATCH_INTENT` are what the capture,
+refund and void endpoints answer with when our state machine and PayPal's disagree. They all map to
+`PP_UNPROCESSABLE` (422), not to a 409: retrying cannot help, the request has to change. The name is kept in
+`details.paypal_name` and `details.matched_token`, because a bare 422 is untriageable and each of these is a
+bug report against the local guard that let the request through (EC-CAP-3, EC-REF-2, `intentForLines`).
+
+**Reason:** the libraries, the tests and the deterministic request ids for capture-on-shipment, refund and
+void all existed in `packages/orders` (D-019, D-028, EC-CAP-1..5, EC-REF-1..5) and nothing in `apps/web`
+could reach them: `apps/web/app/api/` had no `orders` route at all, and `packages/orders`' only production
+caller was the webhook ingest. Real PayPal post-purchase money movement was therefore implemented and
+unreachable, which is the same defect class as a route that returns a fabricated success. The `refund`
+hole is the one that mattered most: `refund()`'s capture lookup is global, so a merchant-only route wired
+naively would have let one merchant refund another's capture by id.
+
+**Evidence:** `packages/paypal/src/errors.ts` (`NAME_TO_CODE` additions),
+`packages/paypal/test/errors.test.ts` (mapping table + four `name` cases, 33 tests);
+`packages/db/src/repos/orders.ts` (`findOrderForMerchant`, `findCaptureForMerchant`),
+`packages/db/test/repos.orders.live.test.ts` (four live-Postgres isolation tests);
+`apps/web/lib/order-ops.ts` (`captureShipmentForMerchant`, `voidOrderForMerchant`, `refundForMerchant`,
+`orderOpsDeps`), `apps/web/lib/order-ops.test.ts` (17 tests: guard order, audit row, JSON amounts);
+`apps/web/app/api/orders/[id]/{capture,void,refund}/route.ts` and their `route.test.ts` (57 tests:
+401/403/400/409/404/402/503 mapping, strict bodies, cross-origin, `'FULL'`, nonce required, PayPal-shaped
+capture id refused). Measured: `pnpm typecheck` exit 0; `pnpm lint` 0 errors (14 pre-existing warnings),
+money-discipline clean; `pnpm format:check` clean; `pnpm test` 167 files / 3351 passed, 1 skipped;
+`pnpm secret-scan` no leaks; `pnpm build` green with all three routes in the manifest. Live PayPal
+verification is still blocked on HUMAN_TODO 1 (the vault), so no real capture, refund or void has been
+observed against the sandbox — the routes are wired to the real client, not to a stub.

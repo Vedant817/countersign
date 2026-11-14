@@ -760,3 +760,36 @@ output above.
   **Caveats:** there is still no merchant sign-in (the route trusts the buyer-persona `cs_session` that only
   `/api/agent/session` mints), and a live `provideEvidence` still returns PayPal's 404 because no real captured
   payment → dispute exists (HUMAN_TODO 1a/2) — never a fabricated filed packet.
+
+- **2026-11-15 (IST)** - **Post-purchase money movement is reachable from the web tier (P0,
+  `prod/real-users`; D-061).** `packages/orders` already implemented capture-on-shipment, refund and void
+  with the deterministic `PayPal-Request-Id`s and every §12 case tagged to M11 (EC-CAP-1..5, EC-REF-1..5,
+  EC-IDEM-5/6, EC-MDT-3/4, EC-TIME-5), and nothing in `apps/web` could call any of it: `app/api/` had no
+  `orders` route, and the package's only production caller was the PayPal webhook ingest. The three
+  operations are now three merchant-only routes - `POST /api/orders/{id}/capture`, `/void`, `/refund` -
+  built to `/api/disputes/{id}/decision`'s shape (same-origin before the body, `requireMerchant`, the
+  `mer_...` row via `merchantIdFor`, a strict zod body, `HTTP_STATUS_BY_ERROR_CODE` for every refusal).
+  **Ownership is a SQL predicate.** `findOrderForMerchant` and `findCaptureForMerchant` join
+  `orders.merchant_id`, and both answer `undefined` for "no such row" and "not yours", so a guessed
+  `ord_...` is one `CS_NOT_FOUND` rather than an existence oracle. The refund hole was the sharp one:
+  `refund()` looks a capture up by PayPal id across the whole table, so a route that forwarded the body's
+  id would have let one merchant refund another's capture; the route takes our `cap_...` id, resolves it
+  for this merchant, refuses a capture on another order, and only then passes `paypal_capture_id` down. A
+  refund also requires an `idempotencyKey` (the form nonce), because EC-IDEM-5 and EC-IDEM-6 cannot be told
+  apart from the request. Amounts cross the boundary as decimal strings and come back as
+  `{ minor: "<string>", currency }`: `capture` takes no amount at all, and nothing in the response is a
+  `bigint` a client would have to guess at. Four PayPal error names the post-purchase endpoints return
+  (`AUTHORIZATION_ALREADY_CAPTURED`, `CAPTURE_FULLY_REFUNDED`, `REFUND_AMOUNT_EXCEEDED`,
+  `ACTION_DOES_NOT_MATCH_INTENT`) were unmapped and now land on `PP_UNPROCESSABLE` with the name kept for
+  triage.
+  **Measured:** 83 new tests - 57 route (401/403/400/409/404/402/503, cross-origin, strict bodies,
+  `'FULL'`, nonce required, PayPal-shaped capture id refused), 17 `lib/order-ops` (guard order, audit row
+  written only on success, JSON amounts), 4 live-Postgres finder isolation, 5 PayPal mapping. Full gates:
+  `pnpm typecheck` exit 0; `pnpm lint` 0 errors, money-discipline clean (219 files); `pnpm format:check`
+  clean; `pnpm test` 167 files / **3351 passed, 1 skipped**; `pnpm secret-scan` no leaks; `pnpm build` green
+  with `/api/orders/[id]/{capture,refund,void}` in the manifest.
+  **Caveats:** no real capture, refund or void has been observed against the PayPal sandbox - H-01 (the
+  vault) is still open, so the live half of AT-M11 remains skipped and `packages/orders` is still `wip`
+  above; WP-17d's merchant order-ops **UI** (S-15) is deliberately not written, so these routes have no
+  page to click yet; `refund`'s audit row records the intent, and a capture that PayPal later reverses is
+  still reconciled by the webhook rather than by this route.
