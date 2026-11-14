@@ -53,7 +53,7 @@ import {
   SEED_WALLET_ID,
 } from '../src/seed/personas'
 import { SEED_WALLET_CAP, renderSummary, runSeed } from '../src/seed/run'
-import { closeDb, db } from '../src/client'
+import { closeDb, db, type Tx } from '../src/client'
 import { merchants } from '../src/schema'
 
 const hasDatabase = (process.env['DATABASE_URL'] ?? '').trim() !== ''
@@ -783,5 +783,98 @@ describe.skipIf(!hasDatabase)('seed idempotency (live database)', () => {
       .where(eq(merchants.owner_user_id, MERCHANT.id))
     expect(secondRows).toHaveLength(1)
     expect(secondRows[0]!.id).toBe(firstRows[0]!.id)
+  })
+})
+
+/* ------------------------------------------------------------------------------------------ */
+/* PAYPAL_MERCHANT_ID precedence on the seeded merchant row (live database)                       */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * Run `fn` inside a transaction that is always rolled back, so a test can seed and mutate the shared
+ * database without leaving residue (e.g. `TESTMERCHANT1` behind on the seeded merchant row).
+ *
+ * postgres-js rolls back when the callback throws, so we throw a sentinel after the body succeeds.
+ * A failing `expect` throws an `AssertionError` instead, which is re-thrown so the test still fails.
+ */
+async function withRollback(fn: (tx: Tx) => Promise<void>): Promise<void> {
+  const ROLLBACK = Symbol('rollback')
+  try {
+    await db().transaction(async (tx) => {
+      await fn(tx)
+      throw ROLLBACK
+    })
+  } catch (cause) {
+    if (cause === ROLLBACK) return
+    throw cause
+  }
+}
+
+describe.skipIf(!hasDatabase)('seed: PAYPAL_MERCHANT_ID precedence (live database)', () => {
+  it('(a) overwrites a non-null merchant id when PAYPAL_MERCHANT_ID is explicitly set', async () => {
+    const savedPaypal = process.env['PAYPAL_MERCHANT_ID']
+    const savedMerchant = process.env['MERCHANT_ID']
+    try {
+      await withRollback(async (tx) => {
+        // Start from a known state: no env override, so the seeded row's PayPal id is NULL.
+        delete process.env['PAYPAL_MERCHANT_ID']
+        delete process.env['MERCHANT_ID']
+        await runSeed(tx)
+        // Give the row an old, non-null value — the situation the old isNull guard refused to fix.
+        await tx
+          .update(merchants)
+          .set({ paypal_merchant_id: 'OLDMERCHANT99' })
+          .where(eq(merchants.owner_user_id, MERCHANT.id))
+
+        // An explicit PAYPAL_MERCHANT_ID must win over the existing non-null value.
+        process.env['PAYPAL_MERCHANT_ID'] = 'TESTMERCHANT1'
+        await runSeed(tx)
+
+        const rows = await tx
+          .select()
+          .from(merchants)
+          .where(eq(merchants.owner_user_id, MERCHANT.id))
+        expect(rows).toHaveLength(1)
+        expect(rows[0]!.paypal_merchant_id).toBe('TESTMERCHANT1')
+      })
+    } finally {
+      if (savedPaypal === undefined) delete process.env['PAYPAL_MERCHANT_ID']
+      else process.env['PAYPAL_MERCHANT_ID'] = savedPaypal
+      if (savedMerchant === undefined) delete process.env['MERCHANT_ID']
+      else process.env['MERCHANT_ID'] = savedMerchant
+    }
+  })
+
+  it('(b) leaves a non-null merchant id unchanged when PAYPAL_MERCHANT_ID is unset (fallback must not overwrite)', async () => {
+    const savedPaypal = process.env['PAYPAL_MERCHANT_ID']
+    const savedMerchant = process.env['MERCHANT_ID']
+    try {
+      await withRollback(async (tx) => {
+        delete process.env['PAYPAL_MERCHANT_ID']
+        delete process.env['MERCHANT_ID']
+        await runSeed(tx)
+        await tx
+          .update(merchants)
+          .set({ paypal_merchant_id: 'OLDMERCHANT99' })
+          .where(eq(merchants.owner_user_id, MERCHANT.id))
+
+        // PAYPAL_MERCHANT_ID unset: the value would come from the MERCHANT_ID fallback. That must only
+        // fill a NULL, never overwrite a value the operator already set (e.g. in the settings UI).
+        process.env['MERCHANT_ID'] = 'mrc_fallback_only'
+        await runSeed(tx)
+
+        const rows = await tx
+          .select()
+          .from(merchants)
+          .where(eq(merchants.owner_user_id, MERCHANT.id))
+        expect(rows).toHaveLength(1)
+        expect(rows[0]!.paypal_merchant_id).toBe('OLDMERCHANT99')
+      })
+    } finally {
+      if (savedPaypal === undefined) delete process.env['PAYPAL_MERCHANT_ID']
+      else process.env['PAYPAL_MERCHANT_ID'] = savedPaypal
+      if (savedMerchant === undefined) delete process.env['MERCHANT_ID']
+      else process.env['MERCHANT_ID'] = savedMerchant
+    }
   })
 })

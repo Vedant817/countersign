@@ -142,8 +142,26 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
 
   const rawPaypalMerchantId = paypalMerchantIdFromEnv()
   const paypalMerchantId = rawPaypalMerchantId.length > 0 ? rawPaypalMerchantId : null
+  // Whether the operator *explicitly* configured the PayPal account, as opposed to the value having
+  // come from the `MERCHANT_ID` fallback inside `paypalMerchantIdFromEnv`. Only an explicit value is
+  // authoritative enough to overwrite a row that already holds one.
+  const paypalMerchantIdExplicit = (process.env['PAYPAL_MERCHANT_ID']?.trim() ?? '').length > 0
   const merchantId = `mer_${MERCHANT.id.replace(/^usr_/, '')}`
 
+  // The seeded store merchant's PayPal payee id (`merchants.paypal_merchant_id`).
+  //
+  // The write is deliberately asymmetric, because the two sources of the value mean different things:
+  //
+  //  - **`PAYPAL_MERCHANT_ID` set (non-blank)** — an explicit operator choice. It is authoritative: it
+  //    updates the row even when the row already holds a different value (e.g. one an operator typed
+  //    into the settings UI). The whole point of setting it is to make PayPal accept the payee, so a
+  //    stale value must not win.
+  //  - **`PAYPAL_MERCHANT_ID` unset or blank** — the value, if any, is the `MERCHANT_ID` fallback. That
+  //    is a boot default, not a PayPal account, so it only fills a `NULL`: a merchant id entered in the
+  //    settings UI must never be overwritten by the fallback.
+  //
+  // Either way the write is idempotent — running the seed twice leaves the same row — because the target
+  // value is a pure function of the environment, not of a clock or a counter.
   const seededMerchant = await repo(
     async () => {
       await e
@@ -162,7 +180,9 @@ export async function runSeed(exec?: Exec): Promise<SeedSummary> {
           .update(merchants)
           .set({ paypal_merchant_id: paypalMerchantId, updated_at: new Date() })
           .where(
-            and(eq(merchants.owner_user_id, MERCHANT.id), isNull(merchants.paypal_merchant_id)),
+            paypalMerchantIdExplicit
+              ? eq(merchants.owner_user_id, MERCHANT.id)
+              : and(eq(merchants.owner_user_id, MERCHANT.id), isNull(merchants.paypal_merchant_id)),
           )
       }
     },
