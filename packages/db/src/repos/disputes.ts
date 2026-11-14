@@ -16,7 +16,7 @@
  * deterministic router in §8.15 and is `null` until it has run — a case with no liability has not been
  * assessed, which is different from having been assessed as `UNPROVABLE`.
  */
-import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
 
 import type { CsError, DisputeId, Money, PacketId, Result } from '@countersign/core'
 
@@ -254,6 +254,52 @@ export function listDisputesForReview(
       return rows as DisputeRow[]
     },
     { table: 'disputes', op: 'list_for_review', limit },
+  )
+}
+
+/**
+ * List disputes scoped to a single merchant via the dispute -> order -> merchant relationship.
+ */
+export function listDisputesForMerchant(
+  merchantId: string,
+  limit: number,
+  exec?: Exec,
+): Promise<Result<DisputeRow[], CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select(getTableColumns(disputes))
+        .from(disputes)
+        .innerJoin(orders, eq(disputes.order_id, orders.id))
+        .where(eq(orders.merchant_id, merchantId))
+        .orderBy(desc(disputes.updated_at))
+        .limit(limit)
+      return rows as DisputeRow[]
+    },
+    { table: 'disputes', op: 'list_for_merchant', merchantId, limit },
+  )
+}
+
+/**
+ * Find a dispute scoped to a single merchant.
+ * Returns undefined if the dispute does not exist, has no order, or belongs to another merchant.
+ */
+export function findDisputeForMerchant(
+  disputeId: string,
+  merchantId: string,
+  exec?: Exec,
+): Promise<Result<DisputeRow | undefined, CsError>> {
+  return repo(
+    async () => {
+      const rows = await (exec ?? db())
+        .select(getTableColumns(disputes))
+        .from(disputes)
+        .innerJoin(orders, eq(disputes.order_id, orders.id))
+        .where(and(eq(disputes.id, disputeId as DisputeId), eq(orders.merchant_id, merchantId)))
+        .limit(1)
+      return rows[0] as DisputeRow | undefined
+    },
+    { table: 'disputes', op: 'find_for_merchant', disputeId, merchantId },
   )
 }
 
