@@ -18,7 +18,7 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 **Blocks:** live PayPal vault payment token for the seeded buyer (Asha) on the local dev stack.
 
-**Context:** Headed Playwright vault-save run failed at step `paypal_login` at URL `https://www.sandbox.paypal.com/signin` with error: `PayPal login failed: page.waitForNavigation: Target page, context or browser has been closed. Page: Log in to your PayPal accountLog InForgot password?orSign UpAccept Cookies`.
+**Context:** Headed Playwright vault-save run reached `paypal_consent` but failed at URL `https://www.sandbox.paypal.com/checkoutweb/genericError` with error: `PayPal approval step failed: TimeoutError: page.waitForURL: Timeout 30000ms exceeded. Page: Things don’t appear to be working at the`.
 Also set BUYER_PASSWORD in .env.local and re-run `pnpm db:seed` first; the current buyer hash comes from a throwaway random password.
 
 **Steps to complete:**
