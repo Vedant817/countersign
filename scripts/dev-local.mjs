@@ -98,6 +98,16 @@ const viPort = portFromEnv('COUNTERSIGN_VI_PORT', 8000)
 // literals below then override it for the values the launcher owns, because web and VI must agree on
 // the session token, the KEK and the signing key or the two halves of the lab cannot talk to each
 // other — a stale `.env.local` copy of one of those is a mismatch that reads as a broken service.
+//
+// ## Why `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` are not blanked here
+//
+// They were: this object set both to `''`, which silently won over `...localEnv` a few lines above. So
+// `paypalClient()` answered `PP_UNAVAILABLE` ("PayPal is not configured on this server", 503) on every
+// wallet and order route no matter what the operator had configured, and `/status` reported
+// `PAYPAL_CLIENT_ID: false` — the D-040 pattern this repo keeps finding, where a health page and a money
+// path disagree. Blanking them cannot make a local lab safer: `PAYPAL_API_BASE` and `PAYPAL_ENV` are
+// already pinned to sandbox below, and `assertSandbox` (EC-ENV-1) refuses a live host on the first call.
+// An unset credential is now the only way to be unconfigured, which is the same answer `/status` gives.
 const environment = {
   ...process.env,
   ...localEnv,
@@ -136,8 +146,6 @@ const environment = {
   // generated, and the generated set is announced at start-up.
   GATE_SIGNING_KEY: secretOr('GATE_SIGNING_KEY', generateGateSigningKey),
   GATE_KID: process.env['GATE_KID'] ?? 'local-gate',
-  PAYPAL_CLIENT_ID: '',
-  PAYPAL_CLIENT_SECRET: '',
   PAYPAL_ENV: 'sandbox',
   PAYPAL_API_BASE: 'https://api-m.sandbox.paypal.com',
 }
