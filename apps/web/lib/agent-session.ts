@@ -23,7 +23,7 @@ import 'server-only'
  * ## Provisioning, step by step
  *
  * ```
- *   user ─▶ wallet ─▶ device key (server, single use)
+ *   user ─▶ wallet ─▶ device key (browser, non-extractable)
  *                        │
  *                        ├─▶ vi POST /v1/keys/agent          → agent kid + encrypted private key
  *                        ├─▶ vi POST /v1/l1/issue            → the L1 that binds the device key
@@ -32,6 +32,16 @@ import 'server-only'
  *                        ├─▶ vi POST /v1/l2/finalize         → the L2, with disclosures
  *                        └─▶ mint_delegated (db)             → mandates + budget + wallet cap
  * ```
+ *
+ * ## Prepare and finalize
+ *
+ * That pipeline has the buyer's device key at its centre, so it is written as two phases:
+ * `prepareAgentSession` does everything up to and including `vi POST /v1/l2/prepare` and seals what
+ * the second phase needs into a `pending` token (`./pending-session-token.ts`, HMAC under
+ * `SESSION_SECRET`); the buyer's browser signs `signing_input` with its own non-extractable key; and
+ * `finalizeAgentSession` verifies the token, hands vi the signature, and writes the mandate, budget
+ * and wallet cap. `provisionAgentSession` is the two phases back to back with the demo's own
+ * server-held key (`./demo-device.ts`) — the fixture whose custody the real flow removes.
  *
  * ## Refusals, not throws
  *
@@ -88,7 +98,14 @@ import { merchantIdentity } from './merchant'
 import { applyCap, assertStoreCurrency } from './apply-cap'
 import { compileIntent, compilerModelLabel } from './intent-compiler'
 import { createDemoDeviceKey } from './demo-device'
+import { deviceThumbprint } from './device-thumbprint'
 import { pickActiveWallet } from './active-wallet'
+import {
+  PENDING_SESSION_TTL_SECONDS,
+  signPendingSessionToken,
+  verifyPendingSessionToken,
+  type PendingAgentSession,
+} from './pending-session-token'
 import {
   AGENT_AUDIENCE,
   agentIssuer,
@@ -136,7 +153,51 @@ export interface ProvisionInput {
 }
 
 /**
- * Provision one buyer session: a real mandate, a real agent key, a real L2 — for a buyer who signed in.
+ * What `prepareAgentSession` needs before it will run. The buyer is named by id (D-060) and the
+ * device key arrives from the caller — the browser's own non-extractable key in the real flow, the
+ * demo's server-minted one in `provisionAgentSession`.
+ */
+export interface PrepareAgentSessionInput {
+  /** Whose mandate this is — an existing `BUYER` row's id, resolved by the caller from the session. */
+  readonly userId: UserId
+  /** The buyer's own words. They become the mandate's `nl_intent` and the first line of the read-back. */
+  readonly intent: string
+  /** The per-purchase cap in minor units. */
+  readonly capMinor: bigint
+  /** The device public key, in the shape vi's `device_public_jwk` expects. */
+  readonly devicePublicJwk: JsonWebKey
+  /** `dev_<jkt>` for that key, matching `browser-keystore.ts`'s `deviceKeyId`. */
+  readonly deviceKid: string
+}
+
+/** What `prepareAgentSession` hands back: the bytes to sign, and the token that opens phase 2. */
+export interface PreparedAgentSession {
+  /** vi's prepare-record id — `finalizeAgentSession` passes it to `l2/finalize` verbatim. */
+  readonly prepareId: string
+  /**
+   * The exact ASCII the device key signs, `header.payload`. Passed through byte for byte: a
+   * re-encoded copy would be signed instead of the bytes vi verifies, and the failure would surface
+   * as `VI_SIGNATURE_MISMATCH` (see `@countersign/vi-client`'s note on `signing_input`).
+   */
+  readonly signingInput: string
+  /** The HMAC token carrying everything `finalizeAgentSession` needs (`./pending-session-token.ts`). */
+  readonly pending: string
+}
+
+/** What `finalizeAgentSession` takes from the browser after it has signed `signingInput`. */
+export interface FinalizeAgentSessionInput {
+  /** Whose session this is. The token must name the same buyer, or the token is refused. */
+  readonly userId: UserId
+  /** The `pending` token `prepareAgentSession` returned. */
+  readonly pending: string
+  /** The `prepareId` the prepare phase returned; must be the one the token names. */
+  readonly prepareId: string
+  /** ES256 over `signingInput`, raw P1363 r‖s, base64url — from the buyer's own device key. */
+  readonly signatureB64Url: string
+}
+
+/**
+ * Phase 1 of provisioning: everything up to and including `vi POST /v1/l2/prepare`.
  *
  * A fresh mandate per call is deliberate: each run gets its own mandate and budget, so a buyer can ask for
  * a second cap without the first reservation changing the answer. The cost is a handful of rows per run,
@@ -145,10 +206,22 @@ export interface ProvisionInput {
  *
  * **The buyer is never created here (D-060).** The caller resolved the id from the session, and this
  * function refuses one that names no row rather than minting an account to match it.
+ *
+ * **The device is the buyer's own now, not a per-run fixture.** The key arrives in `input`, its
+ * thumbprint is recomputed server-side (the browser's claim about its own key is verified, not
+ * trusted), and `deviceKid` must be exactly `dev_<that thumbprint>`. The buyer's existing device row
+ * for that thumbprint is reused when there is one — the browser holds the same non-extractable key
+ * across sessions — and created (`Browser device`) when there is not. A reused device is also why
+ * the L1 write is an upsert: `l1_credentials` is UNIQUE (device_id, wallet_id), and a second
+ * provision from the same browser is a re-issue over the same pair (EC-KEY-2), not a conflict.
+ *
+ * Nothing is signed yet when this returns: the L2 signing input goes to the buyer's browser, and the
+ * state `finalizeAgentSession` needs travels there inside the sealed `pending` token rather than in
+ * any request body.
  */
-export async function provisionAgentSession(
-  input: ProvisionInput,
-): Promise<Result<AgentSession, CsError>> {
+export async function prepareAgentSession(
+  input: PrepareAgentSessionInput,
+): Promise<Result<PreparedAgentSession, CsError>> {
   if (!agentDemoAllowed()) {
     return err(
       csError(
@@ -199,7 +272,6 @@ export async function provisionAgentSession(
   }
 
   const userId = existingUser.id as UserId
-  const deviceId = newId('dev') as DeviceId
   const agentId = newId('agt') as AgentId
   const mandateId = newId('mdt') as MandateId
   const ttlSeconds = 24 * 60 * 60
@@ -229,11 +301,12 @@ export async function provisionAgentSession(
   // The buyer row already exists and was read above: D-060 removed the "mint a user if the cookie is
   // absent" branch, which is what let a browser hold an identity nobody had authenticated for.
   //
-  // The wallet is the buyer's real saved PayPal vault wallet (no placeholder is ever created). What is
-  // per mandate is the **device**: `demo-device.ts` mints a fresh P-256 key each call and never persists
-  // the private half, so a stored device row could not sign a second L2 — and `l1_credentials` is UNIQUE
-  // (device_id, wallet_id), which a new device beside the reused wallet satisfies exactly. (Reusing the
-  // device would have meant re-issuing its L1 from a row that no longer holds the key.)
+  // The wallet is the buyer's real saved PayPal vault wallet (no placeholder is ever created). The
+  // **device** is the buyer's own key from `input`: its thumbprint is recomputed here rather than
+  // trusted from the browser, and `deviceKid` is refused unless it is exactly `dev_<that
+  // thumbprint>` — a mismatched id would bind the L1 to a key that is not the one being verified
+  // later. The row for that thumbprint is reused when the buyer already has one (the browser holds
+  // the same non-extractable key across sessions), and created when there is none.
   const wallets = await repository.listWalletsForUser(userId)
   if (!wallets.ok) return wallets
   const active = pickActiveWallet(wallets.value)
@@ -247,15 +320,43 @@ export async function provisionAgentSession(
   // The mandate, the L1 and the wallet cap all name the row that was resolved above.
   const resolvedWalletId = active.id as WalletId
 
-  const deviceKey = await createDemoDeviceKey()
-  const device = await repository.createDevice({
-    id: deviceId,
-    user_id: userId,
-    public_jwk: deviceKey.publicJwk as never,
-    jkt: deviceKey.jkt,
-    label: 'Demo device (server, single use)',
-  })
-  if (!device.ok) return device
+  let jkt: string
+  try {
+    jkt = await deviceThumbprint(input.devicePublicJwk)
+  } catch (cause) {
+    return err(
+      csError(
+        'CS_VALIDATION',
+        `The device public key could not be thumbprinted: ${cause instanceof Error ? cause.message : String(cause)}`,
+      ),
+    )
+  }
+  if (input.deviceKid !== `dev_${jkt}`) {
+    return err(
+      csError(
+        'CS_VALIDATION',
+        'The device key id is not dev_<thumbprint> of the device public key it arrived with.',
+        undefined,
+        { userMessage: 'The device key does not match its id. Refresh the page and try again.' },
+      ),
+    )
+  }
+  const existingDevice = await repository.findDeviceByJkt(userId, jkt)
+  if (!existingDevice.ok) return existingDevice
+  let deviceId: DeviceId
+  if (existingDevice.value !== undefined) {
+    deviceId = existingDevice.value.id as DeviceId
+  } else {
+    deviceId = newId('dev') as DeviceId
+    const device = await repository.createDevice({
+      id: deviceId,
+      user_id: userId,
+      public_jwk: input.devicePublicJwk as never,
+      jkt,
+      label: 'Browser device',
+    })
+    if (!device.ok) return device
+  }
 
   // --- 2. The agent key, minted by vi ---------------------------------------------------------------
   const minted = await vi.mintAgentKey({ agent_id: agentId })
@@ -280,12 +381,15 @@ export async function provisionAgentSession(
       payer_email: active.payer_email,
       payment_token_id: active.payment_token_id,
     },
-    device_public_jwk: deviceKey.publicJwk as never,
-    device_kid: deviceKey.kid,
+    device_public_jwk: input.devicePublicJwk as never,
+    device_kid: input.deviceKid,
   })
   if (!issued.ok) return issued
 
-  const l1 = await repository.createL1Credential({
+  // An upsert, not a bare insert: a reused browser device may already hold an L1 for this wallet,
+  // and re-issuing over the same (device, wallet) pair is EC-KEY-2's documented path — a second
+  // provision converges on one credential instead of dying on the UNIQUE index.
+  const l1 = await repository.upsertL1Credential({
     id: newId('l1') as never,
     user_id: userId,
     device_id: deviceId,
@@ -297,7 +401,7 @@ export async function provisionAgentSession(
   })
   if (!l1.ok) return l1
 
-  // --- 4. The mandate: compiled, prepared, signed, finalised ----------------------------------------
+  // --- 4. The mandate: compiled, capped, prepared ---------------------------------------------------
   const compiledResult = await compileIntent({ userId: input.userId, text: input.intent })
   if (!compiledResult.ok) return err(compiledResult.error)
   const currencyOk = assertStoreCurrency(compiledResult.value)
@@ -402,7 +506,7 @@ export async function provisionAgentSession(
   const aud = agentIssuer() || AGENT_AUDIENCE
   const prepared = await vi.prepareL2({
     l1: issued.value.l1,
-    device_kid: deviceKey.kid,
+    device_kid: input.deviceKid,
     agent_public_jwk: minted.value.public_jwk as never,
     agent_kid: minted.value.kid,
     checkout_constraints: checkoutConstraints,
@@ -422,63 +526,201 @@ export async function provisionAgentSession(
   })
   if (!prepared.ok) return prepared
 
-  const signature = await deviceKey.sign(prepared.value.signing_input)
+  // --- 5. Seal what phase 2 needs, and hand back the bytes the buyer signs --------------------------
+  //
+  // The mandate row does not exist yet: it is written by `finalizeAgentSession`, after vi has the
+  // buyer's own signature over `signing_input`. Everything the write needs travels inside the token
+  // — ids, L2 payload, constraints, the cap as a decimal string — so the second request needs
+  // nothing from its caller but the signature and the token it was given.
+  const pendingPayload: PendingAgentSession = {
+    prepareId: prepared.value.prepare_id,
+    mandateId,
+    userId,
+    deviceId,
+    agentId,
+    agentKid: minted.value.kid,
+    walletId: resolvedWalletId,
+    l2Payload: toJsonSafe(prepared.value.payload) as Record<string, unknown>,
+    intent: input.intent,
+    readback,
+    constraints: toJsonSafe(finalConstraints) as unknown[],
+    nonce,
+    aud,
+    capMinor: input.capMinor.toString(),
+    compilerModel: compilerModelLabel(),
+    expiresAtEpochSec,
+    exp: Math.floor(systemClock.nowMs() / 1000) + PENDING_SESSION_TTL_SECONDS,
+  }
+  const pending = await signPendingSessionToken(pendingPayload)
+  if (!pending.ok) return pending
+
+  return {
+    ok: true,
+    value: {
+      prepareId: prepared.value.prepare_id,
+      signingInput: prepared.value.signing_input,
+      pending: pending.value,
+    },
+  }
+}
+
+/**
+ * Phase 2 of provisioning: the L2 signature arrives, and the mandate is written.
+ *
+ * The `pending` token is opened first — signature, then shape, then expiry, then buyer, then the
+ * `prepareId` it was sealed for — because nothing in it is trusted state until it verifies; a token
+ * that fails any of those is refused with `CS_VALIDATION` (or `CS_FORBIDDEN` when it names another
+ * buyer or another prepare record), never a throw. What binds the token to this call's L2 signature
+ * is those two facts together: the token was issued to `input.userId` for `pending.prepareId`, and
+ * `input.prepareId` must be the id the token names, so a token cannot be spent against a prepare
+ * record it was not minted for. vi then verifies the signature against its own stored prepare record
+ * before any row is written.
+ *
+ * vi returns the finished L2; the
+ * mandate row is then written from the token's ids and payload, with `iat`/`exp` from vi's response,
+ * and the budget and wallet cap follow. The returned `AgentSession` is the same shape phase 1's
+ * wrapper always reported.
+ */
+export async function finalizeAgentSession(
+  input: FinalizeAgentSessionInput,
+): Promise<Result<AgentSession, CsError>> {
+  if (!agentDemoAllowed()) {
+    return err(
+      csError(
+        'CS_FORBIDDEN',
+        'The agent demo is available only when COUNTERSIGN_AGENT_DEMO=1 and NODE_ENV is not production.',
+      ),
+    )
+  }
+  const config = readServiceConfig()
+  if (config === null) {
+    return err(
+      csError(
+        'CS_INTERNAL',
+        'VI_SERVICE_URL and VI_SERVICE_TOKEN must be set to provision an agent session.',
+      ),
+    )
+  }
+  const vi = createViClient(config)
+
+  const verified = await verifyPendingSessionToken(input.pending, { userId: input.userId })
+  if (!verified.ok) return verified
+  const pending = verified.value
+
+  // The token names the prepare record it was sealed for, and this call must name the same one. A
+  // token from one prepare handed a `prepareId` from another is refused before vi is called: the
+  // signature would be checked against a record this token says nothing about, and the mandate would
+  // be written under ids from the wrong run. `CS_FORBIDDEN` because the token itself is valid — this
+  // caller is simply not the one it was issued to, the same distinction a wrong buyer draws.
+  if (pending.prepareId !== input.prepareId) {
+    return err(
+      csError(
+        'CS_FORBIDDEN',
+        'The pending session token names a different prepare record than the one this request finalises.',
+        undefined,
+        {
+          userMessage:
+            'That pending session does not match this request. Start again from the beginning.',
+        },
+      ),
+    )
+  }
+
   const finalized = await vi.finalizeL2({
-    prepare_id: prepared.value.prepare_id,
-    signature_b64url: signature,
+    prepare_id: input.prepareId,
+    signature_b64url: input.signatureB64Url,
   })
   if (!finalized.ok) return finalized
 
   const iat = finalized.value.iat
-  const exp = finalized.value.exp ?? expiresAtEpochSec
+  const exp = finalized.value.exp ?? pending.expiresAtEpochSec
+  const nowMs = systemClock.nowMs()
 
   const mandate = await repository.createMandate({
-    id: mandateId,
-    user_id: userId,
-    device_id: deviceId,
-    agent_id: agentId,
-    wallet_id: resolvedWalletId,
+    id: pending.mandateId,
+    user_id: pending.userId,
+    device_id: pending.deviceId,
+    agent_id: pending.agentId,
+    wallet_id: pending.walletId,
     l2_serialized: finalized.value.l2,
-    l2_payload: toJsonSafe(prepared.value.payload) as never,
-    nl_intent: input.intent,
-    readback,
-    constraints: toJsonSafe(finalConstraints) as never,
-    nonce,
-    aud,
+    l2_payload: pending.l2Payload as never,
+    nl_intent: pending.intent,
+    readback: pending.readback,
+    constraints: pending.constraints as never,
+    nonce: pending.nonce,
+    aud: pending.aud,
     iat: BigInt(iat),
     exp: BigInt(exp),
     status: 'ACTIVE',
-    compiler_model: compilerModelLabel(),
+    compiler_model: pending.compilerModel,
   })
   if (!mandate.ok) return mandate
 
+  const cap = money(BigInt(pending.capMinor), 'USD')
   const budget = await repository.openBudget({
-    mandateId,
-    cap: money(input.capMinor, 'USD'),
+    mandateId: pending.mandateId,
+    cap,
   })
   if (!budget.ok) return budget
 
-  const walletCap = await repository.setWalletCap(
-    resolvedWalletId,
-    'MONTH',
-    money(input.capMinor, 'USD'),
-  )
+  const walletCap = await repository.setWalletCap(pending.walletId, 'MONTH', cap)
   if (!walletCap.ok) return walletCap
 
   return {
     ok: true,
     value: {
-      userId,
-      walletId: resolvedWalletId,
-      deviceId,
-      agentId,
-      mandateId,
-      readback,
-      agentKid: minted.value.kid,
+      userId: pending.userId,
+      walletId: pending.walletId,
+      deviceId: pending.deviceId,
+      agentId: pending.agentId,
+      mandateId: pending.mandateId,
+      readback: pending.readback,
+      agentKid: pending.agentKid,
       expiresAtEpochSec: exp,
       createdAtEpochSec: new Date(nowMs).getUTCSeconds(),
     },
   }
+}
+
+/**
+ * Provision one buyer session: the two phases back to back, with the demo's own server-held key.
+ *
+ * The real flow replaces only the middle of this function: `prepareAgentSession` is called with the
+ * browser's public key, the *browser* signs `signingInput` with its non-extractable key, and
+ * `finalizeAgentSession` receives that signature. Here the signing happens on the server against
+ * `./demo-device.ts`'s per-call key — real bytes, real signature, fixture custody — so every
+ * downstream verifier behaves exactly as the real flow's would.
+ *
+ * The demo gate is checked here exactly as it always was, and again inside each phase, so a future
+ * caller that skips this wrapper is still gated.
+ */
+export async function provisionAgentSession(
+  input: ProvisionInput,
+): Promise<Result<AgentSession, CsError>> {
+  if (!agentDemoAllowed()) {
+    return err(
+      csError(
+        'CS_FORBIDDEN',
+        'The agent demo is available only when COUNTERSIGN_AGENT_DEMO=1 and NODE_ENV is not production.',
+      ),
+    )
+  }
+  const deviceKey = await createDemoDeviceKey()
+  const prepared = await prepareAgentSession({
+    userId: input.userId,
+    intent: input.intent,
+    capMinor: input.capMinor,
+    devicePublicJwk: deviceKey.publicJwk,
+    deviceKid: deviceKey.kid,
+  })
+  if (!prepared.ok) return prepared
+  const signature = await deviceKey.sign(prepared.value.signingInput)
+  return finalizeAgentSession({
+    userId: input.userId,
+    pending: prepared.value.pending,
+    prepareId: prepared.value.prepareId,
+    signatureB64Url: signature,
+  })
 }
 
 /* ------------------------------------------------------------------------------------------ */
