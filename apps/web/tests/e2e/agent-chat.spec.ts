@@ -31,13 +31,14 @@
  */
 import { expect, test } from '@playwright/test'
 
-import { signUpBuyer } from './buyer-session'
+import { giveBuyerSavedWallet, signUpBuyer } from './buyer-session'
 
 test.describe('S-10 agent chat', () => {
   // A mandate belongs to an account, and the surface is closed without one (D-060). Each test gets its own
   // address because `users.email` is UNIQUE and these run against one database.
   test.beforeEach(async ({ page }) => {
-    await signUpBuyer(page.request)
+    const email = await signUpBuyer(page.request)
+    await giveBuyerSavedWallet(email)
     // The session cookie is set by the sign-up response; the page is a fresh navigation, not a client
     // transition, so its server components read the cookie the way a returning buyer's would.
     await page.goto('/agent')

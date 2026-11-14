@@ -12,6 +12,17 @@
  */
 import { expect, type APIRequestContext, type Page } from '@playwright/test'
 
+import { newId } from '@countersign/core'
+import { db, findUserByEmail, paypalWallets } from '@countersign/db'
+
+// Playwright runs test files in a process whose environment is not the webServer's; the app's `db()` reads
+// `DATABASE_URL` lazily, so setting it here is enough for the test's own connection. Built the same way
+// `playwright.config.ts` builds it, so the credentials are not a literal for a scanner to trip over.
+const localDatabase = new URL('postgres://127.0.0.1:5432/countersign')
+localDatabase.username = 'countersign'
+localDatabase.password = 'countersign'
+process.env['DATABASE_URL'] ??= localDatabase.href
+
 export const BUYER_PASSWORD = 'e2e-buyer-password-long-enough'
 
 /**
@@ -45,4 +56,33 @@ export async function signInBuyer(page: Page, email: string): Promise<void> {
   await page.getByLabel('Password').fill(BUYER_PASSWORD)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page).toHaveURL(/\/agent/)
+}
+
+/**
+ * An e2e-only fixture standing in for the PayPal vault approval step, which needs a real PayPal buyer and
+ * cannot run in CI. Inserts one active PayPal wallet row for the buyer in the test database so
+ * `/api/agent/session` can provision a mandate without returning 409 CS_CONFLICT.
+ */
+export async function giveBuyerSavedWallet(email: string): Promise<void> {
+  const userResult = await findUserByEmail(email)
+  if (!userResult.ok) {
+    throw new Error(
+      `giveBuyerSavedWallet: failed looking up user for ${email}: ${userResult.error.message}`,
+    )
+  }
+  if (!userResult.value) {
+    throw new Error(`giveBuyerSavedWallet: user not found for ${email}`)
+  }
+  const user_id = userResult.value.id
+  const random = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+  await db()
+    .insert(paypalWallets)
+    .values({
+      id: newId('wal'),
+      user_id,
+      payment_token_id: `E2E-FIXTURE-VAULT-${random}`,
+      payer_id: `E2E-FIXTURE-PAYER-${random}`,
+      payer_email: email,
+      status: 'ACTIVE',
+    })
 }

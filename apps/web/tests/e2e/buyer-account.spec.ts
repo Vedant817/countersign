@@ -18,7 +18,7 @@
  */
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
-import { buyerEmail, signInBuyer, signUpBuyer } from './buyer-session'
+import { buyerEmail, giveBuyerSavedWallet, signInBuyer, signUpBuyer } from './buyer-session'
 
 interface SessionResponse {
   user_id: string
@@ -59,6 +59,9 @@ test.describe('the buyer account', () => {
     await expect(page).toHaveURL(/\/agent/)
     await expect(page.getByText(`Asha · ${email}`)).toBeVisible()
 
+    await giveBuyerSavedWallet(email)
+    await page.reload()
+
     // A mandate for this account: the chip names the buyer's own device, and the cap is the signed cap.
     await page.getByRole('button', { name: 'Create mandate' }).click()
     const chip = page.getByTestId('mandate-chip')
@@ -73,7 +76,8 @@ test.describe('the buyer account', () => {
   })
 
   test('one account keeps one buyer across two mandates', async ({ page }) => {
-    await signUpBuyer(page.request)
+    const email = await signUpBuyer(page.request)
+    await giveBuyerSavedWallet(email)
     const first = await createMandate(page.request, 5000)
     const second = await createMandate(page.request, 15000)
 
@@ -99,10 +103,12 @@ test.describe('the buyer account', () => {
     const victimContext = await browser.newContext()
     const attackerContext = await browser.newContext()
     try {
-      await signUpBuyer(victimContext.request)
+      const victimEmail = await signUpBuyer(victimContext.request)
+      await giveBuyerSavedWallet(victimEmail)
       const victim = await createMandate(victimContext.request, 15000)
 
-      await signUpBuyer(attackerContext.request)
+      const attackerEmail = await signUpBuyer(attackerContext.request)
+      await giveBuyerSavedWallet(attackerEmail)
       const attacker = await createMandate(attackerContext.request, 5000)
       expect(attacker.user_id).not.toBe(victim.user_id)
 
@@ -198,6 +204,24 @@ test.describe('the buyer account', () => {
       data: { intent: 'Buy shoes', cap_minor: '5000' },
     })
     expect(session.status()).toBe(403)
+  })
+
+  test('a buyer with no saved PayPal wallet is told to save one, and gets no mandate', async ({
+    page,
+  }) => {
+    await signUpBuyer(page.request)
+    const response = await page.request.post('/api/agent/session', {
+      data: {
+        intent: 'Buy the cheapest trail shoes you can find, under 150',
+        cap_minor: '15000',
+      },
+    })
+    expect(response.status()).toBe(409)
+    const body = (await response.json()) as {
+      error?: { code?: string; userMessage?: string }
+    }
+    expect(body.error?.code).toBe('CS_CONFLICT')
+    expect(body.error?.userMessage).toContain('Wallet page')
   })
 })
 
