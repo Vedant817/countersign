@@ -96,6 +96,7 @@ type ViPaymentConstraints = NonNullable<L2PrepareRequest['payment_constraints']>
 
 import { merchantIdentity } from './merchant'
 import { applyCap, assertStoreCurrency } from './apply-cap'
+import { assertNoAmbiguities } from './agent-intent'
 import { compileIntent, compilerModelLabel } from './intent-compiler'
 import { createDemoDeviceKey } from './demo-device'
 import { deviceThumbprint } from './device-thumbprint'
@@ -276,6 +277,23 @@ export async function prepareAgentSession(
   const mandateId = newId('mdt') as MandateId
   const ttlSeconds = 24 * 60 * 60
 
+  // --- The mandate's intent: compiled before any side effect, and refused if it is ambiguous --------
+  //
+  // §8.8: "Clarify before signing." A sentence with no stated limit ("something warm for the trip")
+  // compiles to an `ambiguities` entry, and the compiler's own rule is that such a mandate is not ready
+  // to sign. This runs **before** the key sync, the wallet/device/L1 work and vi's `l2/prepare`, so a
+  // refusal produces no vi call and writes no row: an ambiguous intent never gets a mandate signed at the
+  // client's default cap (the defect this step removes). The buyer answers in the chat and the client
+  // re-compiles (`POST /api/intent/compile`); nothing about the compile itself changes here.
+  const compiledResult = await compileIntent({ userId, text: input.intent })
+  if (!compiledResult.ok) return err(compiledResult.error)
+  const intentGate = assertNoAmbiguities(compiledResult.value)
+  if (!intentGate.ok) return intentGate
+  // The value the gate cleared; reused by the mandate build below rather than compiled twice (a second
+  // compile could, in principle, answer differently and let the signed constraints drift from the ones the
+  // gate inspected).
+  const compiledIntent = compiledResult.value
+
   // --- 0. Mirror vi's public keys into our own table ------------------------------------------------
   //
   // The Gate's check 5 verifies the merchant's checkout JWT against `jwks_keys`, and vi generates its
@@ -401,17 +419,12 @@ export async function prepareAgentSession(
   })
   if (!l1.ok) return l1
 
-  // --- 4. The mandate: compiled, capped, prepared ---------------------------------------------------
-  const compiledResult = await compileIntent({ userId: input.userId, text: input.intent })
-  if (!compiledResult.ok) return err(compiledResult.error)
-  const currencyOk = assertStoreCurrency(compiledResult.value)
+  // --- 4. The mandate: compiled above, capped, prepared ---------------------------------------------
+  // The intent was compiled and cleared of ambiguities before any side effect; reuse that result here.
+  const currencyOk = assertStoreCurrency(compiledIntent)
   if (!currencyOk.ok) return err(currencyOk.error)
 
-  const finalConstraints = applyCap(
-    compiledResult.value.constraints,
-    input.capMinor,
-    merchant.value,
-  )
+  const finalConstraints = applyCap(compiledIntent.constraints, input.capMinor, merchant.value)
 
   const existingLineItems = finalConstraints.find(
     (c): c is Extract<VIConstraint, { type: 'mandate.checkout.line_items' }> =>
@@ -490,7 +503,7 @@ export async function prepareAgentSession(
 
   const expiresAtEpochSec = Math.floor(nowMs / 1000) + ttlSeconds
   const compiled: CompiledMandate = {
-    ...compiledResult.value,
+    ...compiledIntent,
     constraints: finalConstraints,
     ttlSeconds,
     expiresAtEpochSec,

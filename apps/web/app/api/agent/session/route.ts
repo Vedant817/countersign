@@ -126,7 +126,12 @@ export async function POST(request: Request): Promise<Response> {
             ? 404
             : provisioned.error.code === 'CS_CONFLICT'
               ? 409
-              : 503,
+              : // `CS_VALIDATION` is a request the buyer can fix by rephrasing — including an intent the
+                // compiler still has a question about (the ambiguity gate in `lib/agent-intent.ts`). It is a
+                // 400, not a 503: the deployment is fine, the sentence is incomplete.
+                provisioned.error.code === 'CS_VALIDATION'
+                ? 400
+                : 503,
     })
   }
 

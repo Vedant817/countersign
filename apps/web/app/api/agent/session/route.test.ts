@@ -39,7 +39,7 @@ function req(body: unknown = { intent: 'Buy shoes under $50' }): Request {
 
 async function read(response: Response): Promise<{
   status: number
-  body: Record<string, unknown> & { error?: { code: string } }
+  body: Record<string, unknown> & { error?: { code: string; userMessage?: string } }
 }> {
   return { status: response.status, body: (await response.json()) as never }
 }
@@ -142,5 +142,23 @@ describe('POST /api/agent/session', () => {
     const { status, body } = await read(response)
     expect(status).toBe(409)
     expect(body.error?.code).toBe('CS_CONFLICT')
+  })
+
+  it('answers 400 with the compiler question when the intent is ambiguous', async () => {
+    // The gate in `lib/agent-intent.ts` refuses an intent with an open question before any vi call or
+    // write; the route's job is only to surface that as a 400 the buyer can fix by rephrasing.
+    agent.provisionAgentSession.mockResolvedValue(
+      err({
+        code: 'CS_VALIDATION',
+        message: 'The intent is not ready to sign: the compiler still needs an answer.',
+        userMessage: 'What is the most you would like to spend?',
+        retryable: false,
+      }),
+    )
+    const response = await POST(req({ intent: 'something warm for the trip' }))
+    const { status, body } = await read(response)
+    expect(status).toBe(400)
+    expect(body.error?.code).toBe('CS_VALIDATION')
+    expect(body.error?.userMessage).toBe('What is the most you would like to spend?')
   })
 })
