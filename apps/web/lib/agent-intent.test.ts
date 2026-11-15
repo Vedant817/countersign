@@ -128,7 +128,7 @@ describe('the compiled cap is a ceiling, never the only limit (applyCap after th
 // ---------------------------------------------------------------------------------------------
 
 type DbModule = typeof import('@countersign/db')
-type ViModule = typeof import('../app/lab/device-sign/vi')
+type ViModule = typeof import('./vi-client')
 type IntentModule = typeof import('./intent-compiler')
 type MerchantModule = typeof import('./merchant')
 
@@ -154,7 +154,7 @@ const viClient = vi.hoisted(() => ({
   finalizeL2: vi.fn(),
   jwks: vi.fn(),
 }))
-vi.mock('../app/lab/device-sign/vi', async (importOriginal) => ({
+vi.mock('./vi-client', async (importOriginal) => ({
   ...(await importOriginal<ViModule>()),
   createViClient: () => viClient,
 }))

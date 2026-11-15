@@ -1,14 +1,7 @@
 import { z } from 'zod'
 
-import {
-  MISSING_CONFIG,
-  createViClient,
-  failure,
-  failureResponse,
-  readJson,
-  readServiceConfig,
-  signingLabAllowed,
-} from '../vi'
+import { VI_CONFIG_MISSING, createViClient, readServiceConfig } from '@/lib/vi-client'
+import { failure, failureResponse, readJson, signingLabAllowed } from '../vi'
 
 const requestSchema = z.strictObject({
   prepareId: z.string().min(1).max(128),
@@ -25,7 +18,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const config = readServiceConfig()
   if (config === null) {
-    return failure(500, 'CS_INTERNAL', MISSING_CONFIG)
+    return failure(500, 'CS_INTERNAL', VI_CONFIG_MISSING)
   }
 
   const body = await readJson(request)

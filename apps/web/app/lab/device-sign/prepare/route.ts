@@ -3,18 +3,20 @@ import { z } from 'zod'
 
 import {
   AGENT_AUDIENCE,
+  VI_CONFIG_MISSING,
+  agentIssuer,
+  createViClient,
+  readServiceConfig,
+} from '@/lib/vi-client'
+import {
   AGENT_ID,
   DEVICE_ID,
   ITEM,
-  MISSING_CONFIG,
   USER_ID,
   WALLET,
-  agentIssuer,
-  createViClient,
   failure,
   failureResponse,
   readJson,
-  readServiceConfig,
   signingLabAllowed,
 } from '../vi'
 import { merchantIdentity } from '@/lib/merchant'
@@ -34,7 +36,7 @@ export async function POST(request: Request): Promise<Response> {
   }
   const config = readServiceConfig()
   if (config === null) {
-    return failure(500, 'CS_INTERNAL', MISSING_CONFIG)
+    return failure(500, 'CS_INTERNAL', VI_CONFIG_MISSING)
   }
 
   const body = await readJson(request)

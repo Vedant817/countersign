@@ -24,7 +24,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type * as DbModule from '@countersign/db'
-import type * as ViModule from '../app/lab/device-sign/vi'
+import type * as ViModule from './vi-client'
 
 /**
  * `finalizeAgentSession`'s two side-effecting dependencies are doubles: what these tests are about is
@@ -41,7 +41,7 @@ vi.mock('@countersign/db', async (importOriginal) => ({
 }))
 
 const viStub = vi.hoisted(() => ({ finalizeL2: vi.fn() }))
-vi.mock('../app/lab/device-sign/vi', async (importOriginal) => ({
+vi.mock('./vi-client', async (importOriginal) => ({
   ...(await importOriginal<typeof ViModule>()),
   createViClient: () => viStub,
 }))

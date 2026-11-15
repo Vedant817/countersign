@@ -7,9 +7,9 @@ import { csError, paypalMerchantIdFromEnv, type CsError, type Result } from '@co
  *
  * ## Why this is its own module
  *
- * It used to live in `app/lab/device-sign/vi.ts`, next to the signing lab's sample wallet, and the
- * production checkout route imported it from there (`import { MERCHANT } from
- * '../../lab/device-sign/vi'`). That is the wrong direction of dependency in a way that hides a real
+ * It used to live in the signing lab's `vi.ts`, next to the sample wallet, and the production checkout
+ * route imported it from there (`import { MERCHANT } from '../../lab/device-sign/vi'`). That is the wrong
+ * direction of dependency in a way that hides a real
  * problem: a **demo harness** was the source of truth for the merchant named in a merchant-signed
  * checkout JWT. Deleting or gating the lab would have silently changed what the shop signs as.
  *

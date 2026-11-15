@@ -107,12 +107,7 @@ import {
   verifyPendingSessionToken,
   type PendingAgentSession,
 } from './pending-session-token'
-import {
-  AGENT_AUDIENCE,
-  agentIssuer,
-  createViClient,
-  readServiceConfig,
-} from '../app/lab/device-sign/vi'
+import { AGENT_AUDIENCE, agentIssuer, createViClient, readServiceConfig } from './vi-client'
 
 /** The demo is opt-in, local only, and never production — the same gate the signing lab uses. */
 export function agentDemoAllowed(): boolean {
@@ -183,6 +178,16 @@ export interface PreparedAgentSession {
   readonly signingInput: string
   /** The HMAC token carrying everything `finalizeAgentSession` needs (`./pending-session-token.ts`). */
   readonly pending: string
+  /**
+   * The read-back of the mandate this prepare is for, already rendered.
+   *
+   * It is returned here rather than recomputed by the caller for the same reason the read-back is not
+   * paraphrased anywhere: it is the exact string the buyer will sign, and a second rendering is a second
+   * thing that can disagree with the signature (D-040).
+   */
+  readonly readback: string
+  /** UTC epoch seconds when the mandate this prepare is for expires. */
+  readonly expiresAtEpochSec: number
 }
 
 /** What `finalizeAgentSession` takes from the browser after it has signed `signingInput`. */
@@ -573,6 +578,8 @@ export async function prepareAgentSession(
       prepareId: prepared.value.prepare_id,
       signingInput: prepared.value.signing_input,
       pending: pending.value,
+      readback,
+      expiresAtEpochSec,
     },
   }
 }

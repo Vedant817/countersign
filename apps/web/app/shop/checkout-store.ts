@@ -4,7 +4,7 @@ import { csError, err, ok } from '@countersign/core'
 import { findOrderByAttempt } from '@countersign/db'
 import type { MerchantCheckoutStore } from '@countersign/gate'
 
-import { MISSING_CONFIG, createViClient, readServiceConfig } from '../lab/device-sign/vi'
+import { VI_CONFIG_MISSING, createViClient, readServiceConfig } from '@/lib/vi-client'
 import { shopCatalogMode, shopPersistenceError } from './catalog'
 
 type CheckoutJwtRequest = Parameters<MerchantCheckoutStore['createCheckoutJwt']>[0]
@@ -18,7 +18,7 @@ export const shopCheckout: MerchantCheckoutStore = {
     }
     const config = readServiceConfig()
     if (config === null) {
-      return Promise.resolve(err(csError('CS_INTERNAL', MISSING_CONFIG)))
+      return Promise.resolve(err(csError('CS_INTERNAL', VI_CONFIG_MISSING)))
     }
     return createViClient(config).createCheckoutJwt({
       merchant: request.merchant,
