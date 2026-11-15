@@ -14,6 +14,27 @@ roughly two thirds of the remaining P0 work; nothing else can proceed until they
 
 ---
 
+## ☐ Remove `NODE_ENV=development` from your local `.env.local` (one line)
+
+**Blocks:** nothing in CI; it only breaks `pnpm build` on this laptop.
+
+**Context:** `.env.local` (line 9, gitignored, so agents cannot and should not edit it) sets
+`NODE_ENV=development`. `next build` loads `.env.local`, so a local build runs in development mode and dies
+while prerendering `/_global-error` with `"useContext" of null` — the same commit builds green in CI, which
+sets no `NODE_ENV`. Diagnosed 15 November 2026; `NODE_ENV=production pnpm build` on top of the same tree
+exits 0.
+
+**Fix (either one):**
+
+- Delete the `NODE_ENV=development` line from `.env.local` — `pnpm dev:local` and `next dev` force
+  development themselves, so the line is redundant there. **Preferred.**
+- Or keep it and always build as `NODE_ENV=production pnpm build`.
+
+`NODE_ENV` is not set at User or Machine level, so there is nothing to change in Windows environment
+variables.
+
+---
+
 ## ☐ Perform one manual PayPal sandbox vault save in a browser at http://localhost:3000/wallet
 
 **Blocks:** live PayPal vault payment token for the seeded buyer (Asha) on the local dev stack.

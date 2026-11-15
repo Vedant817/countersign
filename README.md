@@ -77,6 +77,12 @@ Then try these two, which are the interesting ones:
 occupied ports rather than terminating another server. Ports are overridable:
 `COUNTERSIGN_VI_PORT=8010 COUNTERSIGN_WEB_PORT=3100 pnpm dev:local`.
 
+**Local production builds need `NODE_ENV=production`.** `.env.local` is written for the dev stack and
+normally carries `NODE_ENV=development`, which `next build` loads; a development `NODE_ENV` makes prerendering
+`/_global-error` fail with `"useContext" of null`. Either remove that line from `.env.local` or build with it
+overridden: `NODE_ENV=production pnpm build`. CI is unaffected — it sets no `NODE_ENV`, so Next defaults it
+to `production`.
+
 **No LLM output is authoritative.** Model output is validated by zod, shown to a human, or checked by
 deterministic code before any side effect (spec §8.0 rule 4). You can verify that claim on screen: the
 read-back is rendered from the mandate, and `packages/compiler` is what decides what may be signed.
