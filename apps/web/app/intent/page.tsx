@@ -1,10 +1,14 @@
 import type { Metadata } from 'next'
+import { redirect } from 'next/navigation'
 
 import { hasBlockingAmbiguities, readBack } from '@countersign/compiler'
+import type { UserId } from '@countersign/core'
 
+import { BUYER_PERSONA, currentUser } from '@/lib/auth'
 import { compileIntent } from '@/lib/intent-compiler'
 import { missingLlmConfig } from '@/lib/llm'
 import { merchantIdentity } from '@/lib/merchant'
+import { safeNextPath } from '@/lib/next-path'
 
 import { ReadBackText } from './read-back-text'
 
@@ -48,6 +52,12 @@ export const metadata: Metadata = {
  *
  * A `POST`-equivalent handled on the server, result as HTML, no client JavaScript. A consent surface
  * is the wrong place to add an interactive dependency.
+ *
+ * ## Buyer-scoped — D-062
+ *
+ * Mandates are signed against a buyer's row, so an intent is compiled for a signed-in buyer's real
+ * user id. Anonymous visitors are redirected to `/buyer-login`, and merchant sessions are refused
+ * with an explanation: intents belong to buyers.
  */
 export const dynamic = 'force-dynamic'
 
@@ -62,16 +72,52 @@ interface PageProps {
 }
 
 export default async function IntentPage({ searchParams }: PageProps) {
+  const user = await currentUser()
+  if (!user.ok) {
+    throw new Error(`the session could not be read: ${user.error.code} ${user.error.message}`)
+  }
+
   const { intent } = await searchParams
   const text = (intent ?? '').trim()
+  const returnTo = text ? `/intent?intent=${encodeURIComponent(text)}` : '/intent'
+
+  if (user.value === undefined) {
+    redirect(`/buyer-login?next=${encodeURIComponent(safeNextPath(returnTo, '/intent'))}`)
+  }
+
+  if (user.value.persona !== BUYER_PERSONA) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
+        <header>
+          <span className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
+            Intent compiler
+          </span>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+            Intents are for buyer accounts
+          </h1>
+          <p className="mt-3 max-w-2xl text-pretty text-ink-soft">
+            The signed-in account is a merchant ({user.value.displayName}). Intent compilation and
+            spending mandates belong to buyer accounts.
+          </p>
+        </header>
+      </div>
+    )
+  }
+
+  const buyer = user.value
   const notConfigured = missingLlmConfig(process.env)
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
       <header>
-        <span className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
-          Intent compiler
-        </span>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="font-mono text-xs uppercase tracking-[0.2em] text-ink-faint">
+            Intent compiler
+          </span>
+          <p className="font-mono text-xs uppercase tracking-widest text-ink-faint">
+            {buyer.displayName} · {buyer.email}
+          </p>
+        </div>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
           Say what you want. See what you would be signing.
         </h1>
@@ -121,13 +167,13 @@ export default async function IntentPage({ searchParams }: PageProps) {
         </div>
       </form>
 
-      {text !== '' ? <Compiled intent={text} /> : null}
+      {text !== '' ? <Compiled intent={text} buyerId={buyer.id} /> : null}
     </div>
   )
 }
 
-async function Compiled({ intent }: { intent: string }) {
-  const compiled = await compileIntent({ userId: 'usr_local_visitor' as never, text: intent })
+async function Compiled({ intent, buyerId }: { intent: string; buyerId: UserId }) {
+  const compiled = await compileIntent({ userId: buyerId, text: intent })
 
   if (!compiled.ok) {
     return (

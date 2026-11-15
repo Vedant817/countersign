@@ -789,6 +789,7 @@ output above.
   clean; `pnpm test` 167 files / **3351 passed, 1 skipped**; `pnpm secret-scan` no leaks; `pnpm build` green
   with `/api/orders/[id]/{capture,refund,void}` in the manifest.
 - **2026-11-15 (IST)** - **Closed anonymous/impersonation hole on `/api/intent/compile` (D-062).** Route now requires same-origin, authenticates buyer session via `requireBuyer()` (401 anonymous, 403 merchant), drops `user_id` from body schema with `.strict()`, and passes session user ID to `compileIntent`. Tested via 9 new vitest tests.
+- **2026-11-15 (IST)** - **Closed anonymous compiler hole on `/intent` page (D-062).** Page now enforces buyer session via `currentUser()`: anonymous visitors redirect to `/buyer-login` (preserving query parameters), merchant sessions render an explanation that intents belong to buyer accounts, and authenticated buyers compile using their real `buyer.id`, eliminating `'usr_local_visitor'`.
 
   **Caveats:** no real capture, refund or void has been observed against the PayPal sandbox - H-01 (the
   vault) is still open, so the live half of AT-M11 remains skipped and `packages/orders` is still `wip`
