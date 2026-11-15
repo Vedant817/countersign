@@ -35,9 +35,58 @@ variables.
 
 ---
 
-## ☐ Perform one manual PayPal sandbox vault save in a browser at http://localhost:3000/wallet
+## ☐ Perform one manual PayPal sandbox vault save in a browser at http://127.0.0.1:3000/wallet
 
 **Blocks:** live PayPal vault payment token for the seeded buyer (Asha) on the local dev stack.
+
+**Status (15 Nov 2026): automated attempts are blocked at PayPal's own login, not at consent.** The US
+accounts and the app's Vault switch are in place, and everything before PayPal answers is verified:
+
+- OAuth token from `https://api-m.sandbox.paypal.com/v1/oauth2/token`: **HTTP 200, `access_token` present**.
+- Re-seed with `.env.local` loaded: `store paypal_merchant_id equals PAYPAL_MERCHANT_ID: true`,
+  `buyer password hash present: true`, `merchant password hash present: true`.
+- Buyer sign-in at `/buyer-login` and the "Save a PayPal payment method" button both work; the flow
+  reaches `https://www.sandbox.paypal.com/...`.
+- `PAYPAL_BUYER_EMAIL` is a sandbox personal address of the form `sb<16 chars>@personal.example.com`.
+
+**The exact blocker (attempt 2 of 3, real output):**
+```
+FAILED STEP: paypal_consent
+URL: https://www.sandbox.paypal.com/agreements/approve
+ERROR: PayPal approval step failed: TimeoutError: page.waitForURL: Timeout 30000ms exceeded.
+Page: <p class="nonjsAlert" role="alert">NOTE: Many features on the PayPal Web site require Javascript
+and cookies.</p>Pay with PayPalEnter your email address to get started.Already set up to use your mobile
+number to log in? Type it below. Otherwise, click the link to log in with email.Forgot your email
+```
+Screenshot: `%TEMP%\cs-vault-paypal_consent.png` (outside the repo). So the page that came back is a
+**fresh email-entry page, not the consent screen**: the password step did not actually authenticate the
+sandbox buyer, and the script's Step 4 looked for a consent button that was never going to exist.
+
+Two likely causes, and both are for you to check in the dashboard rather than for us to guess at:
+1. The `sb…@personal.example.com` address is not a usable password login for this sandbox account (PayPal
+   now issues sandbox personal accounts whose sign-in is not the generated `sb…` address), or
+2. `PAYPAL_BUYER_PASSWORD` no longer matches that account.
+
+**What we need from you (10 minutes, in the visible browser):**
+
+1. Open <https://developer.paypal.com/dashboard/accounts>, copy the **exact email** and **System
+   Generated Password** of the US personal sandbox buyer, and put both in `.env.local` as
+   `PAYPAL_BUYER_EMAIL` / `PAYPAL_BUYER_PASSWORD` (the dashboard password is shown once per account; use
+   "View/Reset" if it is hidden).
+2. Log in to <https://www.sandbox.paypal.com> by hand with those two values and confirm you reach the
+   account overview. If PayPal asks for a mobile/OTP step, say so — that makes the flow manual-only and
+   the script cannot complete it.
+3. Tell us, and the headed re-run is
+   `HEADED=1 BASE_URL=http://127.0.0.1:3000 node --env-file=.env.local ./node_modules/tsx/dist/cli.mjs apps/web/scripts/sandbox-vault-save.mts`.
+
+**Two environment notes found while running it (neither is a PayPal block):**
+- `localhost` resolves to `::1` first on this machine while Next binds IPv4 only, so
+  `http://localhost:3000/buyer-login` is a **404**; `http://127.0.0.1:3000/...` is 200. The script now
+  defaults to `127.0.0.1`, so `BASE_URL` no longer has to be passed.
+- `pnpm build` will fail while `NODE_ENV=development` is in `.env.local` — that line is already gone, so
+  this note is history.
+
+---
 
 **Context:** Setup-token payload now matches PayPal's documented example (commit after eaa4f99) and PayPal still shows `checkoutweb/genericError` at consent right after a successful sandbox login. Most likely cause is account eligibility: saving PayPal wallets without a purchase is only offered for business accounts in supported countries (US, UK, EU, CA, AU, JP, SG, HK and others; India is NOT on PayPal's list: https://developer.paypal.com/docs/checkout/save-payment-methods/purchase-later/payment-tokens-api/paypal/). Fix: in the PayPal Developer Dashboard > Testing Tools > Sandbox Accounts, check the country of the sandbox BUSINESS account whose merchant ID equals PAYPAL_MERCHANT_ID and of the sandbox PERSONAL buyer account. If either is IN, create a US business account and a US personal account, create a REST app on the US business account with Vault enabled (App Feature Options > Accept payments > Advanced options > Vault), update PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_MERCHANT_ID, PAYPAL_BUYER_EMAIL and PAYPAL_BUYER_PASSWORD in .env.local, re-run `pnpm db:seed`, then run `HEADED=1 PW_CHANNEL=chrome pnpm --filter @countersign/web exec tsx scripts/sandbox-vault-save.mts`.
 
@@ -54,10 +103,10 @@ variables.
 
 ## ☐ Set BUYER_PASSWORD and MERCHANT_PASSWORD in .env.local to passwords of your choice
 
-**Blocks:** local and preview sign-in for the buyer (Asha) and merchant personas at `/login`.
-
-1. Set `BUYER_PASSWORD` and `MERCHANT_PASSWORD` in `.env.local` to passwords of your choice.
-2. Re-run `pnpm db:seed` to store their scrypt hashes on the buyer and merchant rows in the database.
+**Done by the agent on 15 Nov 2026:** both were absent; `scripts/check-ids.mjs` appended a 24-character
+`crypto.randomBytes(18).toString('base64url')` value to each (never printed), and `pnpm db:seed` reported
+`merchant password sign-in configured` and `buyer password sign-in configured`. Rotation is still yours if
+you want your own values — changing the line and re-running `pnpm db:seed` is the whole procedure.
 
 ---
 

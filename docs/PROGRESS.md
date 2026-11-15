@@ -525,6 +525,31 @@ WP-06s and everything needing live sandbox is not started.
     migrated-but-unseeded database, so the storefront had no products.)
   `tests (vi-service)` is green with `ruff check` **and** `ruff format --check`, and the local `vi:lint` now runs both.
 
+- **2026-11-15 (IST)** - **US sandbox accounts: credentials verified, but the vault save is blocked at
+  PayPal's own login (HUMAN_TODO, vault-save item).** The eight `.env.local` keys were checked by presence
+  only (`scripts/check-ids.mjs`, untracked): all four PayPal values plus `BUYER_PASSWORD` and
+  `MERCHANT_PASSWORD` are present, `NODE_ENV` is absent (no `NODE_ENV=development` line remained to
+  remove), and `PAYPAL_MERCHANT_ID` matches `^[A-Z0-9]{13}$`. The two missing passwords were appended as
+  24-character `randomBytes(18).toString('base64url')` values, never echoed, and `pnpm db:seed` reported
+  `merchant password sign-in configured` / `buyer password sign-in configured`.
+  **Measured, not asserted:** `POST /v1/oauth2/token` against `api-m.sandbox.paypal.com` returned
+  **HTTP 200 with `access_token` present**; a re-seed then answered
+  `store paypal_merchant_id equals PAYPAL_MERCHANT_ID: true`, `buyer password hash present: true`,
+  `merchant password hash present: true`; `pnpm dev:local` served `GET http://127.0.0.1:3000/` **200**,
+  `/status` **200** and the signing service `GET /v1/status` **200** (there is no `/api/ready` route —
+  readiness is `/status` plus `/v1/status`).
+  The vault save (`apps/web/scripts/sandbox-vault-save.mts`) got through buyer sign-in and reached PayPal,
+  then stopped at **`paypal_consent`, `https://www.sandbox.paypal.com/agreements/approve`, "TimeoutError:
+  page.waitForURL: Timeout 30000ms exceeded"**, with the returned page being a fresh
+  "Enter your email address to get started" form rather than a consent screen — the sandbox buyer's
+  password step did not authenticate. Two attempts only, no third: the second run's screenshot is at
+  `%TEMP%\cs-vault-paypal_consent.png`. Nothing was committed to the database on the way (the wallet row
+  is still the seeded placeholder), no order id exists, and the exact error plus the two dashboard checks
+  that would unblock it are written into `docs/HUMAN_TODO.md`. Also found on the way, unrelated to PayPal:
+  `localhost` resolves to `::1` first on this machine while Next binds IPv4, so `http://localhost:3000/…`
+  is a **404** and only `http://127.0.0.1:3000/…` answers — `sandbox-vault-save.mts` now defaults to
+  `127.0.0.1`, and its success line prints the token's **first 2** characters rather than 4.
+
 - **2026-11-13 (IST)** - **§5 driven to the real PayPal answer: the money path is blocked by PayPal, not by us (P1).**
   Every money call was exercised **through our own `PayPalClient`** against the live sandbox, and the outcome is
   PayPal's own words:

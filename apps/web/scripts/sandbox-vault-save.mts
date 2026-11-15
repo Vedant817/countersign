@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm'
 
 import { BUYER, closeDb, db, findUserByEmail, paypalWallets } from '@countersign/db'
 
-const baseUrl = process.env['BASE_URL'] ?? 'http://localhost:3000'
+const baseUrl = process.env['BASE_URL'] ?? 'http://127.0.0.1:3000'
 const buyerEmail = process.env['BUYER_EMAIL'] ?? BUYER.email
 const buyerPassword = process.env['BUYER_PASSWORD']
 const paypalBuyerEmail = process.env['PAYPAL_BUYER_EMAIL']
@@ -291,7 +291,7 @@ async function main(): Promise<void> {
       }
 
       const token = activeWallet.payment_token_id
-      const tokenPrefix = token.slice(0, 4)
+      const tokenPrefix = token.slice(0, 2)
       const tokenLength = token.length
 
       console.info('vault_saved=true')
