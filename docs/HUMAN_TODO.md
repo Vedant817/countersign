@@ -50,6 +50,7 @@ accounts and the app's Vault switch are in place, and everything before PayPal a
 - `PAYPAL_BUYER_EMAIL` is a sandbox personal address of the form `sb<16 chars>@personal.example.com`.
 
 **The exact blocker (attempt 2 of 3, real output):**
+
 ```
 FAILED STEP: paypal_consent
 URL: https://www.sandbox.paypal.com/agreements/approve
@@ -58,11 +59,13 @@ Page: <p class="nonjsAlert" role="alert">NOTE: Many features on the PayPal Web s
 and cookies.</p>Pay with PayPalEnter your email address to get started.Already set up to use your mobile
 number to log in? Type it below. Otherwise, click the link to log in with email.Forgot your email
 ```
+
 Screenshot: `%TEMP%\cs-vault-paypal_consent.png` (outside the repo). So the page that came back is a
 **fresh email-entry page, not the consent screen**: the password step did not actually authenticate the
 sandbox buyer, and the script's Step 4 looked for a consent button that was never going to exist.
 
 Two likely causes, and both are for you to check in the dashboard rather than for us to guess at:
+
 1. The `sb…@personal.example.com` address is not a usable password login for this sandbox account (PayPal
    now issues sandbox personal accounts whose sign-in is not the generated `sb…` address), or
 2. `PAYPAL_BUYER_PASSWORD` no longer matches that account.
@@ -80,6 +83,7 @@ Two likely causes, and both are for you to check in the dashboard rather than fo
    `HEADED=1 BASE_URL=http://127.0.0.1:3000 node --env-file=.env.local ./node_modules/tsx/dist/cli.mjs apps/web/scripts/sandbox-vault-save.mts`.
 
 **Two environment notes found while running it (neither is a PayPal block):**
+
 - `localhost` resolves to `::1` first on this machine while Next binds IPv4 only, so
   `http://localhost:3000/buyer-login` is a **404**; `http://127.0.0.1:3000/...` is 200. The script now
   defaults to `127.0.0.1`, so `BASE_URL` no longer has to be passed.
