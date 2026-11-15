@@ -56,7 +56,7 @@ beforeEach(() => {
 })
 
 describe('GET /api/wallet/vault/return', () => {
-  it('refuses an unauthenticated request with 401', async () => {
+  it('refuses an unauthenticated request with a redirect to buyer sign-in', async () => {
     auth.requireBuyer.mockResolvedValue(
       err(
         csError(
@@ -71,42 +71,63 @@ describe('GET /api/wallet/vault/return', () => {
     )
 
     const response = await GET(req())
-    expect(response.status).toBe(401)
-    const body = (await response.json()) as { error?: { code: string } }
-    expect(body.error?.code).toBe('CS_UNAUTHENTICATED')
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe('http://localhost/buyer-login?next=%2Fwallet')
+    const setCookie = response.headers.get('set-cookie') ?? ''
+    expect(setCookie).toContain('Max-Age=0')
   })
 
-  it('returns 400 when approval_token_id is missing', async () => {
+  it('redirects to /wallet with missing_token when approval_token_id is missing', async () => {
     const response = await GET(req(''))
-    expect(response.status).toBe(400)
-    const body = (await response.json()) as { error?: { code: string; message: string } }
-    expect(body.error?.code).toBe('CS_VALIDATION')
-    expect(body.error?.message).toContain('Missing approval_token_id')
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(
+      'http://localhost/wallet?vault_error=missing_token',
+    )
     const setCookie = response.headers.get('set-cookie') ?? ''
     expect(setCookie).toContain('cs_vault_setup=')
     expect(setCookie).toContain('Max-Age=0')
   })
 
-  it('returns 400 and calls neither createPaymentToken nor upsertWalletByToken when cookie is missing', async () => {
+  it('redirects to /wallet with missing_token and calls neither createPaymentToken nor upsertWalletByToken when cookie is missing', async () => {
     const response = await GET(req('?approval_token_id=setup_123'))
-    expect(response.status).toBe(400)
-    const body = (await response.json()) as { error?: { code: string } }
-    expect(body.error?.code).toBe('CS_VALIDATION')
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(
+      'http://localhost/wallet?vault_error=missing_token',
+    )
     expect(mockCreatePaymentToken).not.toHaveBeenCalled()
     expect(db.upsertWalletByToken).not.toHaveBeenCalled()
     const setCookie = response.headers.get('set-cookie') ?? ''
     expect(setCookie).toContain('Max-Age=0')
   })
 
-  it('returns 400 and saves nothing when cookie does not match approval_token_id', async () => {
+  it('redirects to /wallet with missing_token and saves nothing when cookie does not match approval_token_id', async () => {
     const response = await GET(req('?approval_token_id=setup_123', 'cs_vault_setup=other_token'))
-    expect(response.status).toBe(400)
-    const body = (await response.json()) as { error?: { code: string } }
-    expect(body.error?.code).toBe('CS_VALIDATION')
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(
+      'http://localhost/wallet?vault_error=missing_token',
+    )
     expect(mockCreatePaymentToken).not.toHaveBeenCalled()
     expect(db.upsertWalletByToken).not.toHaveBeenCalled()
     const setCookie = response.headers.get('set-cookie') ?? ''
     expect(setCookie).toContain('Max-Age=0')
+  })
+
+  it('redirects to /wallet with forbidden when user is not a buyer', async () => {
+    auth.requireBuyer.mockResolvedValue(
+      err(csError('CS_FORBIDDEN', 'Forbidden', {}, { userMessage: 'Buyer only' })),
+    )
+    const response = await GET(req())
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe('http://localhost/wallet?vault_error=forbidden')
+  })
+
+  it('redirects to /wallet with paypal_error when paypalClient fails', async () => {
+    paypal.paypalClient.mockReturnValue(err(csError('PP_UNAVAILABLE', 'PayPal unconfigured')))
+    const response = await GET(req('?approval_token_id=setup_123', 'cs_vault_setup=setup_123'))
+    expect(response.status).toBe(303)
+    expect(response.headers.get('location')).toBe(
+      'http://localhost/wallet?vault_error=paypal_error',
+    )
   })
 
   it('saves the wallet, clears the cookie, and 303 redirects on happy path', async () => {

@@ -24,8 +24,19 @@ interface WalletPageProps {
     saved?: string | string[]
     cancelled?: string | string[]
     error?: string | string[]
+    vault_error?: string | string[]
   }>
 }
+
+const VAULT_ERROR_MESSAGES: Record<string, string> = {
+  missing_token: 'PayPal approval token was missing or expired. Please try again.',
+  forbidden: 'Only buyer accounts can save payment methods.',
+  unauthenticated: 'Please sign in to save a payment method.',
+  paypal_error: 'PayPal could not save your payment method. Please try again.',
+  internal: 'Something went wrong while saving your payment method. Please try again.',
+}
+
+const DEFAULT_VAULT_ERROR_MESSAGE = 'Could not save the payment method. Please try again.'
 
 function maskToken(token: string): string {
   const last4 = token.slice(-4)
@@ -58,6 +69,17 @@ export default async function WalletPage({ searchParams }: WalletPageProps) {
   const isCancelled =
     params.cancelled === '1' || (Array.isArray(params.cancelled) && params.cancelled.includes('1'))
   const hasError = Boolean(params.error)
+  const vaultErrorCode =
+    typeof params.vault_error === 'string'
+      ? params.vault_error
+      : Array.isArray(params.vault_error)
+        ? params.vault_error[0]
+        : undefined
+  const errorMessage = vaultErrorCode
+    ? (VAULT_ERROR_MESSAGES[vaultErrorCode] ?? DEFAULT_VAULT_ERROR_MESSAGE)
+    : hasError
+      ? DEFAULT_VAULT_ERROR_MESSAGE
+      : undefined
 
   return (
     <main className="mx-auto max-w-md px-4 py-16">
@@ -92,12 +114,12 @@ export default async function WalletPage({ searchParams }: WalletPageProps) {
         </p>
       )}
 
-      {hasError && (
+      {errorMessage && (
         <p
           className="mt-6 rounded-card border border-blocked bg-blocked-soft p-3 text-sm text-blocked"
           role="alert"
         >
-          Could not save the payment method. Please try again.
+          {errorMessage}
         </p>
       )}
 

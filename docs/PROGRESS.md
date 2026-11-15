@@ -796,3 +796,4 @@ output above.
   above; WP-17d's merchant order-ops **UI** (S-15) is deliberately not written, so these routes have no
   page to click yet; `refund`'s audit row records the intent, and a capture that PayPal later reverses is
   still reconciled by the webhook rather than by this route.
+- **2026-11-15 (IST)** - **Vault return route no longer answers the buyer's browser with raw JSON.** Every failure path on `GET /api/wallet/vault/return` now redirects (303) to `/wallet?vault_error=<code>` (`missing_token` | `forbidden` | `paypal_error` | `internal`; anonymous buyer -> `/buyer-login?next=/wallet`), and `/wallet` renders a readable message per code; route tests updated to assert the redirect and Location.

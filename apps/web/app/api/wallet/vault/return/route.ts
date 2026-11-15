@@ -4,6 +4,7 @@ import { newId, type WalletId } from '@countersign/core'
 import { upsertWalletByToken } from '@countersign/db'
 
 import { requireBuyer } from '@/lib/auth'
+import { safeNextPath } from '@/lib/next-path'
 import { paypalClient } from '@/lib/paypal-client'
 import { finishVault } from '@/lib/wallet-vault'
 
@@ -40,17 +41,38 @@ function clearVaultCookie(response: NextResponse): NextResponse {
   return response
 }
 
+function toVaultErrorCode(code: string): string {
+  switch (code) {
+    case 'CS_UNAUTHENTICATED':
+      return 'unauthenticated'
+    case 'CS_FORBIDDEN':
+      return 'forbidden'
+    case 'CS_VALIDATION':
+      return 'missing_token'
+    case 'CS_INTERNAL':
+      return 'internal'
+    default:
+      if (code.startsWith('PP_') || code === 'CS_PAYPAL_UNCONFIGURED') {
+        return 'paypal_error'
+      }
+      return 'internal'
+  }
+}
+
 export async function GET(request: Request) {
+  const base = new URL(request.url).origin
+
   const buyer = await requireBuyer()
   if (!buyer.ok) {
-    return NextResponse.json(
-      {
-        error: {
-          code: buyer.error.code,
-          message: buyer.error.userMessage ?? buyer.error.message,
-        },
-      },
-      { status: buyer.error.code === 'CS_UNAUTHENTICATED' ? 401 : 403 },
+    if (buyer.error.code === 'CS_UNAUTHENTICATED') {
+      const next = encodeURIComponent(safeNextPath('/wallet', '/wallet'))
+      return clearVaultCookie(
+        NextResponse.redirect(new URL(`/buyer-login?next=${next}`, base), 303),
+      )
+    }
+    const code = toVaultErrorCode(buyer.error.code)
+    return clearVaultCookie(
+      NextResponse.redirect(new URL(`/wallet?vault_error=${code}`, base), 303),
     )
   }
 
@@ -58,15 +80,7 @@ export async function GET(request: Request) {
   const setupTokenId = url.searchParams.get('approval_token_id')
   if (!setupTokenId) {
     return clearVaultCookie(
-      NextResponse.json(
-        {
-          error: {
-            code: 'CS_VALIDATION',
-            message: 'Missing approval_token_id',
-          },
-        },
-        { status: 400 },
-      ),
+      NextResponse.redirect(new URL('/wallet?vault_error=missing_token', base), 303),
     )
   }
 
@@ -74,16 +88,9 @@ export async function GET(request: Request) {
 
   const client = paypalClient()
   if (!client.ok) {
+    const code = toVaultErrorCode(client.error.code)
     return clearVaultCookie(
-      NextResponse.json(
-        {
-          error: {
-            code: client.error.code,
-            message: client.error.userMessage ?? client.error.message,
-          },
-        },
-        { status: 503 },
-      ),
+      NextResponse.redirect(new URL(`/wallet?vault_error=${code}`, base), 303),
     )
   }
 
@@ -107,20 +114,11 @@ export async function GET(request: Request) {
   )
 
   if (!r.ok) {
-    const status = r.error.code === 'CS_VALIDATION' ? 400 : 502
+    const code = toVaultErrorCode(r.error.code)
     return clearVaultCookie(
-      NextResponse.json(
-        {
-          error: {
-            code: r.error.code,
-            message: r.error.userMessage ?? r.error.message,
-          },
-        },
-        { status },
-      ),
+      NextResponse.redirect(new URL(`/wallet?vault_error=${code}`, base), 303),
     )
   }
 
-  const base = url.origin
-  return clearVaultCookie(NextResponse.redirect(`${base}/wallet?saved=1`, 303))
+  return clearVaultCookie(NextResponse.redirect(new URL('/wallet?saved=1', base), 303))
 }
