@@ -19,6 +19,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
 import { buyerEmail, giveBuyerSavedWallet, signInBuyer, signUpBuyer } from './buyer-session'
+import { armVirtualPasskey } from './virtual-passkey'
 
 interface SessionResponse {
   user_id: string
@@ -39,6 +40,15 @@ async function createMandate(
 }
 
 test.describe('the buyer account', () => {
+  // The whole flow below signs the mandate in the browser ("Create mandate" -> prepare -> passkey ->
+  // finalize), so the browser needs a platform passkey before the click. A laptop with Windows Hello
+  // has one; `ubuntu-latest` does not, and the ceremony then cancels itself and no chip is ever
+  // rendered — which is how this test passed locally and timed out in CI. `./virtual-passkey` has the
+  // account.
+  test.beforeEach(async ({ page }) => {
+    await armVirtualPasskey(page)
+  })
+
   test('signs up, signs in, creates a mandate and signs out again', async ({ page }) => {
     // Anonymous: the surface is closed and the login page says where it will return to.
     await page.goto('/agent')
