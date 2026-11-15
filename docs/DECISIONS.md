@@ -1857,3 +1857,15 @@ money-discipline clean; `pnpm format:check` clean; `pnpm test` 167 files / 3351 
 `pnpm secret-scan` no leaks; `pnpm build` green with all three routes in the manifest. Live PayPal
 verification is still blocked on HUMAN_TODO 1 (the vault), so no real capture, refund or void has been
 observed against the sandbox — the routes are wired to the real client, not to a stub.
+
+---
+
+## D-062 - Intent compilation takes the buyer from the session, not the request body
+
+**Date:** 2026-11-15
+
+**Decision:** `POST /api/intent/compile` takes the buyer identity exclusively from the authenticated session via `requireBuyer()` (`apps/web/lib/auth.ts`), never from a field in the request body, and removes the anonymous fallback to `'usr_local_visitor'`. The route enforces `requireSameOrigin(request)` before reading the request body (refusing cross-origin with 403), validates the body against a strict schema permitting only `{ intent, locale? }` (extra fields such as `user_id` fail with 400 `CS_VALIDATION`), returns 401 for anonymous callers and 403 for merchant sessions, and passes the session buyer's user ID to `compileIntent`.
+
+**Reason:** The previous implementation accepted an optional `user_id` in the JSON body and fell back to the hardcoded string `'usr_local_visitor'`. This created an impersonation hole where any caller could compile an intent under any user ID, while anonymous callers were granted a fabricated visitor ID. In a production application, intent compilation must be bound to the authenticated buyer session.
+
+**Evidence:** `apps/web/app/api/intent/compile/route.ts` updated to check same-origin, enforce `requireBuyer()`, reject unknown fields including `user_id`, and compile under the session buyer's id; `apps/web/app/api/intent/compile/route.test.ts` added with 9 vitest cases (200 success with session buyer id and locale pass-through, 401 anonymous, 403 merchant, 400 when body includes `user_id`, 403 cross-origin, 403 opaque origin, 400 non-JSON body, 400 compiler error propagation). All repo gates passed clean.

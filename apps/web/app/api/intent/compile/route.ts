@@ -17,12 +17,22 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { csError, HTTP_STATUS_BY_ERROR_CODE, toBody, type UserId } from '@countersign/core'
+import {
+  csError,
+  HTTP_STATUS_BY_ERROR_CODE,
+  toBody,
+  type CsError,
+  type UserId,
+} from '@countersign/core'
 import { readBack } from '@countersign/compiler'
 
+import { requireBuyer } from '@/lib/auth'
 import { compileIntent } from '@/lib/intent-compiler'
 import { intentResponseBody } from '@/lib/intent-response'
 import { merchantIdentity } from '@/lib/merchant'
+import { requireSameOrigin } from '@/lib/same-origin'
+
+export const dynamic = 'force-dynamic'
 
 const MAX_INTENT_CHARS = 2_000
 
@@ -30,7 +40,6 @@ const requestSchema = z
   .object({
     intent: z.string().min(1).max(MAX_INTENT_CHARS),
     locale: z.enum(['en-IN', 'en-US']).optional(),
-    user_id: z.string().min(1).max(128).optional(),
   })
   .strict()
 
@@ -51,7 +60,16 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   LLM_SCHEMA: 502,
 }
 
+function statusFor(error: CsError): number {
+  return STATUS_BY_CODE[error.code] ?? 500
+}
+
 export async function POST(request: Request): Promise<Response> {
+  const originRefusal = requireSameOrigin(request)
+  if (originRefusal !== null) {
+    return NextResponse.json(toBody(originRefusal), { status: statusFor(originRefusal) })
+  }
+
   let raw: unknown
   try {
     raw = await request.json()
@@ -76,10 +94,12 @@ export async function POST(request: Request): Promise<Response> {
     )
   }
 
-  // The demo has no buyer session yet, so an anonymous caller is identified as such rather than
-  // refused: `compile` records whose intent this is, and inventing a real user id would be worse than
-  // naming the absence.
-  const userId = (parsed.data.user_id ?? 'usr_local_visitor') as UserId
+  const buyer = await requireBuyer()
+  if (!buyer.ok) {
+    return NextResponse.json(toBody(buyer.error), { status: statusFor(buyer.error) })
+  }
+
+  const userId = buyer.value.id as UserId
 
   const compiled = await compileIntent({
     userId,
@@ -89,7 +109,7 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!compiled.ok) {
     return NextResponse.json(toBody(compiled.error), {
-      status: STATUS_BY_CODE[compiled.error.code] ?? 500,
+      status: statusFor(compiled.error),
     })
   }
 
@@ -117,7 +137,7 @@ export async function POST(request: Request): Promise<Response> {
     const cs = csError('CS_INTERNAL', 'The mandate could not be serialised.', {
       cause: error instanceof Error ? error.message : String(error),
     })
-    return NextResponse.json(toBody(cs), { status: STATUS_BY_CODE[cs.code] ?? 500 })
+    return NextResponse.json(toBody(cs), { status: statusFor(cs) })
   }
 
   return NextResponse.json(body, { status: 200 })
