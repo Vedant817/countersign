@@ -87,5 +87,5 @@ export default async function AgentPage() {
     )
   }
 
-  return <AgentChat displayName={buyer.displayName} email={buyer.email} />
+  return <AgentChat displayName={buyer.displayName} email={buyer.email} userId={buyer.id} />
 }

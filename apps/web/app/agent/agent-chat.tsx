@@ -30,6 +30,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { formatMoney, isCurrency, money } from '@countersign/core'
 
 import { SignOutButton } from '../disputes/logout-button'
+import { signMandate, type SignedMandate } from './mandate-sign'
 
 interface SessionView {
   user_id: string
@@ -115,13 +116,49 @@ function amountLabel(minor: string, currency: string | null): string {
   return minor
 }
 
-export function AgentChat({ displayName, email }: { displayName: string; email: string }) {
+/**
+ * The finalize response, reshaped into the `SessionView` the transcript's run route consumes.
+ *
+ * The two surfaces agree on every field the run route reads (`user_id`, `mandate_id`, `agent_id`,
+ * `agent_kid`); the cap display comes from prepare's `cap_display` — the mandate is written with
+ * exactly the cap that was read back to the buyer before the passkey prompt.
+ */
+function toSessionView(signed: SignedMandate, capDisplay: string): SessionView {
+  return {
+    user_id: signed.userId,
+    mandate_id: signed.mandateId,
+    agent_id: signed.agentId,
+    agent_kid: signed.agentKid,
+    readback: signed.readback,
+    readback_summary: signed.readbackSummary,
+    cap_minor: '0',
+    cap_display: capDisplay,
+    expires_at_epoch_sec: signed.expiresAtEpochSec,
+  }
+}
+
+export function AgentChat({
+  displayName,
+  email,
+  userId,
+}: {
+  displayName: string
+  email: string
+  /** The signed-in buyer's id; the browser key and the mandate belong to it. */
+  userId: string
+}) {
   const [intent, setIntent] = useState('Buy running shoes under $50')
   const [capMinor, setCapMinor] = useState('5000')
   const [session, setSession] = useState<SessionView | null>(null)
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
+  /**
+   * The prepare read-back, shown **before** the passkey prompt: the buyer sees what is about to be
+   * signed (the compiler's own sentence and the server-formatted cap) before the ceremony starts.
+   */
+  const [preparedSummary, setPreparedSummary] = useState<string | null>(null)
+  const [preparedCap, setPreparedCap] = useState<string | null>(null)
   const [message, setMessage] = useState('Buy running shoes under $50')
   /**
    * Which planner runs the free-form turn.
@@ -136,26 +173,37 @@ export function AgentChat({ displayName, email }: { displayName: string; email: 
 
   const startSession = useCallback(async (): Promise<SessionView | null> => {
     setSessionError(null)
+    setPreparedSummary(null)
+    setPreparedCap(null)
     try {
-      const response = await fetch('/api/agent/session', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ intent, cap_minor: capMinor }),
+      // The buyer's browser signs the mandate: prepare -> passkey step-up -> sign -> finalize
+      // (`./mandate-sign`). There is no server-held device key on this path; the only private half is
+      // the one this browser created.
+      let capDisplay = ''
+      const result = await signMandate({
+        userId: userId as never,
+        intent,
+        capMinor: BigInt(capMinor),
+        onPrepared: (prepared) => {
+          // The server has accepted the sentence and compiled it; the buyer sees the read-back before
+          // the passkey prompt, so what is about to be signed is on screen first (§8.8).
+          capDisplay = prepared.capDisplay
+          setPreparedSummary(prepared.readbackSummary)
+          setPreparedCap(prepared.capDisplay)
+        },
       })
-      const body = (await response.json()) as SessionView & { error?: { message?: string } }
-      if (!response.ok) {
-        setSessionError(
-          body.error?.message ?? `The session route answered HTTP ${response.status}.`,
-        )
+      if (!result.ok) {
+        setSessionError(result.userMessage)
         return null
       }
-      setSession(body)
-      return body
+      const view = toSessionView(result.session, capDisplay)
+      setSession(view)
+      return view
     } catch (cause) {
-      setSessionError(cause instanceof Error ? cause.message : 'The session route was unreachable.')
+      setSessionError(cause instanceof Error ? cause.message : 'The mandate flow failed.')
       return null
     }
-  }, [capMinor, intent])
+  }, [capMinor, intent, userId])
 
   const send = useCallback(
     async (text: string, mode: Turn['mode'], sku?: string) => {
@@ -319,6 +367,24 @@ export function AgentChat({ displayName, email }: { displayName: string; email: 
           </p>
         ) : null}
 
+        {/* The prepare read-back, shown between prepare and the passkey prompt: the buyer sees the
+            compiled sentence and the cap before the ceremony starts, so what is signed is on screen
+            first (§8.8). It is replaced by the mandate chip once finalize returns. */}
+        {preparedSummary !== null && session === null ? (
+          <div
+            data-testid="prepared-readback"
+            className="mt-5 rounded-card border border-rule bg-paper p-4"
+          >
+            <p className="font-mono text-xs uppercase tracking-widest text-ink-faint">
+              About to sign · confirm with your passkey
+            </p>
+            <p className="mt-2 font-medium">{preparedSummary}</p>
+            {preparedCap !== null ? (
+              <p className="mt-1 text-sm text-ink-soft">Cap {preparedCap}</p>
+            ) : null}
+          </div>
+        ) : null}
+
         {session !== null ? (
           <div
             data-testid="mandate-chip"
@@ -338,8 +404,9 @@ export function AgentChat({ displayName, email }: { displayName: string; email: 
           </div>
         ) : (
           <p className="mt-4 text-sm text-ink-soft">
-            No mandate yet. Creating one mints an agent key, issues an L1 to a server-side demo
-            device key and signs an L2 with the cap above. Nothing is charged.
+            No mandate yet. Creating one mints an agent key, issues an L1 to the device key held in
+            this browser and signs an L2 with the cap above. The key never leaves this browser.
+            Nothing is charged.
           </p>
         )}
       </section>
