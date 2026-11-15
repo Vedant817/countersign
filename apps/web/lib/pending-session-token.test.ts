@@ -215,4 +215,51 @@ describe('finalizeAgentSession and the prepare id in the token', () => {
     })
     expect(db.createMandate).toHaveBeenCalledTimes(1)
   })
+
+  it('refuses a valid token presented by another buyer, before vi or the database is touched', async () => {
+    // The token is real (signed with the same `SESSION_SECRET`), so this is the route's actual refusal
+    // path: `finalizeAgentSession` verifies the token against the *caller's* buyer id and stops there.
+    // Without this, a token minted for one buyer could be finalised by another — the mandate row would
+    // be written with the wrong `user_id`.
+    const signed = await signPendingSessionToken(payload())
+    expect(signed.ok).toBe(true)
+    if (!signed.ok) return
+
+    const result = await finalizeAgentSession({
+      userId: 'usr_someone_else' as never,
+      pending: signed.value,
+      prepareId: 'prepare_pending_test',
+      signatureB64Url: 'c2lnbmF0dXJl',
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CS_FORBIDDEN')
+    expect(result.error.userMessage).toBe('That pending session does not belong to this browser.')
+    // The refusal happens after the token is verified but before anything is spent: no vi call, no row.
+    expect(viStub.finalizeL2).not.toHaveBeenCalled()
+    expect(db.createMandate).not.toHaveBeenCalled()
+  })
+
+  it('refuses a token whose prepare id differs from the one the caller names, before vi is called', async () => {
+    const signed = await signPendingSessionToken(payload({ prepareId: 'prepare-A' }))
+    expect(signed.ok).toBe(true)
+    if (!signed.ok) return
+
+    const result = await finalizeAgentSession({
+      userId: USER,
+      pending: signed.value,
+      prepareId: 'prepare-B',
+      signatureB64Url: 'c2lnbmF0dXJl',
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CS_FORBIDDEN')
+    expect(result.error.userMessage).toBe(
+      'That pending session does not match this request. Start again from the beginning.',
+    )
+    expect(viStub.finalizeL2).not.toHaveBeenCalled()
+    expect(db.createMandate).not.toHaveBeenCalled()
+  })
 })
